@@ -10,12 +10,14 @@
   },
   "dependencies": {
     "@types/markdown-it": "^14.1.2",
+    "@vicons/antd": "^0.13.0",
     "@vueuse/core": "^14.2.1",
     "axios": "^1.13.6",
     "lucide-vue-next": "^0.577.0",
     "markdown-it": "^14.1.1",
     "naive-ui": "^2.44.1",
     "pinia": "^3.0.4",
+    "vfonts": "^0.0.3",
     "vue": "^3.5.30"
   },
   "devDependencies": {
@@ -26,7 +28,7 @@
     "postcss": "^8.5.8",
     "tailwindcss": "^4.2.2",
     "typescript": "~5.9.3",
-    "vite": "^8.0.1",
+    "vite": "^6.0.0",
     "vue-tsc": "^3.2.5"
   }
 }
