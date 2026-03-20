@@ -1,4 +1,10 @@
 spring:
+  devtools:
+    restart:
+      enabled: true
+      additional-paths: src/main/java
+    livereload:
+      enabled: true
   application:
     name: lingshu-ai
   profiles:
@@ -34,4 +40,4 @@ logging:
 lingshu:
   ollama:
     base-url: http://localhost:11434
-    model: qwen2.5
+    model: qwen3.5:4b

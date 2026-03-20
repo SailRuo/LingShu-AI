@@ -17,12 +17,37 @@ public class ChatController {
     }
 
     @PostMapping("/send")
-    public String chat(@RequestBody String message) {
-        return chatService.chat(message);
+    public String chat(@RequestBody ChatRequest request) {
+        return chatService.chat(request.message());
     }
 
+    @GetMapping(value = "/welcome", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<String> getWelcome() {
+        return chatService.streamWelcome();
+    }
+
+    @GetMapping("/models")
+    public java.util.List<String> getModels(
+            @RequestParam(name = "source", defaultValue = "ollama") String source,
+            @RequestParam(name = "baseUrl", defaultValue = "http://localhost:11434") String baseUrl,
+            @RequestParam(name = "apiKey", required = false) String apiKey) {
+        return chatService.getModels(source, baseUrl, apiKey);
+    }
+
+    public record ChatRequest(String message, String model, String apiKey, String baseUrl) {}
+
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> streamChat(@RequestBody String message) {
-        return chatService.streamChat(message);
+    public Flux<String> streamChat(
+            @RequestBody ChatRequest request,
+            @RequestHeader(value = "X-LS-BaseUrl", required = false) String baseUrl,
+            @RequestHeader(value = "X-LS-ApiKey", required = false) String apiKey,
+            @RequestHeader(value = "X-LS-Model", required = false) String model) {
+        
+        // Priority: Request Body > Headers
+        String finalBaseUrl = request.baseUrl() != null ? request.baseUrl() : baseUrl;
+        String finalApiKey = request.apiKey() != null ? request.apiKey() : apiKey;
+        String finalModel = request.model() != null ? request.model() : model;
+
+        return chatService.streamChat(request.message(), finalModel, finalApiKey, finalBaseUrl);
     }
 }
