@@ -36,3 +36,4 @@ logs/
 # Optional: Environment variables
 .env
 .env.*.local
+/data/
