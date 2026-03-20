@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: lingshu-ai
+  profiles:
+    active: dev
+
+server:
+  port: 8080
+
+logging:
+  level:
+    com.lingshu.ai: DEBUG
+
+lingshu:
+  ollama:
+    base-url: http://localhost:11434
+    model: qwen2.5
