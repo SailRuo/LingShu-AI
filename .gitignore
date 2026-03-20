@@ -1,0 +1,38 @@
+# Maven
+target/
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# Node / Frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vscode/*
+!.vscode/extensions.json
+.vite/
+.npm/
+
+# IDEs
+.idea/
+*.iml
+*.iws
+.project
+.settings/
+.classpath
+.factorypath
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Optional: Environment variables
+.env
+.env.*.local
