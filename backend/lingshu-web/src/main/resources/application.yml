@@ -3,6 +3,26 @@ spring:
     name: lingshu-ai
   profiles:
     active: dev
+  datasource:
+    url: jdbc:postgresql://localhost:5432/lingshu
+    username: postgres
+    password: lingshu123
+    driver-class-name: org.postgresql.Driver
+  neo4j:
+    uri: bolt://localhost:7687
+    authentication:
+      username: neo4j
+      password: lingshu123
+  data:
+    neo4j:
+      database: neo4j
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
 
 server:
   port: 8080
