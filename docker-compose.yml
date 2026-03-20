@@ -1,0 +1,24 @@
+services:
+  neo4j:
+    image: neo4j:5.26.0
+    container_name: lingshu-neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/lingshu123
+    volumes:
+      - ./data/neo4j/data:/data
+      - ./data/neo4j/logs:/logs
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: lingshu-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=lingshu
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=lingshu123
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
