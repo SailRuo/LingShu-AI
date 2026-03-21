@@ -8,5 +8,6 @@ import java.util.List;
 @Repository("chatMessageRepository")
 public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> {
     List<ChatMessage> findBySessionIdOrderByCreatedAtAsc(Long sessionId);
+    List<ChatMessage> findTop5BySessionOrderByCreatedAtDesc(com.lingshu.ai.infrastructure.entity.ChatSession session);
     List<ChatMessage> findTop5ByOrderByCreatedAtDesc();
 }

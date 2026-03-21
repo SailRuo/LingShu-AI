@@ -79,7 +79,7 @@ onUnmounted(() => {
         <!-- Center Tabs -->
         <nav class="flex items-center gap-8 ml-8">
           <div class="nav-tab active">
-            <span>深度洞察</span>
+            <span>记忆图谱</span>
             <div class="tab-indicator"></div>
           </div>
           <div class="nav-tab">
@@ -131,7 +131,7 @@ onUnmounted(() => {
                 </div>
                 <div class="sider-link active">
                     <n-icon><Zap /></n-icon>
-                    <span>深度洞察</span>
+                    <span>记忆图谱</span>
                 </div>
                 <div class="sider-link">
                     <n-icon><Share2 /></n-icon>

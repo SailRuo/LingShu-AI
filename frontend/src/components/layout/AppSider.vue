@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { NMenu, NIcon } from 'naive-ui'
-import { Layers, Shield, FileText, Settings, Activity, Hexagon, Zap, Share2 } from 'lucide-vue-next'
+import { Layers, Shield, FileText, Settings, Activity, Hexagon, Zap } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import { h } from 'vue'
 
@@ -11,8 +11,7 @@ const renderIcon = (c: Component) => () => h(NIcon, null, { default: () => h(c) 
 
 const mainNav = [
   { label: '意念共鸣', key: 'resonance', icon: renderIcon(Activity) },
-  { label: '深度洞察', key: 'insight', icon: renderIcon(Zap) },
-  { label: '关联矩阵', key: 'matrix', icon: renderIcon(Share2) },
+  { label: '记忆图谱', key: 'insight', icon: renderIcon(Zap) },
   { label: '全维口袋', key: 'pocket', icon: renderIcon(Layers) },
 ]
 

@@ -8,6 +8,7 @@ import com.lingshu.ai.infrastructure.repository.UserRepository;
 import com.lingshu.ai.infrastructure.repository.FactRepository;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.service.AiServices;
+import dev.langchain4j.store.embedding.filter.Filter;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -59,7 +60,14 @@ public class MemoryServiceImpl implements MemoryService {
         // 2. 调用 AI 分析新事实与冲突
         com.lingshu.ai.core.dto.MemoryUpdate report = factExtractor.analyze(message, currentFactsBuilder.toString());
         
-        if (report == null) return;
+        if (report == null) {
+            log.debug("Memory pulse: No cognitive updates required for this message.");
+            return;
+        }
+
+        log.debug("Cognitive report received: {} new facts, {} deletions requested", 
+                report.getNewFacts() != null ? report.getNewFacts().size() : 0,
+                report.getDeletedFactIds() != null ? report.getDeletedFactIds().size() : 0);
 
         // 3. 处理过期/错误的记忆 (删除)
         if (report.getDeletedFactIds() != null && !report.getDeletedFactIds().isEmpty()) {
@@ -79,19 +87,39 @@ public class MemoryServiceImpl implements MemoryService {
             }
 
             for (String fact : report.getNewFacts()) {
+                // Defensive check: filter out "[]" or empty/blank facts
+                if (fact == null || fact.trim().isEmpty() || fact.equals("[]")) {
+                    log.debug("Memory pulse: Skipping invalid or empty fact candidate.");
+                    continue;
+                }
+                
                 log.info("Aha! New persistent fact: {}", fact);
                 
-                // Save to Neo4j
+                // 1. Save to Neo4j first to get the ID
                 FactNode factNode = FactNode.builder()
                         .content(fact)
                         .category("Memory")
                         .observedAt(LocalDateTime.now())
                         .importance(0.8)
                         .build();
+                
+                // We need to save the user to get the relationship persisted and IDs generated
                 user.addFact(factNode);
+                user = userRepository.save(user);
+                
+                // Find the just-added fact node to get its ID
+                FactNode savedFact = user.getFacts().stream()
+                        .filter(f -> f.getContent().equals(fact))
+                        .findFirst()
+                        .orElse(factNode);
 
-                // Save to pgvector
-                dev.langchain4j.data.segment.TextSegment segment = dev.langchain4j.data.segment.TextSegment.from(fact);
+                // 2. Save to pgvector with the Neo4j ID as metadata
+                java.util.Map<String, String> metadata = new java.util.HashMap<>();
+                if (savedFact.getId() != null) {
+                    metadata.put("fact_id", savedFact.getId().toString());
+                }
+                
+                dev.langchain4j.data.segment.TextSegment segment = dev.langchain4j.data.segment.TextSegment.from(fact, new dev.langchain4j.data.document.Metadata(metadata));
                 dev.langchain4j.data.embedding.Embedding embedding = embeddingModel.embed(segment).content();
                 embeddingStore.add(embedding, segment);
             }
@@ -107,19 +135,27 @@ public class MemoryServiceImpl implements MemoryService {
 
         // 1. Graph Retrieval (Neo4j)
         userRepository.findByName(userId).ifPresent(user -> {
+            log.debug("Graph Retrieval: Found {} facts for user {}", user.getFacts() != null ? user.getFacts().size() : 0, userId);
             contextBuilder.append("Known facts from your profile: ");
             user.getFacts().forEach(f -> contextBuilder.append(f.getContent()).append("; "));
             contextBuilder.append("\n");
         });
 
         // 2. Semantic Retrieval (pgvector)
+        log.debug("Semantic Retrieval: Querying vector store for: {}", message);
         dev.langchain4j.data.embedding.Embedding queryEmbedding = embeddingModel.embed(message).content();
         List<dev.langchain4j.store.embedding.EmbeddingMatch<dev.langchain4j.data.segment.TextSegment>> matches = 
                 embeddingStore.findRelevant(queryEmbedding, 5, 0.6);
         
         if (!matches.isEmpty()) {
+            log.debug("Semantic Retrieval: Found {} relevant segments", matches.size());
             contextBuilder.append("Related memories found: ");
-            matches.forEach(match -> contextBuilder.append(match.embedded().text()).append(" (relevant); "));
+            matches.forEach(match -> {
+                log.trace("Match text: {} (score: {})", match.embedded().text(), match.score());
+                contextBuilder.append(match.embedded().text()).append(" (relevant); ");
+            });
+        } else {
+            log.debug("Semantic Retrieval: No relevant segments above threshold.");
         }
 
         return contextBuilder.toString();
@@ -162,10 +198,24 @@ public class MemoryServiceImpl implements MemoryService {
 
     @Override
     public void deleteFact(Long factId) {
-        log.info("Deleting fact node with ID: {}", factId);
-        // Delete from Neo4j
-        factRepository.deleteById(factId);
+        log.info("Cognitive cleanup: Removing fact node #{}", factId);
         
-        // Potential TODO: Semantic cleanup if metadata was stored
+        // 1. Delete from Neo4j (SDN automatically handles relationship detachment)
+        try {
+            factRepository.deleteById(factId);
+            log.debug("Neo4j node removal successful: {}", factId);
+        } catch (Exception e) {
+            log.error("Neo4j cleanup failed for factId {}: {}", factId, e.getMessage());
+            // Optional: Fallback to manual detach delete if SDN fails
+        }
+        
+        // 2. Delete from pgvector (memory_segments table)
+        try {
+            // matches metadata fact_id set in extractFacts (line 118)
+            embeddingStore.removeAll(Filter.metadataKey("fact_id").isEqualTo(factId.toString()));
+            log.debug("Vector store cleanup successful for factId: {}", factId);
+        } catch (Exception e) {
+            log.warn("Semantic cleanup skipped or failed for factId {}: Vector store may not support automated removal", factId);
+        }
     }
 }

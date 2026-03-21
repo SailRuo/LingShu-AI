@@ -113,9 +113,10 @@ import { Cpu, Database, Activity, Zap, BrainCircuit } from 'lucide-vue-next'
 }
 
 .metric-item {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
+  height: 24px;
 }
 
 .metric-icon {
@@ -145,7 +146,7 @@ import { Cpu, Database, Activity, Zap, BrainCircuit } from 'lucide-vue-next'
 }
 
 .sync-indicator {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 4px 12px;
@@ -153,6 +154,7 @@ import { Cpu, Database, Activity, Zap, BrainCircuit } from 'lucide-vue-next'
   border-radius: 6px;
   font-size: 11px;
   color: var(--color-text-dim);
+  height: 24px;
 }
 
 .sync-value {
@@ -162,11 +164,14 @@ import { Cpu, Database, Activity, Zap, BrainCircuit } from 'lucide-vue-next'
 }
 
 .version-tag {
+  display: inline-flex;
+  align-items: center;
   padding: 4px 10px;
   background: var(--color-surface);
   border-radius: 4px;
   font-size: 10px;
   font-family: 'Fira Code', monospace;
   color: var(--color-text-dim);
+  height: 24px;
 }
 </style>

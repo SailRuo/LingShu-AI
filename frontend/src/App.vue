@@ -51,7 +51,6 @@ const naiveTheme = computed(() => themeStore.current.isDark ? darkTheme : null)
           <main class="main-content">
             <ResonanceView v-if="activeMenu === 'resonance'" />
             <InsightView v-else-if="activeMenu === 'insight'" />
-            <ConsoleHome v-else-if="activeMenu === 'matrix'" />
             <ConsoleHome v-else-if="activeMenu === 'pocket'" />
             <SettingsView v-else-if="activeMenu === 'settings'" />
             <ConsoleHome v-else-if="activeMenu === 'security'" />

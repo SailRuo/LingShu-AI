@@ -68,8 +68,35 @@ public class ChatServiceImpl implements ChatService {
                 .createdAt(java.time.LocalDateTime.now())
                 .build());
 
-        String context = memoryService.retrieveContext("User", message);
-        String augmentedPrompt = "【唤起记忆】\n" + context + "\n\n【用户指令】\n" + message;
+        // 1. 获取长期记忆相关上下文 (RAG)
+        String longTermContext = memoryService.retrieveContext("User", message);
+        
+        // 2. 获取短期记忆 (最近 5 条对话记录)
+        java.util.List<com.lingshu.ai.infrastructure.entity.ChatMessage> recentLogs = 
+                messageRepository.findTop5BySessionOrderByCreatedAtDesc(session);
+        java.util.Collections.reverse(recentLogs);
+        
+        StringBuilder shortTermContext = new StringBuilder();
+        if (!recentLogs.isEmpty()) {
+            shortTermContext.append("【近期对话流水】\n");
+            recentLogs.forEach(m -> shortTermContext.append(m.getRole()).append(": ").append(m.getContent()).append("\n"));
+        }
+
+        String augmentedPrompt = String.format("""
+                【感官记忆 - 长期 facts】
+                %s
+                
+                %s
+                
+                【当前指令】
+                %s
+                
+                指令回复准则：
+                - 只有当用户显式要求“回忆”时，才引用以上记忆。
+                - 如果事实或近期流水不足以支撑回忆，直接回答“之前的记忆有些模糊，能提醒我一下吗？”而非虚构（如：严禁虚构 Java 报错或深夜工作背景）。
+                """, longTermContext, shortTermContext.toString(), message);
+        
+        log.debug("Augmented Prompt generated for chat (first 100 chars): {}...", augmentedPrompt.substring(0, Math.min(100, augmentedPrompt.length())));
         
         String response = assistant.chat(augmentedPrompt);
 
@@ -104,8 +131,36 @@ public class ChatServiceImpl implements ChatService {
         Sinks.Many<String> sink = Sinks.many().unicast().onBackpressureBuffer();
         StringBuilder assistantResponseStore = new StringBuilder();
 
-        String context = memoryService.retrieveContext("User", message);
-        String augmentedPrompt = "【唤起记忆】\n" + context + "\n\n【用户指令】\n" + message;
+        // 1. 获取长期记忆相关上下文 (RAG)
+        String longTermContext = memoryService.retrieveContext("User", message);
+        
+        // 2. 获取短期记忆 (最近 5 条对话记录)
+        java.util.List<com.lingshu.ai.infrastructure.entity.ChatMessage> recentLogs = 
+                messageRepository.findTop5BySessionOrderByCreatedAtDesc(session);
+        java.util.Collections.reverse(recentLogs);
+        
+        StringBuilder shortTermContext = new StringBuilder();
+        if (!recentLogs.isEmpty()) {
+            shortTermContext.append("【近期对话流水】\n");
+            recentLogs.forEach(m -> shortTermContext.append(m.getRole()).append(": ").append(m.getContent()).append("\n"));
+        }
+
+        String augmentedPrompt = String.format("""
+                【感官记忆 - 长期 facts】
+                %s
+                
+                %s
+                
+                【当前指令】
+                %s
+                
+                指令回复准则：
+                - 只有当用户显式要求“回忆”时，才引用以上记忆。
+                - 如果事实或近期流水不足以支撑回忆，直接回答“之前的记忆有些模糊，能提醒我一下吗？”而非虚构（如：严禁虚构 Java 报错或深夜工作背景）。
+                """, longTermContext, shortTermContext.toString(), message);
+
+        log.debug("Augmented Prompt generated for streamChat (first 100 chars): {}...", augmentedPrompt.substring(0, Math.min(100, augmentedPrompt.length())));
+        if (log.isTraceEnabled()) log.trace("Full Augmented Prompt:\n{}", augmentedPrompt);
 
         com.lingshu.ai.core.config.AiConfig.StreamingAssistant currentAssistant = streamingAssistant;
 
