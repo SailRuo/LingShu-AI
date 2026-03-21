@@ -16,16 +16,25 @@ public class ChatController {
         this.chatService = chatService;
     }
 
+    /**
+     * 同步发送消息并获取回复。
+     */
     @PostMapping("/send")
     public String chat(@RequestBody ChatRequest request) {
         return chatService.chat(request.message());
     }
 
+    /**
+     * 获取系统生成的流式欢迎语。
+     */
     @GetMapping(value = "/welcome", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> getWelcome() {
         return chatService.streamWelcome();
     }
 
+    /**
+     * 根据设置参数获取可用的模型列表。
+     */
     @GetMapping("/models")
     public java.util.List<String> getModels(
             @RequestParam(name = "source", defaultValue = "ollama") String source,
@@ -36,6 +45,10 @@ public class ChatController {
 
     public record ChatRequest(String message, String model, String apiKey, String baseUrl) {}
 
+    /**
+     * 流式发送消息并获取分段回复。
+     * 支持从请求体或请求头中动态获取模型配置。
+     */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> streamChat(
             @RequestBody ChatRequest request,
@@ -43,7 +56,7 @@ public class ChatController {
             @RequestHeader(value = "X-LS-ApiKey", required = false) String apiKey,
             @RequestHeader(value = "X-LS-Model", required = false) String model) {
         
-        // Priority: Request Body > Headers
+        // 优先级：请求体参数 > 请求头参数
         String finalBaseUrl = request.baseUrl() != null ? request.baseUrl() : baseUrl;
         String finalApiKey = request.apiKey() != null ? request.apiKey() : apiKey;
         String finalModel = request.model() != null ? request.model() : model;

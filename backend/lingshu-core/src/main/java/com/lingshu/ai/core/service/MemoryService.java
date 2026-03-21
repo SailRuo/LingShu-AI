@@ -3,22 +3,22 @@ package com.lingshu.ai.core.service;
 public interface MemoryService {
     
     /**
-     * Extracts facts from a user message and saves them to the graph.
+     * 从用户消息中提取事实并保存到图数据库中。
      */
     void extractFacts(String userId, String message);
 
     /**
-     * Retrieves relevant context from memory for the current conversation.
+     * 从记忆中检索与当前对话相关的上下文。
      */
     String retrieveContext(String userId, String message);
 
     /**
-     * Retrieves the entire memory graph for visualization.
+     * 获取完整的记忆图谱数据以供可视化。
      */
     Object getGraphData(String userId);
 
     /**
-     * Deletes a fact by its ID and cleans up associated semantic memory.
+     * 通过 ID 删除一个事实，并清理相关的向量语义记忆。
      */
     void deleteFact(Long factId);
 }

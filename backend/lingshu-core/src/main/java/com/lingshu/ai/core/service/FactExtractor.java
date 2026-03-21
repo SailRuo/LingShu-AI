@@ -29,5 +29,8 @@ public interface FactExtractor {
             注意：如果没有任何新事实提取，newFacts 列表应该为空（或不返回该字段），而不是包含 "[]" 字符串。
             如果既无新事实也无需删除，直接返回全空对象。
             """)
+    /**
+     * 核心事实提取逻辑：分析用户消息，识别并提取新事实，或标记需要删除的陈旧/错误事实。
+     */
     MemoryUpdate analyze(@V("message") String message, @V("currentFacts") String currentFacts);
 }

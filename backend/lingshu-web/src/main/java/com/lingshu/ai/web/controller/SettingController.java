@@ -15,11 +15,17 @@ public class SettingController {
         this.settingService = settingService;
     }
 
+    /**
+     * 获取当前系统配置信息（模型、API Key 等）。
+     */
     @GetMapping
     public SystemSetting getSetting() {
         return settingService.getSetting();
     }
 
+    /**
+     * 保存并应用新的系统配置。
+     */
     @PostMapping
     public void saveSetting(@RequestBody SystemSetting setting) {
         settingService.saveSetting(setting);

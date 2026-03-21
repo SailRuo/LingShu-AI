@@ -9,6 +9,7 @@ import com.lingshu.ai.infrastructure.repository.FactRepository;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.store.embedding.filter.Filter;
+import dev.langchain4j.store.embedding.filter.MetadataFilterBuilder;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -212,7 +213,7 @@ public class MemoryServiceImpl implements MemoryService {
         // 2. Delete from pgvector (memory_segments table)
         try {
             // matches metadata fact_id set in extractFacts (line 118)
-            embeddingStore.removeAll(Filter.metadataKey("fact_id").isEqualTo(factId.toString()));
+            embeddingStore.removeAll(MetadataFilterBuilder.metadataKey("fact_id").isEqualTo(factId.toString()));
             log.debug("Vector store cleanup successful for factId: {}", factId);
         } catch (Exception e) {
             log.warn("Semantic cleanup skipped or failed for factId {}: Vector store may not support automated removal", factId);
