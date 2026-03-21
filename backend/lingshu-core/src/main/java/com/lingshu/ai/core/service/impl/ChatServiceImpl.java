@@ -26,6 +26,7 @@ public class ChatServiceImpl implements ChatService {
     private final com.lingshu.ai.core.config.AiConfig.StreamingAssistant streamingAssistant;
     private final org.springframework.web.client.RestTemplate restTemplate;
     private final com.lingshu.ai.core.service.SettingService settingService;
+    private final com.lingshu.ai.core.service.SystemLogService systemLogService;
 
     @org.springframework.beans.factory.annotation.Value("${lingshu.ollama.base-url:http://localhost:11434}")
     private String baseUrl;
@@ -37,7 +38,8 @@ public class ChatServiceImpl implements ChatService {
                            com.lingshu.ai.core.config.AiConfig.Assistant assistant,
                            com.lingshu.ai.core.config.AiConfig.StreamingAssistant streamingAssistant,
                            org.springframework.web.client.RestTemplate restTemplate,
-                           com.lingshu.ai.core.service.SettingService settingService) {
+                           com.lingshu.ai.core.service.SettingService settingService,
+                           com.lingshu.ai.core.service.SystemLogService systemLogService) {
         this.memoryService = memoryService;
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
@@ -46,6 +48,7 @@ public class ChatServiceImpl implements ChatService {
         this.streamingAssistant = streamingAssistant;
         this.restTemplate = restTemplate;
         this.settingService = settingService;
+        this.systemLogService = systemLogService;
     }
 
     private com.lingshu.ai.infrastructure.entity.ChatSession getOrCreateSession() {
@@ -69,9 +72,15 @@ public class ChatServiceImpl implements ChatService {
                 .content(message)
                 .createdAt(java.time.LocalDateTime.now())
                 .build());
+        
+        systemLogService.info("收到用户消息: " + (message.length() > 20 ? message.substring(0, 20) + "..." : message), "CHAT");
 
         // 1. 获取长期记忆相关上下文 (RAG)
+        systemLogService.debug("正在检索长期记忆 (Graph + Semantic)...", "MEMORY");
         String longTermContext = memoryService.retrieveContext("User", message);
+        if (longTermContext != null && !longTermContext.isBlank()) {
+            systemLogService.info("长期记忆检索完成，获取到相关事实。", "MEMORY");
+        }
         
         // 2. 获取短期记忆 (最近 5 条对话记录)
         java.util.List<com.lingshu.ai.infrastructure.entity.ChatMessage> recentLogs = 
@@ -100,7 +109,9 @@ public class ChatServiceImpl implements ChatService {
         
         log.debug("Augmented Prompt generated for chat (first 100 chars): {}...", augmentedPrompt.substring(0, Math.min(100, augmentedPrompt.length())));
         
+        systemLogService.debug("调用 LLM 生成回复 (Model: Default)...", "LLM");
         String response = assistant.chat(augmentedPrompt);
+        systemLogService.info("LLM 回复生成完毕。", "LLM");
 
         messageRepository.save(com.lingshu.ai.infrastructure.entity.ChatMessage.builder()
                 .session(session)
@@ -129,6 +140,8 @@ public class ChatServiceImpl implements ChatService {
                 .content(message)
                 .createdAt(java.time.LocalDateTime.now())
                 .build());
+
+        systemLogService.info("收到用户消息 (流式): " + (message.length() > 20 ? message.substring(0, 20) + "..." : message), "CHAT");
 
         Sinks.Many<String> sink = Sinks.many().unicast().onBackpressureBuffer();
         StringBuilder assistantResponseStore = new StringBuilder();
@@ -164,6 +177,7 @@ public class ChatServiceImpl implements ChatService {
         log.debug("Augmented Prompt generated for streamChat (first 100 chars): {}...", augmentedPrompt.substring(0, Math.min(100, augmentedPrompt.length())));
         if (log.isTraceEnabled()) log.trace("Full Augmented Prompt:\n{}", augmentedPrompt);
 
+        systemLogService.debug("正在准备流式 LLM 调用...", "LLM");
         com.lingshu.ai.core.config.AiConfig.StreamingAssistant currentAssistant = streamingAssistant;
 
         // Use database settings if provided ones are null
@@ -206,6 +220,9 @@ public class ChatServiceImpl implements ChatService {
 
         currentAssistant.chat(augmentedPrompt)
                 .onNext(token -> {
+                    if (assistantResponseStore.length() == 0) {
+                        systemLogService.info("流式输出已开启，接收首个 token...", "LLM");
+                    }
                     assistantResponseStore.append(token);
                     sink.tryEmitNext(token);
                 })
@@ -217,6 +234,7 @@ public class ChatServiceImpl implements ChatService {
                             .createdAt(java.time.LocalDateTime.now())
                             .build());
 
+                    systemLogService.info("对话完成，正在触发事实提取脉冲...", "CHAT");
                     sink.tryEmitComplete();
                     memoryService.extractFacts("User", message);
                 })

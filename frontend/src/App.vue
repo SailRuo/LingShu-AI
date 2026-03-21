@@ -9,6 +9,7 @@ import ResonanceView from '@/views/ResonanceView.vue'
 import InsightView from '@/views/InsightView.vue'
 import SettingsView from '@/views/SettingsView.vue'
 import ConsoleHome from '@/views/ConsoleHome.vue'
+import SystemLogView from '@/views/SystemLogView.vue'
 import { ref } from 'vue'
 
 const themeStore = useThemeStore()
@@ -54,7 +55,7 @@ const naiveTheme = computed(() => themeStore.current.isDark ? darkTheme : null)
             <ConsoleHome v-else-if="activeMenu === 'pocket'" />
             <SettingsView v-else-if="activeMenu === 'settings'" />
             <ConsoleHome v-else-if="activeMenu === 'security'" />
-            <ConsoleHome v-else-if="activeMenu === 'logs'" />
+            <SystemLogView v-else-if="activeMenu === 'logs'" />
             <ResonanceView v-else />
           </main>
         </div>

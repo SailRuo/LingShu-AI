@@ -27,18 +27,21 @@ public class MemoryServiceImpl implements MemoryService {
     private final dev.langchain4j.model.embedding.EmbeddingModel embeddingModel;
     private final dev.langchain4j.store.embedding.EmbeddingStore<dev.langchain4j.data.segment.TextSegment> embeddingStore;
     private final FactRepository factRepository;
+    private final com.lingshu.ai.core.service.SystemLogService systemLogService;
     private FactExtractor factExtractor;
 
     public MemoryServiceImpl(UserRepository userRepository, 
                              ChatLanguageModel model,
                              dev.langchain4j.model.embedding.EmbeddingModel embeddingModel,
                              dev.langchain4j.store.embedding.EmbeddingStore<dev.langchain4j.data.segment.TextSegment> embeddingStore,
-                             FactRepository factRepository) {
+                             FactRepository factRepository,
+                             com.lingshu.ai.core.service.SystemLogService systemLogService) {
         this.userRepository = userRepository;
         this.model = model;
         this.embeddingModel = embeddingModel;
         this.embeddingStore = embeddingStore;
         this.factRepository = factRepository;
+        this.systemLogService = systemLogService;
     }
 
     @PostConstruct
@@ -50,6 +53,7 @@ public class MemoryServiceImpl implements MemoryService {
     @Override
     public void extractFacts(String userId, String message) {
         log.debug("Memory pulse: Analyzing input for cognitive facts: {}", message);
+        systemLogService.info("记忆脉冲: 启动认知事实分析...", "MEMORY");
         
         // 1. 获取当前用户及所有已知事实作为背景
         UserNode user = userRepository.findByName(userId).orElse(null);
@@ -61,21 +65,28 @@ public class MemoryServiceImpl implements MemoryService {
         }
 
         // 2. 调用 AI 分析新事实与冲突
+        systemLogService.debug("正在调用 LLM 进行事实提取与冲突检测...", "FACT");
         com.lingshu.ai.core.dto.MemoryUpdate report = factExtractor.analyze(message, currentFactsBuilder.toString());
         
         if (report == null) {
             log.debug("Memory pulse: No cognitive updates required for this message.");
+            systemLogService.info("没有检测到新的认知更新。", "FACT");
             return;
         }
 
         log.debug("Cognitive report received: {} new facts, {} deletions requested", 
                 report.getNewFacts() != null ? report.getNewFacts().size() : 0,
                 report.getDeletedFactIds() != null ? report.getDeletedFactIds().size() : 0);
+        
+        systemLogService.info(String.format("事实提取分析完成: 新增 %d, 删除 %d", 
+                report.getNewFacts() != null ? report.getNewFacts().size() : 0,
+                report.getDeletedFactIds() != null ? report.getDeletedFactIds().size() : 0), "FACT");
 
         // 3. 处理过期/错误的记忆 (删除)
         if (report.getDeletedFactIds() != null && !report.getDeletedFactIds().isEmpty()) {
             for (Long id : report.getDeletedFactIds()) {
                 log.info("Memory corrected: Removing fact ID {}", id);
+                systemLogService.info("记忆修正: 移除过时事实 ID " + id, "MEMORY");
                 this.deleteFact(id); // 同时清理 Neo4j 和 pgvector
             }
         }
@@ -97,6 +108,7 @@ public class MemoryServiceImpl implements MemoryService {
                 }
                 
                 log.info("Aha! New persistent fact: {}", fact);
+                systemLogService.info("持久化新事实: " + (fact.length() > 30 ? fact.substring(0, 30) + "..." : fact), "MEMORY");
                 
                 // 1. Save to Neo4j first to get the ID
                 FactNode factNode = FactNode.builder()
@@ -146,12 +158,14 @@ public class MemoryServiceImpl implements MemoryService {
 
         // 2. Semantic Retrieval (pgvector)
         log.debug("Semantic Retrieval: Querying vector store for: {}", message);
+        systemLogService.debug("语义检索: 正在向量库中搜寻相关片段...", "MEMORY");
         dev.langchain4j.data.embedding.Embedding queryEmbedding = embeddingModel.embed(message).content();
         List<dev.langchain4j.store.embedding.EmbeddingMatch<dev.langchain4j.data.segment.TextSegment>> matches = 
                 embeddingStore.findRelevant(queryEmbedding, 5, 0.6);
         
         if (!matches.isEmpty()) {
             log.debug("Semantic Retrieval: Found {} relevant segments", matches.size());
+            systemLogService.info("语义检索完成，匹配到 " + matches.size() + " 个相关记忆片段。", "MEMORY");
             contextBuilder.append("Related memories found: ");
             matches.forEach(match -> {
                 log.trace("Match text: {} (score: {})", match.embedded().text(), match.score());

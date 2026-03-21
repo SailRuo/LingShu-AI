@@ -30,7 +30,7 @@ const logs = ref([
   { time: '12:44:02.102', content: '正在获取节点 0x82f4 的关联边...', type: 'info' },
   { time: '12:44:02.114', content: '内存缓存中发现 12 个匹配项。', type: 'info' },
   { time: '12:44:02.115', content: '正在解析 Temporal_Buffer 关联。', type: 'info' },
-  { time: '12:44:02.128', content: '在 0x22a1 处检测到冲突。', type: 'error' },
+  { time: '12:44:02.128', content: '在 0x22a1 处检测 to 冲突。', type: 'error' },
 ])
 
 const nodes = ref([
@@ -483,4 +483,3 @@ onUnmounted(() => {
     animation: pulse 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
 }
 </style>
-

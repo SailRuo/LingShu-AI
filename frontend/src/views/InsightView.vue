@@ -2,7 +2,7 @@
 import { onMounted, ref, onBeforeUnmount, shallowRef, h, computed } from 'vue'
 import { NButton, NIcon, NDropdown, useMessage, NScrollbar, NTag, NProgress } from 'naive-ui'
 import { 
-  RefreshCcw, Activity, Trash2, Eye, Clock, 
+  RefreshCcw, Trash2, Eye, Clock, 
   Search, Target, ZoomIn, ZoomOut
 } from 'lucide-vue-next'
 // @ts-ignore
@@ -67,66 +67,198 @@ const themeColors = computed(() => ({
   isDark: themeStore.current.isDark,
 }))
 
-const config = computed(() => ({
-  containerId: 'viz',
-  nonFlat: true,
-  neo4j: {
-    serverUrl: 'bolt://localhost:7687',
-    serverUser: 'neo4j',
-    serverPassword: 'lingshu123'
-  },
-  labels: {
-    'User': {
-      caption: 'name',
-      size: 55,
-      color: {
-        background: 'rgba(255,255,255,0.03)',
-        border: themeColors.value.nodeUser,
-        highlight: { background: 'rgba(255,255,255,0.08)', border: themeColors.value.nodeUser }
-      },
-      font: { size: 13, color: themeColors.value.nodeUser, face: 'Inter, system-ui' },
-      shape: 'dot',
-      borderWidth: 2
+const config = computed(() => {
+  const nodeFactColor = themeColors.value.nodeFact
+  const nodeUserColor = themeColors.value.nodeUser
+  
+  return {
+    containerId: 'viz',
+    nonFlat: true,
+    neo4j: {
+      serverUrl: 'bolt://localhost:7687',
+      serverUser: 'neo4j',
+      serverPassword: 'lingshu123'
     },
-    'Fact': {
-      caption: 'content',
-      size: 'importance',
-      color: {
-        background: 'rgba(255,255,255,0.02)',
-        border: themeColors.value.nodeFact,
-        highlight: { background: 'rgba(255,255,255,0.05)', border: themeColors.value.primary }
+    labels: {
+      'User': {
+        caption: 'name',
+        size: 48,
+        color: {
+          background: 'transparent',
+          border: nodeUserColor,
+          highlight: { 
+            background: 'rgba(52, 211, 153, 0.15)', 
+            border: nodeUserColor 
+          }
+        },
+        font: { 
+          size: 12, 
+          color: nodeUserColor, 
+          face: 'Inter, system-ui',
+          strokeWidth: 3,
+          strokeColor: 'rgba(0, 0, 0, 0.8)'
+        },
+        shape: 'hexagon',
+        borderWidth: 3,
+        shadow: {
+          enabled: true,
+          color: nodeUserColor,
+          size: 15,
+          x: 0,
+          y: 0
+        },
+        opacity: 0.95
       },
-      font: { size: 11, color: themeColors.value.nodeFact, face: 'Inter, system-ui' },
-      shape: 'dot',
-      borderWidth: 1.5
-    }
-  },
-  relationships: {
-    'HAS_FACT': {
-      thickness: 1,
-      color: themeColors.value.edge,
-      arrows: { to: { enabled: true, scaleFactor: 0.3 } },
-      smooth: { type: 'continuous' }
-    }
-  },
-  initialCypher: "MATCH (u:User)-[r:HAS_FACT]->(f:Fact) RETURN u,r,f",
-  visConfig: {
-    physics: {
-      stabilization: { iterations: 150 },
-      barnesHut: { gravitationalConstant: -3000, springLength: 200 }
+      'Fact': {
+        caption: 'content',
+        size: 'importance',
+        color: {
+          background: 'transparent',
+          border: nodeFactColor,
+          highlight: { 
+            background: 'rgba(251, 191, 36, 0.12)', 
+            border: themeColors.value.primary 
+          }
+        },
+        font: { 
+          size: 10, 
+          color: nodeFactColor, 
+          face: 'Inter, system-ui',
+          strokeWidth: 2,
+          strokeColor: 'rgba(0, 0, 0, 0.7)'
+        },
+        shape: 'diamond',
+        borderWidth: 2,
+        shadow: {
+          enabled: true,
+          color: nodeFactColor,
+          size: 12,
+          x: 0,
+          y: 0
+        },
+        opacity: 0.9
+      }
     },
-    interaction: { hover: true, tooltipDelay: 300 }
+    relationships: {
+      'HAS_FACT': {
+        thickness: 0.08,
+        color: themeColors.value.edge,
+        arrows: { 
+          to: { 
+            enabled: true, 
+            scaleFactor: 0.4,
+            type: 'arrow'
+          } 
+        },
+        smooth: { 
+          type: 'curvedCW',
+          roundness: 0.15
+        },
+        dashes: [8, 12],
+        shadow: {
+          enabled: true,
+          color: 'rgba(52, 211, 153, 0.3)',
+          size: 5,
+          x: 0,
+          y: 0
+        },
+        opacity: 0.7
+      }
+    },
+    initialCypher: "MATCH (u:User)-[r:HAS_FACT]->(f:Fact) RETURN u,r,f",
+    visConfig: {
+      physics: {
+        stabilization: { 
+          iterations: 200,
+          updateInterval: 25
+        },
+        barnesHut: { 
+          gravitationalConstant: -4000, 
+          springLength: 180,
+          springConstant: 0.04,
+          damping: 0.15
+        },
+        maxVelocity: 50,
+        minVelocity: 0.1
+      },
+      interaction: { 
+        hover: true, 
+        tooltipDelay: 200,
+        navigationButtons: false,
+        zoomView: true,
+        dragView: true
+      },
+      nodes: {
+        scaling: {
+          min: 10,
+          max: 35,
+          label: {
+            enabled: true,
+            min: 8,
+            max: 14
+          }
+        }
+      },
+      edges: {
+        scaling: {
+          min: 1,
+          max: 3
+        },
+        smooth: {
+          forceDirection: 'none'
+        }
+      }
+    }
   }
-}))
+})
+
+function injectCustomStyles() {
+  const styleId = 'neovis-custom-styles'
+  if (document.getElementById(styleId)) return
+  
+  const style = document.createElement('style')
+  style.id = styleId
+  style.textContent = `
+    .vis-network {
+      background: transparent !important;
+    }
+    
+    .vis-node {
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    .vis-node:hover {
+      filter: brightness(1.3);
+    }
+    
+    @keyframes nodePulse {
+      0%, 100% { 
+        filter: drop-shadow(0 0 8px var(--glow-color));
+      }
+      50% { 
+        filter: drop-shadow(0 0 20px var(--glow-color));
+      }
+    }
+    
+    @keyframes edgeFlow {
+      0% { stroke-dashoffset: 24; }
+      100% { stroke-dashoffset: 0; }
+    }
+    
+    .vis-edge {
+      animation: edgeFlow 2s linear infinite;
+    }
+  `
+  document.head.appendChild(style)
+}
 
 function initViz() {
   if (viz.value) viz.value.clearNetwork()
   try {
+    injectCustomStyles()
     viz.value = new Neovis(config.value as any)
     viz.value.registerOnEvent('completed', () => {
       isLoaded.value = true
-      // Neovis 的 registerOnEvent 有白名单，不支持 oncontext
-      // 我们直接在底层的 vis.js network 实例上注册事件
       const network = viz.value.network || viz.value._network
       if (network) {
         network.on('oncontext', (event: any) => {
@@ -138,6 +270,20 @@ function initViz() {
             dropdownX.value = event.event.clientX
             dropdownY.value = event.event.clientY
             showDropdown.value = true
+          }
+        })
+        
+        network.on('hoverNode', (_params: any) => {
+          const canvas = document.getElementById('viz')?.querySelector('canvas')
+          if (canvas) {
+            canvas.style.cursor = 'pointer'
+          }
+        })
+        
+        network.on('blurNode', () => {
+          const canvas = document.getElementById('viz')?.querySelector('canvas')
+          if (canvas) {
+            canvas.style.cursor = 'default'
           }
         })
       }
@@ -161,7 +307,6 @@ function initViz() {
 async function handleDeleteFact() {
   if (!rightClickedNode.value) return
   try {
-    // 移除 ID 前缀 (例如 "fact_123" -> "123") 以匹配后端 Long 类型
     const rawId = rightClickedNode.value.id
     const factId = typeof rawId === 'string' ? rawId.replace('fact_', '') : rawId
     
@@ -197,7 +342,11 @@ function refreshGraph() {
 }
 
 onMounted(() => setTimeout(initViz, 500))
-onBeforeUnmount(() => { if (viz.value) viz.value.clearNetwork() })
+onBeforeUnmount(() => { 
+  if (viz.value) viz.value.clearNetwork()
+  const customStyle = document.getElementById('neovis-custom-styles')
+  if (customStyle) customStyle.remove()
+})
 </script>
 
 <template>
@@ -208,8 +357,14 @@ onBeforeUnmount(() => { if (viz.value) viz.value.clearNetwork() })
         
         <div v-if="!isLoaded" class="loading-overlay">
           <div class="loading-content">
-            <Activity :size="28" class="loading-icon" />
-            <span class="loading-text">拓扑映射中...</span>
+            <div class="loading-orb">
+              <div class="orb-core"></div>
+              <div class="orb-ring"></div>
+            </div>
+            <span class="loading-text">拓扑映射中</span>
+            <div class="loading-progress">
+              <div class="progress-bar"></div>
+            </div>
           </div>
         </div>
 
@@ -391,30 +546,99 @@ onBeforeUnmount(() => { if (viz.value) viz.value.clearNetwork() })
   align-items: center;
   justify-content: center;
   z-index: 20;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(4px);
 }
 
 .loading-content {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 20px;
 }
 
-.loading-icon {
-  color: var(--color-primary);
-  animation: pulse 2s ease-in-out infinite;
+.loading-orb {
+  position: relative;
+  width: 60px;
+  height: 60px;
+}
+
+.orb-core {
+  position: absolute;
+  inset: 18px;
+  background: radial-gradient(circle at 30% 30%, var(--color-primary), transparent 70%);
+  background-color: var(--color-primary);
+  border-radius: 50%;
+  box-shadow: 
+    0 0 20px var(--color-primary),
+    0 0 40px rgba(52, 211, 153, 0.4),
+    inset 0 0 15px rgba(255, 255, 255, 0.3);
+  animation: orbPulse 2s ease-in-out infinite;
+}
+
+.orb-ring {
+  position: absolute;
+  inset: 8px;
+  border: 2px solid var(--color-primary);
+  border-radius: 50%;
+  opacity: 0.5;
+  animation: orbRing 2s ease-in-out infinite;
+  box-shadow: 0 0 10px var(--color-primary);
+}
+
+@keyframes orbPulse {
+  0%, 100% { 
+    transform: scale(1); 
+    opacity: 1;
+    box-shadow: 
+      0 0 20px var(--color-primary),
+      0 0 40px rgba(52, 211, 153, 0.4);
+  }
+  50% { 
+    transform: scale(1.15); 
+    opacity: 0.8;
+    box-shadow: 
+      0 0 30px var(--color-primary),
+      0 0 60px rgba(52, 211, 153, 0.6);
+  }
+}
+
+@keyframes orbRing {
+  0%, 100% { 
+    transform: scale(1); 
+    opacity: 0.5;
+  }
+  50% { 
+    transform: scale(1.2); 
+    opacity: 0.2;
+  }
 }
 
 .loading-text {
-  font-size: 11px;
-  letter-spacing: 0.2em;
+  font-size: 12px;
+  letter-spacing: 0.25em;
   color: var(--color-text-dim);
   text-transform: uppercase;
+  font-weight: 500;
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 0.5; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.1); }
+.loading-progress {
+  width: 120px;
+  height: 2px;
+  background: var(--color-surface);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, transparent, var(--color-primary), transparent);
+  animation: progressFlow 1.5s ease-in-out infinite;
+}
+
+@keyframes progressFlow {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
 }
 
 .toolbar {
