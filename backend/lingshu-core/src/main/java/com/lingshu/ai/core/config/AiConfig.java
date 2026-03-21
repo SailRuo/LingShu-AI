@@ -7,8 +7,6 @@ import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-
-import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.web.client.RestTemplate;
@@ -112,6 +110,14 @@ public class AiConfig {
                 .build();
     }
 
+    @Bean
+    public com.lingshu.ai.core.service.EmotionAnalyzer emotionAnalyzer(
+            ChatLanguageModel chatLanguageModel) {
+        return dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.service.EmotionAnalyzer.class)
+                .chatLanguageModel(chatLanguageModel)
+                .build();
+    }
+
     public interface Assistant {
         @dev.langchain4j.service.SystemMessage("""
                 你名唤『灵枢 (LingShu-AI)』，取意于中医大典《灵枢经》，意为“灵魂的枢纽”。
@@ -134,5 +140,9 @@ public class AiConfig {
                 (使命与性格同上：专注于协助用户处理 Java 和 DevOps 问题，并在记忆缺失时主动完善用户画像。)
                 """)
         dev.langchain4j.service.TokenStream chat(@dev.langchain4j.service.UserMessage String message);
+    }
+
+    public interface RawStreamingAssistant {
+        dev.langchain4j.service.TokenStream chat(String userPrompt);
     }
 }

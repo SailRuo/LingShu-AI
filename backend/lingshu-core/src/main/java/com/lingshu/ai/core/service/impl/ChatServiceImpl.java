@@ -1,54 +1,63 @@
 package com.lingshu.ai.core.service.impl;
 
+import com.lingshu.ai.core.dto.EmotionAnalysis;
 import com.lingshu.ai.core.service.ChatService;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.chat.StreamingChatLanguageModel;
-import dev.langchain4j.model.ollama.OllamaChatModel;
-import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
+import com.lingshu.ai.infrastructure.entity.AgentConfig;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
-
-import jakarta.annotation.PostConstruct;
-import java.time.Duration;
 
 @Slf4j
 @Service
 public class ChatServiceImpl implements ChatService {
 
     private final com.lingshu.ai.core.service.MemoryService memoryService;
+    private final com.lingshu.ai.core.service.AgentConfigService agentConfigService;
     private final com.lingshu.ai.infrastructure.repository.ChatSessionRepository sessionRepository;
     private final com.lingshu.ai.infrastructure.repository.ChatMessageRepository messageRepository;
-    private final com.lingshu.ai.core.tool.LocalTools localTools;
     private final com.lingshu.ai.core.config.AiConfig.Assistant assistant;
     private final com.lingshu.ai.core.config.AiConfig.StreamingAssistant streamingAssistant;
+    private final dev.langchain4j.model.chat.StreamingChatLanguageModel streamingChatLanguageModel;
     private final org.springframework.web.client.RestTemplate restTemplate;
     private final com.lingshu.ai.core.service.SettingService settingService;
     private final com.lingshu.ai.core.service.SystemLogService systemLogService;
+    private final com.lingshu.ai.core.service.AffinityService affinityService;
+    private final com.lingshu.ai.core.service.EmotionAnalyzer emotionAnalyzer;
+    private final com.lingshu.ai.core.service.ProactiveService proactiveService;
+    private final com.lingshu.ai.core.service.PromptBuilderService promptBuilderService;
 
     @org.springframework.beans.factory.annotation.Value("${lingshu.ollama.base-url:http://localhost:11434}")
     private String baseUrl;
 
     public ChatServiceImpl(com.lingshu.ai.core.service.MemoryService memoryService,
+                           com.lingshu.ai.core.service.AgentConfigService agentConfigService,
                            com.lingshu.ai.infrastructure.repository.ChatSessionRepository sessionRepository,
                            com.lingshu.ai.infrastructure.repository.ChatMessageRepository messageRepository,
-                           com.lingshu.ai.core.tool.LocalTools localTools,
                            com.lingshu.ai.core.config.AiConfig.Assistant assistant,
                            com.lingshu.ai.core.config.AiConfig.StreamingAssistant streamingAssistant,
+                           dev.langchain4j.model.chat.StreamingChatLanguageModel streamingChatLanguageModel,
                            org.springframework.web.client.RestTemplate restTemplate,
                            com.lingshu.ai.core.service.SettingService settingService,
-                           com.lingshu.ai.core.service.SystemLogService systemLogService) {
+                           com.lingshu.ai.core.service.SystemLogService systemLogService,
+                           com.lingshu.ai.core.service.AffinityService affinityService,
+                           com.lingshu.ai.core.service.EmotionAnalyzer emotionAnalyzer,
+                           com.lingshu.ai.core.service.ProactiveService proactiveService,
+                           com.lingshu.ai.core.service.PromptBuilderService promptBuilderService) {
         this.memoryService = memoryService;
+        this.agentConfigService = agentConfigService;
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
-        this.localTools = localTools;
         this.assistant = assistant;
         this.streamingAssistant = streamingAssistant;
+        this.streamingChatLanguageModel = streamingChatLanguageModel;
         this.restTemplate = restTemplate;
         this.settingService = settingService;
         this.systemLogService = systemLogService;
+        this.affinityService = affinityService;
+        this.emotionAnalyzer = emotionAnalyzer;
+        this.proactiveService = proactiveService;
+        this.promptBuilderService = promptBuilderService;
     }
 
     private com.lingshu.ai.infrastructure.entity.ChatSession getOrCreateSession() {
@@ -62,9 +71,28 @@ public class ChatServiceImpl implements ChatService {
         });
     }
 
+    private AgentConfig getAgent(Long agentId) {
+        if (agentId != null) {
+            return agentConfigService.getAgentById(agentId).orElse(null);
+        }
+        return agentConfigService.getDefaultAgent().orElse(null);
+    }
+
     @Override
     public String chat(String message) {
+        return chat(message, null, "User");
+    }
+
+    @Override
+    public String chat(String message, Long agentId) {
+        return chat(message, agentId, "User");
+    }
+
+    @Override
+    public String chat(String message, Long agentId, String userId) {
         com.lingshu.ai.infrastructure.entity.ChatSession session = getOrCreateSession();
+        AgentConfig agent = getAgent(agentId);
+        String agentName = agent != null ? agent.getDisplayName() : "灵枢";
         
         messageRepository.save(com.lingshu.ai.infrastructure.entity.ChatMessage.builder()
                 .session(session)
@@ -73,16 +101,15 @@ public class ChatServiceImpl implements ChatService {
                 .createdAt(java.time.LocalDateTime.now())
                 .build());
         
-        systemLogService.info("收到用户消息: " + (message.length() > 20 ? message.substring(0, 20) + "..." : message), "CHAT");
+        systemLogService.info("\n收到用户消息: " + (message.length() > 20 ? message.substring(0, 20) + "..." : message), "CHAT");
 
-        // 1. 获取长期记忆相关上下文 (RAG)
-        systemLogService.debug("正在检索长期记忆 (Graph + Semantic)...", "MEMORY");
-        String longTermContext = memoryService.retrieveContext("User", message);
+        analyzeAndUpdateUserState(userId, message);
+
+        String longTermContext = memoryService.retrieveContext(userId, message);
         if (longTermContext != null && !longTermContext.isBlank()) {
             systemLogService.info("长期记忆检索完成，获取到相关事实。", "MEMORY");
         }
         
-        // 2. 获取短期记忆 (最近 5 条对话记录)
         java.util.List<com.lingshu.ai.infrastructure.entity.ChatMessage> recentLogs = 
                 messageRepository.findTop5BySessionOrderByCreatedAtDesc(session);
         java.util.Collections.reverse(recentLogs);
@@ -93,25 +120,17 @@ public class ChatServiceImpl implements ChatService {
             recentLogs.forEach(m -> shortTermContext.append(m.getRole()).append(": ").append(m.getContent()).append("\n"));
         }
 
-        String augmentedPrompt = String.format("""
-                【感官记忆 - 长期 facts】
-                %s
-                
-                %s
-                
-                【当前指令】
-                %s
-                
-                指令回复准则：
-                - 只有当用户显式要求“回忆”时，才引用以上记忆。
-                - 如果事实或近期流水不足以支撑回忆，直接回答“之前的记忆有些模糊，能提醒我一下吗？”而非虚构（如：严禁虚构 Java 报错或深夜工作背景）。
-                """, longTermContext, shortTermContext.toString(), message);
+        String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
+
+        String systemPrompt = promptBuilderService.buildSystemPrompt(agent);
+        String userPrompt = promptBuilderService.buildUserPrompt(relationshipPrompt, longTermContext, shortTermContext.toString(), message);
         
-        log.debug("Augmented Prompt generated for chat (first 100 chars): {}...", augmentedPrompt.substring(0, Math.min(100, augmentedPrompt.length())));
+        log.debug("System Prompt generated for chat (first 100 chars): {}...", systemPrompt.substring(0, Math.min(100, systemPrompt.length())));
+        log.debug("User Prompt generated for chat (first 100 chars): {}...", userPrompt.substring(0, Math.min(100, userPrompt.length())));
         
-        systemLogService.debug("调用 LLM 生成回复 (Model: Default)...", "LLM");
-        String response = assistant.chat(augmentedPrompt);
-        systemLogService.info("LLM 回复生成完毕。", "LLM");
+        systemLogService.llmStart("default-model", "ollama", "LLM");
+        String response = assistant.chat(systemPrompt + "\n\n" + userPrompt);
+        systemLogService.llmEnd(response != null ? response.length() / 4 : 0, "LLM");
 
         messageRepository.save(com.lingshu.ai.infrastructure.entity.ChatMessage.builder()
                 .session(session)
@@ -120,19 +139,66 @@ public class ChatServiceImpl implements ChatService {
                 .createdAt(java.time.LocalDateTime.now())
                 .build());
         
-        memoryService.extractFacts("User", message);
+        memoryService.extractFacts(userId, message);
         
         return response;
     }
 
+    private void analyzeAndUpdateUserState(String userId, String message) {
+        try {
+            EmotionAnalysis emotion = emotionAnalyzer.analyze(message);
+            if (emotion != null) {
+                affinityService.updateEmotion(userId, emotion.getEmotion(), emotion.getIntensity());
+                systemLogService.info(String.format("情绪分析: %s (强度: %.2f)", 
+                        emotion.getEmotion(), emotion.getIntensity()), "EMOTION");
+                
+                if (emotion.isPositive()) {
+                    affinityService.increaseAffinity(userId, 1);
+                } else if (emotion.isNegative() && emotion.getIntensity() > 0.5) {
+                    affinityService.decreaseAffinity(userId, 1);
+                }
+                
+                if (emotion.needsAttention()) {
+                    systemLogService.info("检测到用户需要关注", "EMOTION");
+                }
+            }
+            
+            affinityService.recordInteraction(userId);
+        } catch (Exception e) {
+            log.warn("情绪分析失败: {}", e.getMessage());
+        }
+    }
+
     @Override
     public Flux<String> streamChat(String message) {
-        return streamChat(message, null, null, null);
+        return streamChat(message, null, "User", null, null);
+    }
+
+    @Override
+    public Flux<String> streamChat(String message, Long agentId) {
+        return streamChat(message, agentId, "User", null, null);
+    }
+
+    @Override
+    public Flux<String> streamChat(String message, Long agentId, String userId) {
+        return streamChat(message, agentId, userId, null, null);
     }
 
     @Override
     public Flux<String> streamChat(String message, String model, String apiKey, String baseUrl) {
+        return streamChat(message, null, "User", model, apiKey, baseUrl);
+    }
+
+    @Override
+    public Flux<String> streamChat(String message, Long agentId, String model, String apiKey, String baseUrl) {
+        return streamChat(message, agentId, "User", model, apiKey, baseUrl);
+    }
+
+    @Override
+    public Flux<String> streamChat(String message, Long agentId, String userId, String model, String apiKey, String baseUrl) {
         com.lingshu.ai.infrastructure.entity.ChatSession session = getOrCreateSession();
+        AgentConfig agent = getAgent(agentId);
+        String agentName = agent != null ? agent.getDisplayName() : "灵枢";
         
         messageRepository.save(com.lingshu.ai.infrastructure.entity.ChatMessage.builder()
                 .session(session)
@@ -143,13 +209,13 @@ public class ChatServiceImpl implements ChatService {
 
         systemLogService.info("收到用户消息 (流式): " + (message.length() > 20 ? message.substring(0, 20) + "..." : message), "CHAT");
 
+        analyzeAndUpdateUserState(userId, message);
+
         Sinks.Many<String> sink = Sinks.many().unicast().onBackpressureBuffer();
         StringBuilder assistantResponseStore = new StringBuilder();
 
-        // 1. 获取长期记忆相关上下文 (RAG)
-        String longTermContext = memoryService.retrieveContext("User", message);
+        String longTermContext = memoryService.retrieveContext(userId, message);
         
-        // 2. 获取短期记忆 (最近 5 条对话记录)
         java.util.List<com.lingshu.ai.infrastructure.entity.ChatMessage> recentLogs = 
                 messageRepository.findTop5BySessionOrderByCreatedAtDesc(session);
         java.util.Collections.reverse(recentLogs);
@@ -160,27 +226,14 @@ public class ChatServiceImpl implements ChatService {
             recentLogs.forEach(m -> shortTermContext.append(m.getRole()).append(": ").append(m.getContent()).append("\n"));
         }
 
-        String augmentedPrompt = String.format("""
-                【感官记忆 - 长期 facts】
-                %s
-                
-                %s
-                
-                【当前指令】
-                %s
-                
-                指令回复准则：
-                - 只有当用户显式要求“回忆”时，才引用以上记忆。
-                - 如果事实或近期流水不足以支撑回忆，直接回答“之前的记忆有些模糊，能提醒我一下吗？”而非虚构（如：严禁虚构 Java 报错或深夜工作背景）。
-                """, longTermContext, shortTermContext.toString(), message);
+        String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
 
-        log.debug("Augmented Prompt generated for streamChat (first 100 chars): {}...", augmentedPrompt.substring(0, Math.min(100, augmentedPrompt.length())));
-        if (log.isTraceEnabled()) log.trace("Full Augmented Prompt:\n{}", augmentedPrompt);
+        String systemPrompt = promptBuilderService.buildSystemPrompt(agent);
+        String userPrompt = promptBuilderService.buildUserPrompt(relationshipPrompt, longTermContext, shortTermContext.toString(), message);
 
-        systemLogService.debug("正在准备流式 LLM 调用...", "LLM");
-        com.lingshu.ai.core.config.AiConfig.StreamingAssistant currentAssistant = streamingAssistant;
+        log.debug("System Prompt generated for streamChat (first 100 chars): {}...", systemPrompt.substring(0, Math.min(100, systemPrompt.length())));
+        log.debug("User Prompt generated for streamChat (first 100 chars): {}...", userPrompt.substring(0, Math.min(100, userPrompt.length())));
 
-        // Use database settings if provided ones are null
         String effectiveModel = model;
         String effectiveBaseUrl = baseUrl;
         String effectiveApiKey = apiKey;
@@ -193,6 +246,12 @@ public class ChatServiceImpl implements ChatService {
             if (effectiveApiKey == null) effectiveApiKey = setting.getApiKey();
             effectiveSource = setting.getSource();
         }
+
+        systemLogService.info(String.format("准备LLM调用 | 智能体: %s | 模型: %s | 来源: %s | 端点: %s", 
+            agentName, effectiveModel, effectiveSource, effectiveBaseUrl), "LLM");
+        systemLogService.startTimer("llm_LLM");
+
+        com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant rawAssistant;
 
         if (effectiveModel != null && effectiveBaseUrl != null) {
             dev.langchain4j.model.chat.StreamingChatLanguageModel dynamicModel;
@@ -213,12 +272,16 @@ public class ChatServiceImpl implements ChatService {
                         .build();
             }
             
-            currentAssistant = dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.config.AiConfig.StreamingAssistant.class)
+            rawAssistant = dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant.class)
                     .streamingChatLanguageModel(dynamicModel)
+                    .build();
+        } else {
+            rawAssistant = dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant.class)
+                    .streamingChatLanguageModel(streamingChatLanguageModel)
                     .build();
         }
 
-        currentAssistant.chat(augmentedPrompt)
+        rawAssistant.chat(systemPrompt, userPrompt)
                 .onNext(token -> {
                     if (assistantResponseStore.length() == 0) {
                         systemLogService.info("流式输出已开启，接收首个 token...", "LLM");
@@ -227,6 +290,9 @@ public class ChatServiceImpl implements ChatService {
                     sink.tryEmitNext(token);
                 })
                 .onComplete(response -> {
+                    int tokenCount = assistantResponseStore.length() / 4;
+                    systemLogService.llmEnd(tokenCount, "LLM");
+                    
                     messageRepository.save(com.lingshu.ai.infrastructure.entity.ChatMessage.builder()
                             .session(session)
                             .role("assistant")
@@ -234,11 +300,12 @@ public class ChatServiceImpl implements ChatService {
                             .createdAt(java.time.LocalDateTime.now())
                             .build());
 
-                    systemLogService.info("对话完成，正在触发事实提取脉冲...", "CHAT");
+                    systemLogService.success("对话完成，回复长度: " + assistantResponseStore.length() + " 字符", "CHAT");
                     sink.tryEmitComplete();
-                    memoryService.extractFacts("User", message);
+                    memoryService.extractFacts(userId, message);
                 })
                 .onError(error -> {
+                    systemLogService.llmError(error.getMessage(), "LLM");
                     sink.tryEmitError(error);
                 })
                 .start();
@@ -248,9 +315,17 @@ public class ChatServiceImpl implements ChatService {
 
     @Override
     public Flux<String> streamWelcome() {
+        return streamWelcome("User");
+    }
+
+    @Override
+    public Flux<String> streamWelcome(String userId) {
+        systemLogService.info("生成欢迎消息...", "CHAT");
+        
         java.util.List<com.lingshu.ai.infrastructure.entity.ChatMessage> lastMessages = messageRepository.findTop5ByOrderByCreatedAtDesc();
         
         if (lastMessages.isEmpty()) {
+            systemLogService.info("无历史对话，使用默认欢迎语", "CHAT");
             return Flux.just("欢迎回来。我是灵枢 (LingShu-AI)，你的感官与记忆中枢。今天有什么我可以帮你的吗？");
         }
 
@@ -260,11 +335,23 @@ public class ChatServiceImpl implements ChatService {
                           .append(lastMessages.get(i).getContent()).append("\n");
         }
 
-        String greetingPrompt = "【历史对话记录】\n" + historyContext.toString() + "\n\n" +
-                "请作为『灵枢 (LingShu-AI)』，基于以上对话动态生成一句情感共识强烈的中文欢迎语。如果对话还没开启，请作为新伙伴询问用户的身份。";
+        AgentConfig defaultAgent = agentConfigService.getDefaultAgent().orElse(null);
+        String agentName = defaultAgent != null ? defaultAgent.getDisplayName() : "灵枢";
+        String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
+        
+        String systemPrompt = promptBuilderService.buildSystemPrompt(defaultAgent);
+        String userPrompt = promptBuilderService.buildWelcomeUserPrompt(relationshipPrompt, historyContext.toString(), agentName);
 
-        com.lingshu.ai.core.config.AiConfig.StreamingAssistant currentAssistant = streamingAssistant;
         com.lingshu.ai.infrastructure.entity.SystemSetting setting = settingService.getSetting();
+
+        String effectiveModel = setting.getChatModel();
+        String effectiveSource = setting.getSource();
+
+        systemLogService.info(String.format("欢迎消息LLM调用 | 模型: %s | 来源: %s | 端点: %s",
+            effectiveModel, effectiveSource, setting.getBaseUrl()), "LLM");
+        systemLogService.startTimer("llm_welcome");
+
+        com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant rawAssistant;
 
         if (setting.getChatModel() != null && setting.getBaseUrl() != null) {
             dev.langchain4j.model.chat.StreamingChatLanguageModel dynamicModel;
@@ -284,17 +371,31 @@ public class ChatServiceImpl implements ChatService {
                         .timeout(java.time.Duration.ofMinutes(2))
                         .build();
             }
-            currentAssistant = dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.config.AiConfig.StreamingAssistant.class)
+            rawAssistant = dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant.class)
                     .streamingChatLanguageModel(dynamicModel)
+                    .build();
+        } else {
+            rawAssistant = dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant.class)
+                    .streamingChatLanguageModel(streamingChatLanguageModel)
                     .build();
         }
 
         Sinks.Many<String> sink = Sinks.many().unicast().onBackpressureBuffer();
+        StringBuilder welcomeBuilder = new StringBuilder();
 
-        currentAssistant.chat(greetingPrompt)
-                .onNext(sink::tryEmitNext)
-                .onComplete(response -> sink.tryEmitComplete())
+        rawAssistant.chat(systemPrompt, userPrompt)
+                .onNext(token -> {
+                    welcomeBuilder.append(token);
+                    sink.tryEmitNext(token);
+                })
+                .onComplete(response -> {
+                    systemLogService.endTimer("llm_welcome", "欢迎消息生成完成", "LLM");
+                    systemLogService.success("欢迎消息长度: " + welcomeBuilder.length() + " 字符", "CHAT");
+                    sink.tryEmitComplete();
+                })
                 .onError(err -> {
+                    systemLogService.endTimer("llm_welcome", "欢迎消息生成失败", "LLM");
+                    systemLogService.error(err.getMessage(), "LLM");
                     sink.tryEmitNext("欢迎回来。系统已就绪，随时准备与你共同探索。");
                     sink.tryEmitComplete();
                 })
@@ -307,6 +408,9 @@ public class ChatServiceImpl implements ChatService {
     public java.util.List<String> getModels(String source, String baseUrl, String apiKey) {
         String effectiveUrl = (baseUrl == null || baseUrl.isBlank()) ? this.baseUrl : baseUrl;
         if (effectiveUrl.endsWith("/")) effectiveUrl = effectiveUrl.substring(0, effectiveUrl.length() - 1);
+
+        systemLogService.info(String.format("获取模型列表 | 来源: %s | 端点: %s", source, effectiveUrl), "SYSTEM");
+        systemLogService.startTimer("get_models");
 
         try {
             if ("openai".equalsIgnoreCase(source)) {
@@ -325,53 +429,65 @@ public class ChatServiceImpl implements ChatService {
                     url = base + "/v1/models";
                 }
                 
-                System.out.println("Fetching models from OpenAI-compatible endpoint: " + url);
+                systemLogService.debug("请求OpenAI模型列表: " + url, "SYSTEM");
                 
                 Object responseObj = null;
                 try {
                     responseObj = restTemplate.exchange(url, org.springframework.http.HttpMethod.GET, entity, Object.class).getBody();
                 } catch (Exception e) {
-                    // Try fallback if /v1/models failed and base URL doesn't have v1
                     if (!base.contains("/v1")) {
                         String fallbackUrl = base + "/models";
-                        System.out.println("Retrying fallback endpoint: " + fallbackUrl);
+                        systemLogService.debug("重试备用端点: " + fallbackUrl, "SYSTEM");
                         try {
                             responseObj = restTemplate.exchange(fallbackUrl, org.springframework.http.HttpMethod.GET, entity, Object.class).getBody();
                         } catch (Exception ex) {
-                            throw ex; // still failed, catch at outer block
+                            throw ex;
                         }
                     } else {
                         throw e;
                     }
                 }
                 
-                if (responseObj instanceof java.util.Map response) {
-                    if (response.containsKey("data") && response.get("data") instanceof java.util.List list) {
-                        return (java.util.List<String>) list.stream()
-                                .map(m -> (String) ((java.util.Map) m).get("id"))
+                if (responseObj instanceof java.util.Map<?, ?> response) {
+                    if (response.containsKey("data") && response.get("data") instanceof java.util.List<?> list) {
+                        java.util.List<String> models = list.stream()
+                                .map(m -> (String) ((java.util.Map<?, ?>) m).get("id"))
                                 .collect(java.util.stream.Collectors.toList());
+                        systemLogService.endTimer("get_models", "模型列表获取成功", "SYSTEM");
+                        systemLogService.info("获取到 " + models.size() + " 个OpenAI兼容模型", "SYSTEM");
+                        return models;
                     }
-                } else if (responseObj instanceof java.util.List list) {
-                    return (java.util.List<String>) list.stream()
-                            .map(m -> (String) ((java.util.Map) m).get("id"))
+                } else if (responseObj instanceof java.util.List<?> list) {
+                    java.util.List<String> models = list.stream()
+                            .map(m -> (String) ((java.util.Map<?, ?>) m).get("id"))
                             .collect(java.util.stream.Collectors.toList());
+                    systemLogService.endTimer("get_models", "模型列表获取成功", "SYSTEM");
+                    systemLogService.info("获取到 " + models.size() + " 个OpenAI兼容模型", "SYSTEM");
+                    return models;
                 }
                 
+                systemLogService.warn("模型列表解析失败，使用默认模型", "SYSTEM");
                 return java.util.List.of("gpt-3.5-turbo");
             } else {
-                // Ollama 模式
                 String url = effectiveUrl + "/api/tags";
-                System.out.println("Fetching Ollama models from: " + url);
+                systemLogService.debug("请求Ollama模型列表: " + url, "SYSTEM");
                 
-                java.util.Map response = restTemplate.getForObject(url, java.util.Map.class);
-                if (response == null || !response.containsKey("models")) return java.util.List.of("qwen3.5:4b");
-                java.util.List<java.util.Map> models = (java.util.List<java.util.Map>) response.get("models");
-                return models.stream()
+                java.util.Map<?, ?> response = restTemplate.getForObject(url, java.util.Map.class);
+                if (response == null || !response.containsKey("models")) {
+                    systemLogService.warn("Ollama返回空响应，使用默认模型", "SYSTEM");
+                    return java.util.List.of("qwen3.5:4b");
+                }
+                @SuppressWarnings("unchecked")
+                java.util.List<java.util.Map<?, ?>> models = (java.util.List<java.util.Map<?, ?>>) response.get("models");
+                java.util.List<String> modelNames = models.stream()
                         .map(m -> (String) m.get("name"))
                         .collect(java.util.stream.Collectors.toList());
+                systemLogService.endTimer("get_models", "模型列表获取成功", "SYSTEM");
+                systemLogService.info("获取到 " + modelNames.size() + " 个Ollama模型", "SYSTEM");
+                return modelNames;
             }
         } catch (Exception e) {
-            System.err.println("Failed to fetch models: " + e.getMessage());
+            systemLogService.error("获取模型列表失败: " + e.getMessage(), "SYSTEM");
             return "openai".equalsIgnoreCase(source) ? java.util.List.of("gpt-3.5-turbo") : java.util.List.of("qwen3.5:4b");
         }
     }

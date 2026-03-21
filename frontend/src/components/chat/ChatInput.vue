@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { Send, Sparkles, Mic } from 'lucide-vue-next'
+import { Send, Sparkles } from 'lucide-vue-next'
 
-defineProps<{ modelValue: string; loading: boolean }>()
+defineProps<{ modelValue: string; loading: boolean; disabled?: boolean }>()
 const emit = defineEmits<{
   (e: 'update:modelValue', v: string): void
   (e: 'send'): void
 }>()
 
-function handleInput(e: Event) {
+function handleInput(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     emit('send')
@@ -33,7 +33,7 @@ function handleInput(e: Event) {
       
       <button 
         class="send-btn"
-        :disabled="!modelValue.trim() || loading"
+        :disabled="!modelValue.trim() || loading || disabled"
         @click="emit('send')"
       >
         <Send :size="18" :class="{ spinning: loading }" />

@@ -1,86 +1,139 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
-import { 
-  NIcon, NScrollbar, 
-  NTag, NCard, NEmpty, NInput, NButton,
-  useMessage
-} from 'naive-ui'
-import { 
-  FileText, Search, Trash2, Download, 
-  Activity, Zap, Cpu, Database
-} from 'lucide-vue-next'
+import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
+import { NInput, NButton, NTag, useMessage } from 'naive-ui'
+import { Search, Trash2, Download } from 'lucide-vue-next'
 
-const logs = ref<any[]>([])
-let logEventSource: EventSource | null = null
-const maxLogs = 200
+interface LogLine {
+  time: string
+  type: string
+  section: string
+  content: string
+  isUserMessage: boolean
+  isFactComplete: boolean
+}
+
+const logs = ref<LogLine[]>([])
 const searchQuery = ref('')
+const activeFilters = ref<Set<string>>(new Set())
+let logEventSource: EventSource | null = null
+const maxLines = 500
 const message = useMessage()
+const logContainer = ref<HTMLElement | null>(null)
 
-// Filters
-const filterSection = ref<string | null>(null)
+const SECTION_OPTIONS = [
+  { key: 'MEMORY', label: 'MEMORY', color: '#8b5cf6' },
+  { key: 'CHAT', label: 'CHAT', color: '#3b82f6' },
+  { key: 'LLM', label: 'LLM', color: '#10b981' },
+  { key: 'FACT', label: 'FACT', color: '#f59e0b' },
+  { key: 'SYSTEM', label: 'SYSTEM', color: '#6b7280' }
+]
+
+const toggleFilter = (key: string) => {
+  if (activeFilters.value.has(key)) {
+    activeFilters.value.delete(key)
+  } else {
+    activeFilters.value.add(key)
+  }
+}
 
 const connectLogs = () => {
   if (logEventSource) logEventSource.close()
   
-  // Using relative path to benefit from Vite proxy
+  logs.value = []
+  
   logEventSource = new EventSource('/api/logs/stream')
   
   logEventSource.onmessage = (event) => {
     try {
       const logData = JSON.parse(event.data)
-      logs.value.unshift(logData)
-      if (logs.value.length > maxLogs) {
-        logs.value.pop()
+      if (logData.type === 'PING') return
+      
+      const timestamp = logData.time || new Date().toLocaleTimeString()
+      const type = (logData.type || 'INFO').toUpperCase()
+      const section = (logData.section || 'SYSTEM').toUpperCase()
+      const content = logData.content || ''
+      const isUserMessage = content.includes('收到用户消息')
+      const isFactComplete = content.includes('事实提取分析完成') || 
+                             content.includes('记忆脉冲处理完成') ||
+                             content.includes('持久化新事实')
+      
+      logs.value.push({
+        time: timestamp,
+        type,
+        section,
+        content,
+        isUserMessage,
+        isFactComplete
+      })
+      
+      if (logs.value.length > maxLines) {
+        logs.value = logs.value.slice(-maxLines)
       }
+      
+      nextTick(() => {
+        if (logContainer.value) {
+          logContainer.value.scrollTop = logContainer.value.scrollHeight
+        }
+      })
     } catch (e) {
-      console.error('Failed to parse log data:', e)
+      console.error('Parse error:', e)
     }
   }
 
-  logEventSource.onerror = (err) => {
-    console.error('Log SSE connection error:', err)
+  logEventSource.onerror = () => {
     logEventSource?.close()
     setTimeout(connectLogs, 5000)
   }
 }
 
-const clearLogs = () => {
-  logs.value = []
-  message.info('本地日志已清空')
+const clearLogs = async () => {
+  try {
+    await fetch('/api/logs', { method: 'DELETE' })
+    logs.value = []
+    message.success('日志已清空（包括历史记录）')
+  } catch (e) {
+    message.error('清空失败')
+  }
+}
+
+const exportLogs = () => {
+  const text = logs.value.map(l => `[${l.time}] [${l.type}] [${l.section}] ${l.content}`).join('\n')
+  const blob = new Blob([text], { type: 'text/plain' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `lingshu-logs-${new Date().toISOString().slice(0,10)}.txt`
+  a.click()
+  URL.revokeObjectURL(url)
+  message.success('日志已导出')
 }
 
 const filteredLogs = computed(() => {
   let result = logs.value
+  
+  if (activeFilters.value.size > 0) {
+    result = result.filter(l => activeFilters.value.has(l.section))
+  }
+  
   if (searchQuery.value) {
     const q = searchQuery.value.toLowerCase()
     result = result.filter(l => 
       l.content.toLowerCase().includes(q) || 
-      (l.section && l.section.toLowerCase().includes(q))
+      l.section.toLowerCase().includes(q) ||
+      l.type.toLowerCase().includes(q)
     )
   }
-  if (filterSection.value) {
-    result = result.filter(l => l.section === filterSection.value)
-  }
+  
   return result
 })
 
-const getLogType = (type: string) => {
-  switch (type?.toLowerCase()) {
-    case 'error': return 'error'
-    case 'warn': return 'warning'
-    case 'debug': return 'info'
-    case 'trace': return 'default'
-    default: return 'info'
-  }
-}
-
-const getSectionIcon = (section: string) => {
-  switch (section?.toUpperCase()) {
-    case 'CHAT': return Activity
-    case 'LLM': return Cpu
-    case 'MEMORY': return Zap
-    case 'FACT': return Database
-    default: return FileText
+const getTypeClass = (type: string) => {
+  switch (type) {
+    case 'ERROR': return 'log-error'
+    case 'WARN': return 'log-warn'
+    case 'SUCCESS': return 'log-success'
+    case 'DEBUG': return 'log-debug'
+    default: return 'log-info'
   }
 }
 
@@ -94,400 +147,274 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="system-log-view">
-    <!-- Header -->
-    <header class="view-header">
-      <div class="header-title">
-        <div class="title-icon">
-          <FileText :size="20" />
-        </div>
-        <div class="title-text">
-          <h2>系统日志</h2>
-          <span class="subtitle">实时同步后端 LLM 调用链与认知脉冲</span>
-        </div>
+  <div class="console-view">
+    <header class="console-header">
+      <div class="header-left">
+        <span class="console-title">系统日志控制台</span>
+        <span class="console-status">
+          <span class="status-dot"></span>
+          SSE 已连接
+        </span>
       </div>
       
       <div class="header-actions">
         <n-input 
           v-model:value="searchQuery" 
-          placeholder="搜索日志内容..." 
+          placeholder="搜索日志内容/类型..." 
           clearable 
+          size="small"
           class="search-input"
         >
           <template #prefix>
-            <n-icon><Search /></n-icon>
+            <Search :size="14" />
           </template>
         </n-input>
         
-        <n-button secondary @click="clearLogs">
-          <template #icon><n-icon><Trash2 /></n-icon></template>
+        <n-button size="small" secondary @click="clearLogs">
+          <template #icon><Trash2 :size="14" /></template>
           清空
         </n-button>
         
-        <n-button type="primary">
-          <template #icon><n-icon><Download /></n-icon></template>
+        <n-button size="small" type="primary" @click="exportLogs">
+          <template #icon><Download :size="14" /></template>
           导出
         </n-button>
       </div>
     </header>
+    
+    <div class="filter-bar">
+      <span class="filter-label">筛选:</span>
+      <n-tag 
+        v-for="opt in SECTION_OPTIONS" 
+        :key="opt.key"
+        :checked="activeFilters.has(opt.key)"
+        checkable
+        :color="{ color: activeFilters.has(opt.key) ? opt.color : 'transparent', textColor: activeFilters.has(opt.key) ? '#fff' : opt.color }"
+        @click="toggleFilter(opt.key)"
+        class="filter-tag"
+      >
+        {{ opt.label }}
+      </n-tag>
+      <n-tag v-if="activeFilters.size > 0" @click="activeFilters.clear()" class="clear-filter">
+        清除筛选
+      </n-tag>
+    </div>
 
-    <!-- Main Content -->
-    <main class="view-main">
-      <div class="log-container">
-        <div v-if="filteredLogs.length === 0" class="empty-state">
-          <n-empty description="暂无日志数据，等待系统脉冲..." />
-        </div>
-        
-        <n-scrollbar v-else class="log-scroll">
-          <div class="log-list">
-            <div 
-              v-for="(log, i) in filteredLogs" 
-              :key="i" 
-              class="log-item-card"
-              :class="log.type?.toLowerCase()"
-            >
-              <div class="log-meta">
-                <span class="log-time">{{ log.time }}</span>
-                <div class="log-tags">
-                  <n-tag 
-                    v-if="log.section" 
-                    :bordered="false" 
-                    size="small" 
-                    class="section-tag"
-                  >
-                    <template #icon>
-                      <n-icon :component="getSectionIcon(log.section)" />
-                    </template>
-                    {{ log.section }}
-                  </n-tag>
-                  <n-tag 
-                    :type="getLogType(log.type)" 
-                    :bordered="false" 
-                    size="small" 
-                    class="type-tag"
-                  >
-                    {{ log.type }}
-                  </n-tag>
-                </div>
-              </div>
-              <div class="log-content">
-                {{ log.content }}
-              </div>
-            </div>
+    <div class="console-body" ref="logContainer">
+      <div class="log-content">
+        <template v-for="(log, i) in filteredLogs" :key="i">
+          <div v-if="log.isUserMessage" class="log-separator user"></div>
+          <div 
+            class="log-line" 
+            :class="[
+              getTypeClass(log.type), 
+              { 'user-message': log.isUserMessage, 'fact-message': log.isFactComplete }
+            ]"
+          >
+            <span class="log-time">[{{ log.time }}]</span>
+            <span class="log-type">[{{ log.type }}]</span>
+            <span class="log-section">[{{ log.section }}]</span>
+            <span class="log-text">{{ log.content }}</span>
           </div>
-        </n-scrollbar>
+        </template>
       </div>
-
-      <!-- Sidebar / Filters -->
-      <aside class="log-sidebar">
-        <n-card :bordered="false" class="filter-card">
-          <div class="sidebar-section">
-            <h3 class="sidebar-label">统计概览</h3>
-            <div class="stats-grid">
-              <div class="stat-box">
-                <span class="stat-val">{{ logs.length }}</span>
-                <span class="stat-key">总日志</span>
-              </div>
-              <div class="stat-box">
-                <span class="stat-val text-error">{{ logs.filter(l => l.type === 'ERROR').length }}</span>
-                <span class="stat-key">异常</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="sidebar-divider"></div>
-
-          <div class="sidebar-section">
-            <h3 class="sidebar-label">模块过滤</h3>
-            <div class="filter-groups">
-              <div 
-                class="filter-item" 
-                :class="{ active: filterSection === null }"
-                @click="filterSection = null"
-              >
-                全部模块
-              </div>
-              <div 
-                v-for="s in ['CHAT', 'LLM', 'MEMORY', 'FACT']" 
-                :key="s"
-                class="filter-item"
-                :class="{ active: filterSection === s }"
-                @click="filterSection = s"
-              >
-                {{ s }}
-              </div>
-            </div>
-          </div>
-        </n-card>
-        
-        <div class="system-status-card">
-          <div class="status-header">
-             <div class="status-indicator online"></div>
-             <span>SSE 连接状态: 已就绪</span>
-          </div>
-          <div class="status-details">
-            后端服务器: http://localhost:8080/api/logs/stream
-          </div>
-        </div>
-      </aside>
-    </main>
+      <div v-if="logs.length === 0" class="empty-hint">
+        等待日志流...
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.system-log-view {
+.console-view {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 24px;
-  background: transparent;
-  color: var(--color-text);
+  background: var(--color-glass-bg);
+  backdrop-filter: blur(20px);
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--color-glass-border);
 }
 
-.view-header {
+.console-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
+  padding: 12px 16px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-outline);
   flex-shrink: 0;
 }
 
-.header-title {
+.header-left {
   display: flex;
   align-items: center;
   gap: 16px;
 }
 
-.title-icon {
-  width: 44px;
-  height: 44px;
-  background: var(--color-primary-dim);
-  border: 1px solid var(--color-primary);
-  border-radius: 12px;
+.console-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.console-status {
   display: flex;
   align-items: center;
-  justify-content: center;
-  color: var(--color-primary);
-  box-shadow: 0 0 15px rgba(168, 85, 247, 0.2);
-}
-
-.title-text h2 {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-
-.subtitle {
+  gap: 6px;
   font-size: 12px;
   color: var(--color-text-dim);
 }
 
+.status-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--color-success);
+  border-radius: 50%;
+  box-shadow: 0 0 6px var(--color-success);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 .header-actions {
   display: flex;
-  gap: 12px;
+  gap: 8px;
 }
 
 .search-input {
-  width: 280px;
+  width: 200px;
 }
 
-.view-main {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 1fr 280px;
-  gap: 24px;
-  min-height: 0;
-}
-
-.log-container {
-  background: var(--color-glass-bg);
-  backdrop-filter: blur(20px);
-  border: 1px solid var(--color-glass-border);
-  border-radius: 20px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.empty-state {
-  flex: 1;
+.filter-bar {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-outline);
+  flex-shrink: 0;
 }
 
-.log-scroll {
-  flex: 1;
-}
-
-.log-list {
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.log-item-card {
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 12px;
-  border-left: 3px solid var(--color-primary);
-  transition: all 0.2s;
-}
-
-.log-item-card:hover {
-  background: rgba(255, 255, 255, 0.05);
-  transform: translateX(4px);
-}
-
-.log-item-card.error { border-left-color: var(--color-error); }
-.log-item-card.warning { border-left-color: var(--color-warning); }
-.log-item-card.info { border-left-color: var(--color-primary); }
-
-.log-meta {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.log-time {
-  font-family: 'Fira Code', monospace;
-  font-size: 11px;
+.filter-label {
+  font-size: 12px;
   color: var(--color-text-dim);
 }
 
-.log-tags {
-  display: flex;
-  gap: 8px;
+.filter-tag {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.filter-tag:hover {
+  opacity: 0.8;
+}
+
+.clear-filter {
+  cursor: pointer;
+  color: var(--color-error);
+}
+
+.console-body {
+  flex: 1;
+  overflow: auto;
+  background: var(--color-background);
+  position: relative;
 }
 
 .log-content {
-  font-size: 13px;
-  line-height: 1.6;
-  color: rgba(255, 255, 255, 0.85);
+  padding: 16px;
+  font-family: 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.log-separator {
+  height: 1px;
+  margin: 12px 0;
+  opacity: 0.5;
+}
+
+.log-separator.user {
+  background: linear-gradient(90deg, transparent, var(--color-primary), transparent);
+}
+
+.log-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 0;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.log-line:hover {
+  background: var(--color-surface);
+}
+
+.log-line.user-message {
+  background: var(--color-primary-dim);
+  padding: 8px;
+  margin: 4px 0;
+  border-left: 3px solid var(--color-primary);
+}
+
+.log-time {
+  color: var(--color-text-dim);
+}
+
+.log-type {
+  font-weight: 600;
+}
+
+.log-section {
+  color: var(--color-accent);
+}
+
+.log-text {
+  color: var(--color-text);
+  flex: 1;
   word-break: break-all;
 }
 
-/* Sidebar Styling */
-.log-sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
+.log-error .log-type { color: var(--color-error); }
+.log-warn .log-type { color: var(--color-warning); }
+.log-success .log-type { color: var(--color-success); }
+.log-debug .log-type { color: var(--color-text-dim); }
+.log-info .log-type { color: var(--color-primary); }
 
-.filter-card :deep(.n-card__content) {
-  padding: 20px !important;
-}
+.log-error .log-text { color: var(--color-error); }
+.log-success .log-text { color: var(--color-success); }
+.log-fact-message .log-text { color: var(--color-success); }
 
-.filter-card {
-  background: var(--color-glass-bg) !important;
-  backdrop-filter: blur(20px);
-  border: 1px solid var(--color-glass-border) !important;
-  border-radius: 20px;
-}
-
-.sidebar-label {
-  font-size: 11px;
-  font-weight: 600;
+.empty-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   color: var(--color-text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  margin-bottom: 16px;
+  font-size: 14px;
 }
 
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-}
-
-.stat-box {
-  background: rgba(255, 255, 255, 0.03);
-  padding: 12px;
-  border-radius: 10px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.stat-val {
-  font-size: 18px;
-  font-weight: 700;
-  font-family: 'Fira Code', monospace;
-}
-
-.stat-key {
-  font-size: 10px;
-  color: var(--color-text-dim);
-}
-
-.sidebar-divider {
-  height: 1px;
-  background: var(--color-outline);
-  margin: 20px 0;
-}
-
-.filter-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.filter-item {
-  padding: 10px 12px;
-  border-radius: 8px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s;
-  color: var(--color-text-dim);
-}
-
-.filter-item:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--color-text);
-}
-
-.filter-item.active {
-  background: var(--color-primary-dim);
-  color: var(--color-primary);
-  font-weight: 600;
-}
-
-.system-status-card {
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid var(--color-outline);
-  border-radius: 16px;
-  padding: 16px;
-}
-
-.status-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-
-.status-indicator {
+.console-body::-webkit-scrollbar {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
 }
 
-.status-indicator.online {
-  background: #10b981;
-  box-shadow: 0 0 8px #10b981;
+.console-body::-webkit-scrollbar-track {
+  background: var(--color-background);
 }
 
-.status-details {
-  font-size: 9px;
-  font-family: 'Fira Code', monospace;
-  color: var(--color-text-dim);
-  word-break: break-all;
+.console-body::-webkit-scrollbar-thumb {
+  background: var(--color-outline);
+  border-radius: 4px;
 }
 
-.text-error { color: var(--color-error); }
+.console-body::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-dim);
+}
 </style>

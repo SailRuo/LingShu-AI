@@ -72,7 +72,7 @@ function handleSourceChange(newSource: string) {
   fetchModels()
 }
 
-watch(() => settings.value.baseUrl, (newVal, oldVal) => {
+watch(() => settings.value.baseUrl, (_newVal, oldVal) => {
   if (oldVal !== undefined) fetchModels()
 })
 

@@ -1,44 +1,6 @@
 import type { GlobalThemeOverrides } from 'naive-ui'
 import type { ThemeConfig } from '@/types'
-import { Moon, Sun, Sparkles, Leaf, Layers, Cpu } from 'lucide-vue-next'
-
-export const abyssDark: ThemeConfig = {
-  key: 'abyssDark',
-  label: '深渊黑',
-  icon: Moon,
-  isDark: true,
-  cssVars: {
-    '--color-background': '#09090b',
-    '--color-surface': 'rgba(24, 24, 27, 0.6)',
-    '--color-surface-elevated': 'rgba(39, 39, 42, 0.7)',
-    '--color-primary': '#34d399',
-    '--color-primary-dim': 'rgba(52, 211, 153, 0.15)',
-    '--color-accent': '#fbbf24',
-    '--color-text': '#fafafa',
-    '--color-text-dim': '#71717a',
-    '--color-text-inverse': '#09090b',
-    '--color-outline': 'rgba(255, 255, 255, 0.08)',
-    '--color-success': '#22c55e',
-    '--color-warning': '#f59e0b',
-    '--color-error': '#ef4444',
-    '--color-glass-bg': 'rgba(15, 15, 15, 0.75)',
-    '--color-glass-border': 'rgba(255, 255, 255, 0.06)',
-    '--color-bg-mesh-1': '#020617',
-    '--color-bg-mesh-2': '#09090b',
-    '--color-bg-mesh-3': '#064e3b',
-    '--color-bg-mesh-4': '#020617',
-    '--color-bubble-ai-bg': 'rgba(52, 211, 153, 0.06)',
-    '--color-bubble-ai-border': 'rgba(52, 211, 153, 0.12)',
-    '--color-bubble-user-bg': 'rgba(52, 211, 153, 0.1)',
-    '--color-bubble-user-border': 'rgba(52, 211, 153, 0.18)',
-    '--color-pulse-core': 'rgba(52, 211, 153, 0.25)',
-    '--color-pulse-ring': '#34d399',
-    '--color-node-user': '#34d399',
-    '--color-node-fact': '#fbbf24',
-    '--color-edge': 'rgba(52, 211, 153, 0.4)',
-    '--color-glow': 'rgba(52, 211, 153, 0.3)',
-  }
-}
+import { Sun, Sparkles, Cpu } from 'lucide-vue-next'
 
 export const polarLight: ThemeConfig = {
   key: 'polarLight',
@@ -116,82 +78,6 @@ export const cyberPurple: ThemeConfig = {
   }
 }
 
-export const cyberZenLight: ThemeConfig = {
-  key: 'cyberZenLight',
-  label: '明亮·赛博禅意',
-  icon: Leaf,
-  isDark: false,
-  cssVars: {
-    '--color-background': '#faf9f6',
-    '--color-surface': 'rgba(255, 255, 255, 0.7)',
-    '--color-surface-elevated': 'rgba(255, 255, 255, 0.9)',
-    '--color-primary': '#5b8a72',
-    '--color-primary-dim': 'rgba(91, 138, 114, 0.08)',
-    '--color-accent': '#d4a574',
-    '--color-text': '#2d3436',
-    '--color-text-dim': '#636e72',
-    '--color-text-inverse': '#faf9f6',
-    '--color-outline': 'rgba(0, 0, 0, 0.04)',
-    '--color-success': '#74b9a0',
-    '--color-warning': '#e6a23c',
-    '--color-error': '#c45656',
-    '--color-glass-bg': 'rgba(255, 255, 255, 0.6)',
-    '--color-glass-border': 'rgba(0, 0, 0, 0.03)',
-    '--color-bg-mesh-1': '#faf9f6',
-    '--color-bg-mesh-2': '#f5f3ef',
-    '--color-bg-mesh-3': '#e8f4f0',
-    '--color-bg-mesh-4': '#faf9f6',
-    '--color-bubble-ai-bg': 'rgba(91, 138, 114, 0.04)',
-    '--color-bubble-ai-border': 'rgba(91, 138, 114, 0.08)',
-    '--color-bubble-user-bg': 'rgba(91, 138, 114, 0.06)',
-    '--color-bubble-user-border': 'rgba(91, 138, 114, 0.12)',
-    '--color-pulse-core': 'rgba(91, 138, 114, 0.12)',
-    '--color-pulse-ring': '#5b8a72',
-    '--color-node-user': '#5b8a72',
-    '--color-node-fact': '#d4a574',
-    '--color-edge': 'rgba(91, 138, 114, 0.25)',
-    '--color-glow': 'rgba(91, 138, 114, 0.15)',
-  }
-}
-
-export const darkGlassmorphism: ThemeConfig = {
-  key: 'darkGlassmorphism',
-  label: '深色·毛玻璃',
-  icon: Layers,
-  isDark: true,
-  cssVars: {
-    '--color-background': '#0a0e14',
-    '--color-surface': 'rgba(20, 30, 45, 0.4)',
-    '--color-surface-elevated': 'rgba(30, 45, 65, 0.5)',
-    '--color-primary': '#64b5f6',
-    '--color-primary-dim': 'rgba(100, 181, 246, 0.12)',
-    '--color-accent': '#ff8a65',
-    '--color-text': '#e3f2fd',
-    '--color-text-dim': '#90a4ae',
-    '--color-text-inverse': '#0a0e14',
-    '--color-outline': 'rgba(100, 181, 246, 0.15)',
-    '--color-success': '#81c784',
-    '--color-warning': '#ffb74d',
-    '--color-error': '#e57373',
-    '--color-glass-bg': 'rgba(15, 25, 40, 0.65)',
-    '--color-glass-border': 'rgba(100, 181, 246, 0.12)',
-    '--color-bg-mesh-1': '#0a0e14',
-    '--color-bg-mesh-2': '#0d1b2a',
-    '--color-bg-mesh-3': '#1b3a5f',
-    '--color-bg-mesh-4': '#0a0e14',
-    '--color-bubble-ai-bg': 'rgba(100, 181, 246, 0.05)',
-    '--color-bubble-ai-border': 'rgba(100, 181, 246, 0.1)',
-    '--color-bubble-user-bg': 'rgba(100, 181, 246, 0.08)',
-    '--color-bubble-user-border': 'rgba(100, 181, 246, 0.15)',
-    '--color-pulse-core': 'rgba(100, 181, 246, 0.18)',
-    '--color-pulse-ring': '#64b5f6',
-    '--color-node-user': '#64b5f6',
-    '--color-node-fact': '#ff8a65',
-    '--color-edge': 'rgba(100, 181, 246, 0.35)',
-    '--color-glow': 'rgba(100, 181, 246, 0.25)',
-  }
-}
-
 export const deepTechFuturistic: ThemeConfig = {
   key: 'deepTechFuturistic',
   label: '深色·科技感',
@@ -231,11 +117,8 @@ export const deepTechFuturistic: ThemeConfig = {
 }
 
 export const THEMES: Record<string, ThemeConfig> = { 
-  abyssDark, 
   polarLight, 
   cyberPurple,
-  cyberZenLight,
-  darkGlassmorphism,
   deepTechFuturistic
 }
 
@@ -249,12 +132,14 @@ export function buildNaiveOverrides(theme: ThemeConfig): GlobalThemeOverrides {
       primaryColorSuppl: t['--color-primary'],
       bodyColor: t['--color-background'],
       cardColor: t['--color-surface'],
-      modalColor: t['--color-glass-bg'],
+      modalColor: t['--color-surface-elevated'],
       popoverColor: t['--color-glass-bg'],
       textColor1: t['--color-text'],
       textColor2: t['--color-text-dim'],
       fontFamily: "'Inter', 'Plus Jakarta Sans', system-ui, sans-serif",
       fontFamilyMono: "'Fira Code', 'JetBrains Mono', monospace",
+      borderRadius: '12px',
+      borderRadiusSmall: '8px',
     },
     Layout: {
       color: 'transparent',
@@ -269,6 +154,7 @@ export function buildNaiveOverrides(theme: ThemeConfig): GlobalThemeOverrides {
       itemIconColorActive: t['--color-primary'],
       itemIconColorHover: t['--color-primary'],
       fontSize: '14px',
+      borderRadius: '10px',
     },
     Input: {
       borderRadius: '12px',
@@ -279,14 +165,32 @@ export function buildNaiveOverrides(theme: ThemeConfig): GlobalThemeOverrides {
     Button: {
       borderRadiusMedium: '10px',
       borderRadiusSmall: '8px',
+      borderRadiusLarge: '12px',
     },
     Card: {
       borderRadius: '16px',
       color: t['--color-surface'],
     },
+    Modal: {
+      borderRadius: '16px',
+      color: t['--color-surface-elevated'],
+    },
+    Tabs: {
+      tabBorderRadius: '10px',
+    },
+    Tag: {
+      borderRadius: '8px',
+    },
+    Select: {
+      borderRadius: '12px',
+    },
     Dropdown: {
       color: t['--color-glass-bg'],
       dividerColor: t['--color-outline'],
+      borderRadius: '12px',
+    },
+    Popconfirm: {
+      borderRadius: '12px',
     }
   }
 }

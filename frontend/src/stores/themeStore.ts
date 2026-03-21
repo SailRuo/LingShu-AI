@@ -1,12 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
-import { THEMES, abyssDark, buildNaiveOverrides } from '@/theme/themes'
+import { THEMES, cyberPurple, buildNaiveOverrides } from '@/theme/themes'
 import type { ThemeConfig, ThemeKey } from '@/types'
 
 const STORAGE_KEY = 'lingshu-theme'
 
 export const useThemeStore = defineStore('theme', () => {
-  const current = ref<ThemeConfig>(abyssDark)
+  const current = ref<ThemeConfig>(cyberPurple)
   const availableThemes = Object.values(THEMES)
 
   const naiveOverrides = computed(() => buildNaiveOverrides(current.value))
@@ -35,7 +35,6 @@ export const useThemeStore = defineStore('theme', () => {
     }
   }
 
-  // 初始化主题
   function initTheme() {
     const saved = localStorage.getItem(STORAGE_KEY) as ThemeKey | null
     if (saved && THEMES[saved]) {
@@ -44,7 +43,6 @@ export const useThemeStore = defineStore('theme', () => {
     applyCSS(current.value)
   }
 
-  // 监听主题变化
   watch(current, (theme) => {
     localStorage.setItem(STORAGE_KEY, theme.key)
     applyCSS(theme)

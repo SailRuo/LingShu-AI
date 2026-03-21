@@ -23,6 +23,7 @@ public class LocalTools {
     }
 
     @Tool("Executes a terminal command and returns the output")
+    @SuppressWarnings("deprecation")
     public String executeCommand(String command) {
         log.info("Executing tool: executeCommand with command: {}", command);
         try {

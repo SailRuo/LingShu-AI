@@ -1,14 +1,44 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { NScrollbar } from 'naive-ui'
 import { useChat } from '@/composables/useChat'
-import ChatMessage from '@/components/chat/ChatMessage.vue'
+import { useWebSocket, type WebSocketMessage } from '@/composables/useWebSocket'
+import { useSettings } from '@/stores/settingsStore'
+import ChatMessageComponent from '@/components/chat/ChatMessage.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
-import { Sparkles } from 'lucide-vue-next'
+import type { ChatMessage } from '@/types'
+import { Sparkles, Loader2, Wifi, WifiOff } from 'lucide-vue-next'
 
-const { messages, inputMessage, isTyping, welcomeGreeting, initWelcome, sendMessage, formatTime } = useChat()
+const {
+  messages,
+  inputMessage,
+  isTyping,
+  welcomeGreeting,
+  isLoadingHistory,
+  hasMoreHistory,
+  initWelcome,
+  initChat,
+  loadHistory,
+  formatTime
+} = useChat()
 
-const scrollRef = ref<any>(null)
+const {
+  isConnected,
+  connect,
+  disconnect,
+  sendChat,
+  on,
+  off,
+  startHeartbeat
+} = useWebSocket()
+
+const { settings, fetchSettings } = useSettings()
+
+const scrollRef = ref<InstanceType<typeof NScrollbar> | null>(null)
+const isLoadingMore = ref(false)
+const prevScrollHeight = ref(0)
+const currentAssistantMessage = ref('')
+let stopHeartbeat: (() => void) | null = null
 
 function scrollToBottom() {
   nextTick(() => {
@@ -17,7 +47,23 @@ function scrollToBottom() {
 }
 
 function handleSend() {
-  sendMessage(scrollToBottom)
+  const text = inputMessage.value.trim()
+  if (!text || isTyping.value) return
+
+  messages.value.push({ role: 'user', content: text, timestamp: Date.now() })
+  inputMessage.value = ''
+  isTyping.value = true
+  scrollToBottom()
+
+  const assistantMessage: ChatMessage = {
+    role: 'assistant',
+    content: '',
+    timestamp: Date.now()
+  }
+  messages.value.push(assistantMessage)
+  currentAssistantMessage.value = ''
+
+  sendChat(text, undefined, settings.value.model, settings.value.apiKey, settings.value.baseUrl)
 }
 
 function handleQuickAction(text: string) {
@@ -25,23 +71,116 @@ function handleQuickAction(text: string) {
   handleSend()
 }
 
-onMounted(() => {
+async function handleScroll(e: Event) {
+  const target = e.target as HTMLElement
+  if (target.scrollTop < 50 && hasMoreHistory.value && !isLoadingMore.value) {
+    isLoadingMore.value = true
+    prevScrollHeight.value = target.scrollHeight
+
+    const loaded = await loadHistory(20)
+
+    if (loaded) {
+      nextTick(() => {
+        const newScrollHeight = target.scrollHeight
+        target.scrollTop = newScrollHeight - prevScrollHeight.value
+      })
+    }
+
+    isLoadingMore.value = false
+  }
+}
+
+function handleWebSocketMessage(message: WebSocketMessage) {
+  switch (message.type) {
+    case 'chatStart':
+      isTyping.value = true
+      currentAssistantMessage.value = ''
+      break
+      
+    case 'chatChunk':
+      currentAssistantMessage.value += message.content || ''
+      const lastMsg = messages.value[messages.value.length - 1]
+      if (lastMsg && lastMsg.role === 'assistant') {
+        lastMsg.content = currentAssistantMessage.value
+      }
+      scrollToBottom()
+      break
+      
+    case 'chatEnd':
+      isTyping.value = false
+      currentAssistantMessage.value = ''
+      break
+      
+    case 'error':
+      isTyping.value = false
+      const errorMsg = messages.value[messages.value.length - 1]
+      if (errorMsg && errorMsg.role === 'assistant') {
+        errorMsg.content = '⚠️ ' + (message.message || '发生错误')
+      }
+      break
+      
+    case 'proactiveGreeting':
+      if (message.content) {
+        messages.value.push({ 
+          role: 'assistant', 
+          content: message.content, 
+          timestamp: Date.now() 
+        })
+        scrollToBottom()
+      }
+      break
+      
+    case 'userState':
+      console.log('用户状态更新:', message)
+      break
+  }
+}
+
+onMounted(async () => {
+  await initChat()
   initWelcome()
+  await fetchSettings()
+
+  connect()
+
+  on('*', handleWebSocketMessage)
+
+  stopHeartbeat = startHeartbeat(30000)
+
+  nextTick(() => {
+    scrollToBottom()
+  })
+})
+
+onUnmounted(() => {
+  disconnect()
+  off('*', handleWebSocketMessage)
+  if (stopHeartbeat) {
+    stopHeartbeat()
+  }
 })
 </script>
 
 <template>
   <div class="chat-view">
+    <!-- Connection Status -->
+    <div class="connection-status" :class="{ connected: isConnected, disconnected: !isConnected }">
+      <Wifi v-if="isConnected" :size="14" />
+      <WifiOff v-else :size="14" />
+      <span>{{ isConnected ? '已连接' : '未连接' }}</span>
+    </div>
+
     <!-- Welcome Section -->
     <div class="welcome-section" v-if="messages.length === 0">
       <div class="welcome-content">
         <div class="soul-orb" :class="{ thinking: isTyping }">
-          <div class="orb-core"></div>
-          <div class="orb-ring"></div>
           <div class="orb-glow"></div>
+          <div class="orb-ring"></div>
+          <div class="orb-core"></div>
         </div>
-        <h1 class="welcome-title">{{ welcomeGreeting || '欢迎回来' }}</h1>
-        <p class="welcome-subtitle">开始与灵枢对话，探索你的数字伴侣</p>
+        
+        <h1 class="welcome-title">{{ welcomeGreeting }}</h1>
+        <p class="welcome-subtitle">与灵枢建立深度连接，探索内心世界</p>
         
         <div class="quick-actions">
           <button class="quick-btn" @click="handleQuickAction('今天心情如何？')">
@@ -61,9 +200,24 @@ onMounted(() => {
     </div>
 
     <!-- Messages Area -->
-    <n-scrollbar ref="scrollRef" class="messages-area" v-if="messages.length > 0">
+    <n-scrollbar ref="scrollRef" class="messages-area" v-if="messages.length > 0" @scroll="handleScroll">
       <div class="messages-content">
-        <ChatMessage
+        <!-- Load More Indicator -->
+        <div class="load-more-indicator" v-if="hasMoreHistory">
+          <button 
+            class="load-more-btn" 
+            @click="loadHistory(20)" 
+            :disabled="isLoadingHistory"
+          >
+            <Loader2 v-if="isLoadingHistory" :size="16" class="spin" />
+            <span v-else>向上滚动加载更多</span>
+          </button>
+        </div>
+        <div class="no-more-indicator" v-else-if="messages.length > 0 && !hasMoreHistory">
+          <span>— 没有更多历史消息 —</span>
+        </div>
+        
+        <ChatMessageComponent
           v-for="(msg, i) in messages"
           :key="i"
           :message="msg"
@@ -85,6 +239,7 @@ onMounted(() => {
     <ChatInput
       v-model="inputMessage"
       :loading="isTyping"
+      :disabled="!isConnected"
       @send="handleSend"
     />
   </div>
@@ -97,6 +252,33 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   background: transparent;
+}
+
+/* Connection Status */
+.connection-status {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  z-index: 100;
+  transition: all 0.3s ease;
+}
+
+.connection-status.connected {
+  background: rgba(52, 211, 153, 0.15);
+  color: var(--color-primary);
+  border: 1px solid rgba(52, 211, 153, 0.3);
+}
+
+.connection-status.disconnected {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
 /* Welcome Section */
@@ -238,6 +420,53 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 24px;
+}
+
+/* Load More Indicator */
+.load-more-indicator {
+  text-align: center;
+  padding: 16px 0;
+}
+
+.load-more-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px dashed var(--color-outline);
+  border-radius: 20px;
+  color: var(--color-text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.load-more-btn:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.load-more-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.no-more-indicator {
+  text-align: center;
+  padding: 16px 0;
+  color: var(--color-text-dim);
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* Typing Indicator */

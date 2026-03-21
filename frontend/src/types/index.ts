@@ -6,7 +6,7 @@ export interface ChatMessage {
   timestamp: number
 }
 
-export type ThemeKey = 'abyssDark' | 'polarLight' | 'cyberPurple' | 'cyberZenLight' | 'darkGlassmorphism' | 'deepTechFuturistic'
+export type ThemeKey = 'polarLight' | 'cyberPurple' | 'deepTechFuturistic'
 
 export interface ThemeCSSVars {
   '--color-background': string

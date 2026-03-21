@@ -8,7 +8,6 @@ import com.lingshu.ai.infrastructure.repository.UserRepository;
 import com.lingshu.ai.infrastructure.repository.FactRepository;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.service.AiServices;
-import dev.langchain4j.store.embedding.filter.Filter;
 import dev.langchain4j.store.embedding.filter.MetadataFilterBuilder;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -21,6 +20,17 @@ import java.util.List;
 @Slf4j
 @Service
 public class MemoryServiceImpl implements MemoryService {
+
+    private static final double GAIN_THRESHOLD = 0.3;
+    private static final java.util.Set<String> STOP_WORDS = java.util.Set.of(
+        "的", "了", "是", "在", "我", "你", "他", "她", "它", "们",
+        "这", "那", "有", "和", "与", "或", "但", "如果", "因为",
+        "所以", "但是", "然后", "就", "都", "也", "还", "又", "很",
+        "什么", "怎么", "为什么", "哪", "谁", "几", "多少", "怎样",
+        "吗", "呢", "吧", "啊", "呀", "哦", "嗯", "哈", "嘿",
+        "一个", "一些", "这个", "那个", "不是", "没有", "可以", "会",
+        "能", "要", "想", "去", "来", "说", "看", "做", "给", "让"
+    );
 
     private final UserRepository userRepository;
     private final ChatLanguageModel model;
@@ -54,19 +64,33 @@ public class MemoryServiceImpl implements MemoryService {
     public void extractFacts(String userId, String message) {
         log.debug("Memory pulse: Analyzing input for cognitive facts: {}", message);
         systemLogService.info("记忆脉冲: 启动认知事实分析...", "MEMORY");
+        systemLogService.startTimer("fact_extraction");
         
-        // 1. 获取当前用户及所有已知事实作为背景
+        systemLogService.dbStart("neo4j_query", "User", "MEMORY");
         UserNode user = userRepository.findByName(userId).orElse(null);
+        systemLogService.dbEnd("neo4j_query", "MEMORY");
+        
         StringBuilder currentFactsBuilder = new StringBuilder();
         if (user != null && user.getFacts() != null) {
+            systemLogService.debug("用户已有 " + user.getFacts().size() + " 条记忆事实", "MEMORY");
             user.getFacts().forEach(f -> 
                 currentFactsBuilder.append(String.format("[%d] %s; ", f.getId(), f.getContent()))
             );
+        } else {
+            systemLogService.debug("用户无历史记忆，首次认知分析", "MEMORY");
         }
 
-        // 2. 调用 AI 分析新事实与冲突
-        systemLogService.debug("正在调用 LLM 进行事实提取与冲突检测...", "FACT");
-        com.lingshu.ai.core.dto.MemoryUpdate report = factExtractor.analyze(message, currentFactsBuilder.toString());
+        systemLogService.info("正在调用 LLM 进行事实提取与冲突检测...", "FACT");
+        systemLogService.llmStart("fact-extractor", "ollama", "FACT");
+        
+        com.lingshu.ai.core.dto.MemoryUpdate report;
+        try {
+            report = factExtractor.analyze(message, currentFactsBuilder.toString());
+            systemLogService.llmEnd(0, "FACT");
+        } catch (Exception e) {
+            systemLogService.llmError(e.getMessage(), "FACT");
+            return;
+        }
         
         if (report == null) {
             log.debug("Memory pulse: No cognitive updates required for this message.");
@@ -82,18 +106,17 @@ public class MemoryServiceImpl implements MemoryService {
                 report.getNewFacts() != null ? report.getNewFacts().size() : 0,
                 report.getDeletedFactIds() != null ? report.getDeletedFactIds().size() : 0), "FACT");
 
-        // 3. 处理过期/错误的记忆 (删除)
         if (report.getDeletedFactIds() != null && !report.getDeletedFactIds().isEmpty()) {
             for (Long id : report.getDeletedFactIds()) {
                 log.info("Memory corrected: Removing fact ID {}", id);
                 systemLogService.info("记忆修正: 移除过时事实 ID " + id, "MEMORY");
-                this.deleteFact(id); // 同时清理 Neo4j 和 pgvector
+                this.deleteFact(id);
             }
         }
 
-        // 4. 处理新提取的记忆
         if (report.getNewFacts() != null && !report.getNewFacts().isEmpty()) {
             if (user == null) {
+                systemLogService.info("创建新用户节点: " + userId, "MEMORY");
                 user = UserNode.builder()
                         .name(userId)
                         .firstEncounter(LocalDateTime.now())
@@ -101,7 +124,6 @@ public class MemoryServiceImpl implements MemoryService {
             }
 
             for (String fact : report.getNewFacts()) {
-                // Defensive check: filter out "[]" or empty/blank facts
                 if (fact == null || fact.trim().isEmpty() || fact.equals("[]")) {
                     log.debug("Memory pulse: Skipping invalid or empty fact candidate.");
                     continue;
@@ -110,7 +132,6 @@ public class MemoryServiceImpl implements MemoryService {
                 log.info("Aha! New persistent fact: {}", fact);
                 systemLogService.info("持久化新事实: " + (fact.length() > 30 ? fact.substring(0, 30) + "..." : fact), "MEMORY");
                 
-                // 1. Save to Neo4j first to get the ID
                 FactNode factNode = FactNode.builder()
                         .content(fact)
                         .category("Memory")
@@ -118,69 +139,164 @@ public class MemoryServiceImpl implements MemoryService {
                         .importance(0.8)
                         .build();
                 
-                // We need to save the user to get the relationship persisted and IDs generated
+                systemLogService.dbStart("neo4j_save", "FactNode", "MEMORY");
                 user.addFact(factNode);
                 user = userRepository.save(user);
+                systemLogService.dbEnd("neo4j_save", "MEMORY");
                 
-                // Find the just-added fact node to get its ID
                 FactNode savedFact = user.getFacts().stream()
                         .filter(f -> f.getContent().equals(fact))
                         .findFirst()
                         .orElse(factNode);
 
-                // 2. Save to pgvector with the Neo4j ID as metadata
                 java.util.Map<String, String> metadata = new java.util.HashMap<>();
                 if (savedFact.getId() != null) {
                     metadata.put("fact_id", savedFact.getId().toString());
                 }
                 
                 dev.langchain4j.data.segment.TextSegment segment = dev.langchain4j.data.segment.TextSegment.from(fact, new dev.langchain4j.data.document.Metadata(metadata));
-                dev.langchain4j.data.embedding.Embedding embedding = embeddingModel.embed(segment).content();
-                embeddingStore.add(embedding, segment);
+                
+                systemLogService.embeddingStart(fact.length(), "MEMORY");
+                try {
+                    dev.langchain4j.data.embedding.Embedding embedding = embeddingModel.embed(segment).content();
+                    embeddingStore.add(embedding, segment);
+                    systemLogService.embeddingEnd("MEMORY");
+                } catch (Exception e) {
+                    systemLogService.error("Embedding向量化失败: " + e.getMessage(), "MEMORY");
+                }
             }
             
             user.setLastSeen(LocalDateTime.now());
+            systemLogService.dbStart("neo4j_update", "User.lastSeen", "MEMORY");
             userRepository.save(user);
+            systemLogService.dbEnd("neo4j_update", "MEMORY");
         }
+        
+        systemLogService.endTimer("fact_extraction", "记忆脉冲处理完成", "MEMORY");
     }
 
     @Override
     public String retrieveContext(String userId, String message) {
         StringBuilder contextBuilder = new StringBuilder();
 
-        // 1. Graph Retrieval (Neo4j)
+        systemLogService.dbStart("neo4j_query", "User.facts", "MEMORY");
         userRepository.findByName(userId).ifPresent(user -> {
             log.debug("Graph Retrieval: Found {} facts for user {}", user.getFacts() != null ? user.getFacts().size() : 0, userId);
+            int factCount = user.getFacts() != null ? user.getFacts().size() : 0;
+            systemLogService.debug("图谱检索: 用户 " + userId + " 有 " + factCount + " 条事实", "MEMORY");
             contextBuilder.append("Known facts from your profile: ");
             user.getFacts().forEach(f -> contextBuilder.append(f.getContent()).append("; "));
             contextBuilder.append("\n");
         });
+        systemLogService.dbEnd("neo4j_query", "MEMORY");
 
-        // 2. Semantic Retrieval (pgvector)
+        if (!needsSemanticRetrieval(message)) {
+            return contextBuilder.toString();
+        }
+
         log.debug("Semantic Retrieval: Querying vector store for: {}", message);
-        systemLogService.debug("语义检索: 正在向量库中搜寻相关片段...", "MEMORY");
+        systemLogService.embeddingStart(message.length(), "MEMORY");
         dev.langchain4j.data.embedding.Embedding queryEmbedding = embeddingModel.embed(message).content();
+        systemLogService.embeddingEnd("MEMORY");
+        
+        systemLogService.dbStart("pgvector_query", "embeddingStore", "MEMORY");
+        @SuppressWarnings("deprecation")
         List<dev.langchain4j.store.embedding.EmbeddingMatch<dev.langchain4j.data.segment.TextSegment>> matches = 
                 embeddingStore.findRelevant(queryEmbedding, 5, 0.6);
+        systemLogService.dbEnd("pgvector_query", "MEMORY");
         
         if (!matches.isEmpty()) {
             log.debug("Semantic Retrieval: Found {} relevant segments", matches.size());
-            systemLogService.info("语义检索完成，匹配到 " + matches.size() + " 个相关记忆片段。", "MEMORY");
+            systemLogService.info("语义检索完成，匹配到 " + matches.size() + " 个相关记忆片段:", "MEMORY");
             contextBuilder.append("Related memories found: ");
-            matches.forEach(match -> {
-                log.trace("Match text: {} (score: {})", match.embedded().text(), match.score());
-                contextBuilder.append(match.embedded().text()).append(" (relevant); ");
-            });
+            for (int i = 0; i < matches.size(); i++) {
+                var match = matches.get(i);
+                String matchText = match.embedded().text();
+                double score = match.score();
+                log.trace("Match text: {} (score: {})", matchText, score);
+                contextBuilder.append(matchText).append(" (relevant); ");
+                String displayText = matchText.length() > 40 ? matchText.substring(0, 40) + "..." : matchText;
+                systemLogService.info(String.format("  [%d] 相似度: %.3f | 内容: %s", i + 1, score, displayText), "MEMORY");
+            }
         } else {
             log.debug("Semantic Retrieval: No relevant segments above threshold.");
+            systemLogService.debug("语义检索: 未找到相关度超过阈值(0.6)的内容", "MEMORY");
         }
 
         return contextBuilder.toString();
     }
 
+    private boolean needsSemanticRetrieval(String message) {
+        if (message == null || message.trim().isEmpty()) {
+            return false;
+        }
+        
+        List<String> entities = extractEntities(message);
+        if (entities.isEmpty()) {
+            systemLogService.debug("GAM-RAG: 未提取到实体，增益=0，跳过语义检索", "MEMORY");
+            return false;
+        }
+        
+        systemLogService.dbStart("neo4j_query", "Fact.activation", "MEMORY");
+        List<FactNode> activatedFacts = factRepository.findFactsByKeywords(entities);
+        systemLogService.dbEnd("neo4j_query", "MEMORY");
+        
+        if (activatedFacts.isEmpty()) {
+            systemLogService.debug("GAM-RAG: 实体未激活任何记忆路径，增益=0，跳过语义检索", "MEMORY");
+            return false;
+        }
+        
+        double gain = calculateGain(entities, activatedFacts);
+        systemLogService.info(String.format("GAM-RAG: 激活 %d 个实体，命中 %d 条事实，增益=%.2f", 
+            entities.size(), activatedFacts.size(), gain), "MEMORY");
+        
+        return gain >= GAIN_THRESHOLD;
+    }
+    
+    private List<String> extractEntities(String message) {
+        List<String> entities = new java.util.ArrayList<>();
+        String[] words = message.replaceAll("[\\p{Punct}\\s+]", " ").split("\\s+");
+        
+        for (String word : words) {
+            if (word.length() >= 2 && !STOP_WORDS.contains(word.toLowerCase())) {
+                entities.add(word);
+            }
+        }
+        
+        return entities.stream().distinct().limit(10).collect(java.util.stream.Collectors.toList());
+    }
+    
+    private double calculateGain(List<String> entities, List<FactNode> activatedFacts) {
+        if (entities.isEmpty() || activatedFacts.isEmpty()) {
+            return 0.0;
+        }
+        
+        int totalMatches = 0;
+        double totalImportance = 0.0;
+        
+        for (FactNode fact : activatedFacts) {
+            String content = fact.getContent().toLowerCase();
+            for (String entity : entities) {
+                if (content.contains(entity.toLowerCase())) {
+                    totalMatches++;
+                    totalImportance += fact.getImportance();
+                    break;
+                }
+            }
+        }
+        
+        double entityRatio = (double) totalMatches / entities.size();
+        double avgImportance = totalImportance / activatedFacts.size();
+        
+        return entityRatio * 0.6 + avgImportance * 0.4;
+    }
+
     @Override
     public Object getGraphData(String userId) {
         log.info("Fetching graph data for visualization...");
+        systemLogService.info("获取图谱可视化数据...", "MEMORY");
+        systemLogService.startTimer("graph_data");
+        
         java.util.Map<String, Object> graph = new java.util.HashMap<>();
         java.util.List<java.util.Map<String, Object>> nodes = new java.util.ArrayList<>();
         java.util.List<java.util.Map<String, Object>> links = new java.util.ArrayList<>();
@@ -210,29 +326,36 @@ public class MemoryServiceImpl implements MemoryService {
 
         graph.put("nodes", nodes);
         graph.put("links", links);
+        
+        systemLogService.endTimer("graph_data", "图谱数据获取完成", "MEMORY");
+        systemLogService.info("图谱包含 " + nodes.size() + " 个节点, " + links.size() + " 条边", "MEMORY");
+        
         return graph;
     }
 
     @Override
     public void deleteFact(Long factId) {
         log.info("Cognitive cleanup: Removing fact node #{}", factId);
+        systemLogService.info("认知清理: 删除事实节点 #" + factId, "MEMORY");
         
-        // 1. Delete from Neo4j (SDN automatically handles relationship detachment)
+        systemLogService.dbStart("neo4j_delete", "FactNode#" + factId, "MEMORY");
         try {
             factRepository.deleteById(factId);
             log.debug("Neo4j node removal successful: {}", factId);
+            systemLogService.dbEnd("neo4j_delete", "MEMORY");
         } catch (Exception e) {
             log.error("Neo4j cleanup failed for factId {}: {}", factId, e.getMessage());
-            // Optional: Fallback to manual detach delete if SDN fails
+            systemLogService.error("Neo4j删除失败: " + e.getMessage(), "MEMORY");
         }
         
-        // 2. Delete from pgvector (memory_segments table)
+        systemLogService.dbStart("pgvector_delete", "fact_id=" + factId, "MEMORY");
         try {
-            // matches metadata fact_id set in extractFacts (line 118)
             embeddingStore.removeAll(MetadataFilterBuilder.metadataKey("fact_id").isEqualTo(factId.toString()));
             log.debug("Vector store cleanup successful for factId: {}", factId);
+            systemLogService.dbEnd("pgvector_delete", "MEMORY");
         } catch (Exception e) {
             log.warn("Semantic cleanup skipped or failed for factId {}: Vector store may not support automated removal", factId);
+            systemLogService.warn("向量库清理失败: " + e.getMessage(), "MEMORY");
         }
     }
 }

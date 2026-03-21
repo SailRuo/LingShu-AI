@@ -21,4 +21,12 @@ public class SystemSetting {
     private String baseUrl;
     
     private String apiKey;
+    
+    private Boolean proactiveEnabled;
+    
+    private Integer inactiveThresholdMinutes;
+    
+    private Integer greetingCooldownSeconds;
+    
+    private Long inactiveCheckIntervalMs;
 }
