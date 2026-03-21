@@ -12,6 +12,7 @@ import dev.langchain4j.store.embedding.filter.Filter;
 import dev.langchain4j.store.embedding.filter.MetadataFilterBuilder;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -45,6 +46,7 @@ public class MemoryServiceImpl implements MemoryService {
         this.factExtractor = AiServices.create(FactExtractor.class, model);
     }
 
+    @Async("taskExecutor")
     @Override
     public void extractFacts(String userId, String message) {
         log.debug("Memory pulse: Analyzing input for cognitive facts: {}", message);

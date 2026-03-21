@@ -109,7 +109,7 @@ public class ChatServiceImpl implements ChatService {
                 .createdAt(java.time.LocalDateTime.now())
                 .build());
         
-        new Thread(() -> memoryService.extractFacts("User", message)).start();
+        memoryService.extractFacts("User", message);
         
         return response;
     }
@@ -218,7 +218,7 @@ public class ChatServiceImpl implements ChatService {
                             .build());
 
                     sink.tryEmitComplete();
-                    new Thread(() -> memoryService.extractFacts("User", message)).start();
+                    memoryService.extractFacts("User", message);
                 })
                 .onError(error -> {
                     sink.tryEmitError(error);

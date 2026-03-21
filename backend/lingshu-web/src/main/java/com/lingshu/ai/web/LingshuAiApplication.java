@@ -13,5 +13,8 @@ import org.springframework.data.neo4j.repository.config.EnableNeo4jRepositories;
 public class LingshuAiApplication {
     public static void main(String[] args) {
         SpringApplication.run(LingshuAiApplication.class, args);
+        // 打印启动完成日志
+        System.out.println("LingShu AI Application started successfully!");
+        System.out.println("http://localhost:8080");
     }
 }
