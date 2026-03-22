@@ -3,14 +3,14 @@ package com.lingshu.ai.core.service.impl;
 import com.lingshu.ai.core.dto.EmotionAnalysis;
 import com.lingshu.ai.core.service.ChatService;
 import com.lingshu.ai.infrastructure.entity.AgentConfig;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
-@Slf4j
 @Service
 public class ChatServiceImpl implements ChatService {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ChatServiceImpl.class);
 
     private final com.lingshu.ai.core.service.MemoryService memoryService;
     private final com.lingshu.ai.core.service.AgentConfigService agentConfigService;
@@ -140,7 +140,7 @@ public class ChatServiceImpl implements ChatService {
         
         com.lingshu.ai.core.config.AiConfig.Assistant dynamicAssistant = builder.build();
         
-        String response = dynamicAssistant.chat(session.getId(), systemPrompt, userPrompt);
+        String response = dynamicAssistant.chat(session.getId(), systemPrompt, message);
         systemLogService.llmEnd(response != null ? response.length() / 4 : 0, "LLM");
 
         memoryService.extractFacts(userId, message);
@@ -204,13 +204,6 @@ public class ChatServiceImpl implements ChatService {
         AgentConfig agent = getAgent(agentId);
         String agentName = agent != null ? agent.getDisplayName() : "灵枢";
         
-        messageRepository.save(com.lingshu.ai.infrastructure.entity.ChatMessage.builder()
-                .session(session)
-                .role("user")
-                .content(message)
-                .createdAt(java.time.LocalDateTime.now())
-                .build());
-
         systemLogService.info("收到用户消息 (流式): " + (message.length() > 20 ? message.substring(0, 20) + "..." : message), "CHAT");
 
         analyzeAndUpdateUserState(userId, message);
@@ -269,7 +262,7 @@ public class ChatServiceImpl implements ChatService {
         }
         assistantToUse = builder.build();
 
-        assistantToUse.chat(session.getId(), systemPrompt, userPrompt)
+        assistantToUse.chat(session.getId(), systemPrompt, message)
                 .onPartialThinking(thinking -> {
                     systemLogService.thinking(thinking.text(), "LLM");
                 })
@@ -307,20 +300,6 @@ public class ChatServiceImpl implements ChatService {
         com.lingshu.ai.infrastructure.entity.ChatSession session = getOrCreateSession();
         systemLogService.info("生成欢迎消息...", "CHAT");
         
-        // 历史对话现在由 ChatMemoryProvider 自动处理
-        // java.util.List<com.lingshu.ai.infrastructure.entity.ChatMessage> lastMessages = messageRepository.findTop5ByOrderByCreatedAtDesc();
-        
-        // if (lastMessages.isEmpty()) {
-        //     systemLogService.info("无历史对话，使用默认欢迎语", "CHAT");
-        //     return Flux.just("欢迎回来。我是灵枢 (LingShu-AI)，你的感官与记忆中枢。今天有什么我可以帮你的吗？");
-        // }
-
-        // StringBuilder historyContext = new StringBuilder("最近的对话记录：\n");
-        // for (int i = lastMessages.size() - 1; i >= 0; i--) {
-        //     historyContext.append(lastMessages.get(i).getRole()).append(": ")
-        //                   .append(lastMessages.get(i).getContent()).append("\n");
-        // }
-
         AgentConfig defaultAgent = agentConfigService.getDefaultAgent().orElse(null);
         String agentName = defaultAgent != null ? defaultAgent.getDisplayName() : "灵枢";
         String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
@@ -334,12 +313,13 @@ public class ChatServiceImpl implements ChatService {
         com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant rawAssistant = 
             dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant.class)
                 .streamingChatModel(streamingChatLanguageModel)
+                .chatMemoryProvider(chatMemoryProvider)
                 .build();
 
         Sinks.Many<String> sink = Sinks.many().unicast().onBackpressureBuffer();
         StringBuilder welcomeBuilder = new StringBuilder();
 
-        rawAssistant.chat(session.getId(), systemPrompt, userPrompt)
+        rawAssistant.chat(session.getId(), systemPrompt, "请开始我们的对话")
                 .onPartialResponse(token -> {
                     welcomeBuilder.append(token);
                     sink.tryEmitNext(token);

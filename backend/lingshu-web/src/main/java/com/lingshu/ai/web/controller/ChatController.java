@@ -44,7 +44,8 @@ public class ChatController {
 
     @GetMapping(value = "/welcome", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> getWelcome(@RequestParam(name = "userId", defaultValue = "User") String userId) {
-        return chatService.streamWelcome(userId);
+        // 已禁用欢迎语接口调用
+        return Flux.empty();
     }
 
     @GetMapping("/models")

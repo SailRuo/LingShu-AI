@@ -9,26 +9,28 @@ import dev.langchain4j.mcp.client.DefaultMcpClient;
 import dev.langchain4j.mcp.client.McpClient;
 import dev.langchain4j.mcp.client.transport.stdio.StdioMcpTransport;
 import dev.langchain4j.mcp.client.transport.http.HttpMcpTransport;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 
-@Slf4j
 @Service
-@RequiredArgsConstructor
 public class McpServiceImpl implements McpService {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(McpServiceImpl.class);
 
     private final McpServerConfigRepository repository;
     private final ObjectMapper objectMapper;
     
     // Cache for active MCP clients
     private final Map<Long, McpClient> clientStorage = new ConcurrentHashMap<>();
+
+    public McpServiceImpl(McpServerConfigRepository repository, ObjectMapper objectMapper) {
+        this.repository = repository;
+        this.objectMapper = objectMapper;
+    }
 
     @EventListener(ApplicationReadyEvent.class)
     public void init() {
@@ -61,20 +63,11 @@ public class McpServiceImpl implements McpService {
                 log.error("Failed to parse args or env for MCP client: {}", config.getName(), e);
             }
 
-            StdioMcpTransport transport = new StdioMcpTransport.Builder()
-                    .command(Collections.singletonList(config.getCommand())) // Wait, StdioMcpTransport uses command as List?
-                    // Let's assume the constructor actually uses command(List<String>). 
-                    // Let's provide command(List.of) in a cleaner way below if it errors.
-                    .logEvents(true)
-                    .build();
-            // Actually let's assume standard StdioMcpTransport.Builder()
-            // .command(List<String>)
-            // But wait, command and args might be combined into .command(List<String>)
             List<String> fullCommand = new ArrayList<>();
             fullCommand.add(config.getCommand());
             fullCommand.addAll(argsList);
             
-            transport = new StdioMcpTransport.Builder()
+            StdioMcpTransport transport = new StdioMcpTransport.Builder()
                 .command(fullCommand)
                 .environment(envMap)
                 .logEvents(true)
@@ -105,7 +98,6 @@ public class McpServiceImpl implements McpService {
         McpClient existing = clientStorage.remove(id);
         if (existing != null) {
             try {
-                // If there's a close method, invoke it.
                  existing.close();
             } catch (Exception e) {
                 log.warn("Error closing MCP client", e);
@@ -153,7 +145,6 @@ public class McpServiceImpl implements McpService {
                 initClient(saved);
             } catch (Exception e) {
                 log.error("Failed to start MCP client '{}' after toggle: {}", saved.getName(), e.getMessage());
-                // Optional: we could unset isActive if start fails, but better to let user see it's "enabled" but offline
             }
         } else {
             removeClient(id);
@@ -171,15 +162,12 @@ public class McpServiceImpl implements McpService {
         McpClient client = clientStorage.get(id);
         if (client == null) return Collections.emptyList();
         try {
-            // listTools() usually returns a collection of tool objects
             var tools = client.listTools();
             if (tools == null) return Collections.emptyList();
             
             java.util.List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
             for (var tool : tools) {
                 java.util.Map<String, Object> map = new java.util.HashMap<>();
-                // Extracting typical fields. If different, we might need to adjust.
-                // Assuming it has getName() and getDescription()
                 try {
                     map.put("name", tool.getClass().getMethod("getName").invoke(tool));
                     map.put("description", tool.getClass().getMethod("getDescription").invoke(tool));
@@ -205,7 +193,6 @@ public class McpServiceImpl implements McpService {
             if (serversObj instanceof Map) {
                 servers = (Map<String, Map<String, Object>>) serversObj;
             } else {
-                // Try if it's the map itself without the outer 'mcpServers'
                 servers = (Map<String, Map<String, Object>>) (Object) root;
             }
             
@@ -233,7 +220,6 @@ public class McpServiceImpl implements McpService {
                     }
                 }
                 
-                // Existing check by name
                 repository.findAll().stream()
                         .filter(c -> c.getName().equalsIgnoreCase(name))
                         .findFirst()

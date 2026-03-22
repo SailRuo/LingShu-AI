@@ -42,13 +42,14 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
         org.springframework.data.domain.Pageable pageable = 
                 org.springframework.data.domain.PageRequest.of(0, 10, org.springframework.data.domain.Sort.by("createdAt").descending());
         List<com.lingshu.ai.infrastructure.entity.ChatMessage> dbMessages = 
-                messageRepository.findBySessionIdOrderByCreatedAtDesc(sessionId, pageable).getContent();
+                new java.util.ArrayList<>(messageRepository.findBySessionIdOrderByCreatedAtDesc(sessionId, pageable).getContent());
         
         // 翻转回正序供 LangChain4j 使用
         java.util.Collections.reverse(dbMessages);
         
         return dbMessages.stream()
                 .map(this::toLangChain4jMessage)
+                .filter(java.util.Objects::nonNull)
                 .collect(Collectors.toList());
     }
 
@@ -160,10 +161,12 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
         } else if ("assistant".equalsIgnoreCase(role)) {
             return AiMessage.from(content);
         } else if ("tool".equalsIgnoreCase(role)) {
-            // 为简化处理，历史中的工具返回结果转为系统消息或 AI 消息
-            return SystemMessage.from("[Tool Result] " + content);
+            // 工具返回结果在历史中作为系统提示的一种补充
+            return SystemMessage.from("[记忆回响] " + content);
         }
-        return SystemMessage.from(content);
+        
+        // 不再加载数据库中的 System 消息，确保每一轮对话都由 ChatService 动态注入最新的混合事实提示词
+        return null;
     }
 
     private Long parseId(Object memoryId) {

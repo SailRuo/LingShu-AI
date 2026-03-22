@@ -4,12 +4,12 @@ import com.lingshu.ai.core.service.SettingService;
 import com.lingshu.ai.infrastructure.entity.SystemSetting;
 import com.lingshu.ai.infrastructure.repository.SystemSettingRepository;
 import jakarta.annotation.PostConstruct;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-@Slf4j
 @Service
 public class SettingServiceImpl implements SettingService {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SettingServiceImpl.class);
 
     private final SystemSettingRepository settingRepository;
     private final org.springframework.data.redis.core.StringRedisTemplate redisTemplate;

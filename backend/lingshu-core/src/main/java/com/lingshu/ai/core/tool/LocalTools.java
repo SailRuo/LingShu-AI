@@ -1,16 +1,16 @@
 package com.lingshu.ai.core.tool;
 
 import dev.langchain4j.agent.tool.Tool;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 
-@Slf4j
 @Component
 public class LocalTools {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(LocalTools.class);
 
     @Tool("Reads the content of a local file")
     public String readLocalFile(String path) {

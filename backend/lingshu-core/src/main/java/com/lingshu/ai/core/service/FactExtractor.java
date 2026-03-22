@@ -19,21 +19,22 @@ public interface FactExtractor {
             5. 重要经历：用户提到的关键事件或经历
             
             【处理准则】
-            1. 仅提取用户**明确表述**的信息，禁止推断
-            2. 事实必须是客观简洁的陈述句
-            3. 如果用户纠正了之前的信息，将被纠正的事实ID放入删除列表
-            4. 如果没有任何新事实，返回空对象 {} 或 {"newFacts": [], "deletedFactIds": []}
-            5. 严禁返回 "[]" 字符串作为事实内容
+            1. 仅提取用户**明确表述**的信息，禁止推断。
+            2. 事实必须是客观简洁的陈述句。
+            3. 如果用户纠正了之前的信息，将被纠正的事实ID放入删除列表。
+            4. 如果没有任何新事实，返回 {"newFacts": [], "deletedFactIds": []}。
             
-            【示例】
-            用户说："我是若梵" → 提取："用户的名字是若梵"
-            用户说："我喜欢喝茶" → 提取："用户喜欢喝茶"
-            用户说："我是一名程序员" → 提取："用户的职业是程序员"
-            """)
-    @UserMessage("""
-            分析以下用户消息：{{message}}
+            【返回格式限制】
+            你必须且只能返回合法的 JSON 对象，严禁包含任何 Markdown 格式（如 ```json）或解释性文本。
+            格式要求：
+            {
+              "newFacts": ["提取的事实1", "提取的事实2"],
+              "deletedFactIds": [1, 2, 3]
+            }
             
-            当前已知事实列表: {{currentFacts}}
+            【当前已知事实列表】
+            {{currentFacts}}
             """)
-    MemoryUpdate analyze(@V("message") String message, @V("currentFacts") String currentFacts);
+    @UserMessage("请分析该消息并直接返回 JSON 结果：{{message}}")
+    String analyze(@V("message") String message, @V("currentFacts") String currentFacts);
 }

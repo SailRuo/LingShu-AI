@@ -15,16 +15,16 @@ import dev.langchain4j.store.embedding.EmbeddingSearchResult;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import dev.langchain4j.data.segment.TextSegment;
 import jakarta.annotation.PostConstruct;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
-@Slf4j
 @Service
 public class MemoryServiceImpl implements MemoryService {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(MemoryServiceImpl.class);
 
     private static final double GAIN_THRESHOLD = 0.3;
     private static final java.util.Set<String> STOP_WORDS = java.util.Set.of(
@@ -89,11 +89,16 @@ public class MemoryServiceImpl implements MemoryService {
         systemLogService.info("正在调用 LLM 进行事实提取与冲突检测...", "FACT");
         systemLogService.llmStart("fact-extractor", "ollama", "FACT");
         
-        com.lingshu.ai.core.dto.MemoryUpdate report;
+        com.lingshu.ai.core.dto.MemoryUpdate report = null;
         try {
-            report = factExtractor.analyze(message, currentFactsBuilder.toString());
+            String rawJson = factExtractor.analyze(message, currentFactsBuilder.toString());
+            // 清理可能存在的 markdown 标签（防御性处理）
+            rawJson = rawJson.replaceAll("(?s)```(json)?", "").trim();
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            report = mapper.readValue(rawJson, com.lingshu.ai.core.dto.MemoryUpdate.class);
             systemLogService.llmEnd(0, "FACT");
         } catch (Exception e) {
+            log.error("Failed to parse cognitive report: {}", e.getMessage());
             systemLogService.llmError(e.getMessage(), "FACT");
             return;
         }
@@ -121,6 +126,9 @@ public class MemoryServiceImpl implements MemoryService {
                             .map(f -> f.getContent())
                             .findFirst()
                             .orElse("Unknown");
+                    
+                    // 必须从当前内存对象中移除，否则 save(user) 时可能重新创建关系
+                    user.getFacts().removeIf(f -> f.getId() != null && f.getId().equals(id));
                 }
                 log.info("Memory corrected: Removing outdated fact [{}] (ID: {})", factContent, id);
                 systemLogService.info("记忆修正: 移除过时事实 [" + (factContent.length() > 30 ? factContent.substring(0, 30) + "..." : factContent) + "]", "MEMORY");
@@ -210,14 +218,13 @@ public class MemoryServiceImpl implements MemoryService {
             log.info("Graph Retrieval: Found {} facts for user {}", user.getFacts() != null ? user.getFacts().size() : 0, userId);
             int factCount = user.getFacts() != null ? user.getFacts().size() : 0;
             systemLogService.info("图谱检索: 找到用户 " + userId + " 的 " + factCount + " 条既定事实", "MEMORY");
-            contextBuilder.append("Known facts from your profile: ");
+            contextBuilder.append("关于用户的已知事实：\n");
             if (user.getFacts() != null) {
                 user.getFacts().forEach(f -> {
                     log.debug("  Fact: {}", f.getContent());
-                    contextBuilder.append(f.getContent()).append("; ");
+                    contextBuilder.append("- ").append(f.getContent()).append("\n");
                 });
             }
-            contextBuilder.append("\n");
         }, () -> {
             log.warn("Graph Retrieval: User {} not found in Neo4j", userId);
             systemLogService.warn("图谱检索: 未在 Neo4j 中找到用户 " + userId + " 的节点", "MEMORY");

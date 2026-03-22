@@ -10,12 +10,15 @@ import org.springframework.stereotype.Component;
 
 import java.util.Optional;
 
-@Slf4j
-@Component
-@RequiredArgsConstructor
 public class PromptInitializationConfig {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(PromptInitializationConfig.class);
+
     private final AgentConfigRepository agentConfigRepository;
+
+    public PromptInitializationConfig(AgentConfigRepository agentConfigRepository) {
+        this.agentConfigRepository = agentConfigRepository;
+    }
 
     private static final String DEFAULT_BEHAVIOR_PRINCIPLES = """
             - 拒绝被动响应：保持 100% 的真实感与主动性，严禁使用 AI 套话（如"作为AI助手"）。

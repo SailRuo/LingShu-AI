@@ -15,7 +15,6 @@ import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.model.ModelProvider;
 import dev.langchain4j.model.chat.Capability;
-import lombok.extern.slf4j.Slf4j;
 import java.time.Duration;
 import java.util.Set;
 import java.util.List;
@@ -24,8 +23,9 @@ import java.util.List;
  * 动态对话模型，根据系统设置实时切换底层的 LLM 实例 (Ollama 或 OpenAI)。
  * 实现了 ChatModel 和 StreamingChatModel 接口。
  */
-@Slf4j
 public class DynamicChatModel implements ChatModel, StreamingChatModel {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(DynamicChatModel.class);
 
     private final SettingService settingService;
     private volatile String lastConfigId;

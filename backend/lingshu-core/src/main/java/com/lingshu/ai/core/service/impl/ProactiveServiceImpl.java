@@ -9,8 +9,6 @@ import com.lingshu.ai.infrastructure.entity.UserState;
 import com.lingshu.ai.infrastructure.repository.UserStateRepository;
 import com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant;
 import dev.langchain4j.model.chat.StreamingChatModel;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -24,11 +22,11 @@ import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 
-@Slf4j
 @Service
 @EnableScheduling
-@RequiredArgsConstructor
 public class ProactiveServiceImpl implements ProactiveService {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ProactiveServiceImpl.class);
 
     private final UserStateRepository userStateRepository;
     private final AffinityService affinityService;
@@ -39,13 +37,30 @@ public class ProactiveServiceImpl implements ProactiveService {
     private final ApplicationEventPublisher eventPublisher;
     private final PromptBuilderService promptBuilderService;
 
+    public ProactiveServiceImpl(UserStateRepository userStateRepository,
+                               AffinityService affinityService,
+                               MemoryService memoryService,
+                               AgentConfigService agentConfigService,
+                               SettingService settingService,
+                               SystemLogService systemLogService,
+                               ApplicationEventPublisher eventPublisher,
+                               PromptBuilderService promptBuilderService) {
+        this.userStateRepository = userStateRepository;
+        this.affinityService = affinityService;
+        this.memoryService = memoryService;
+        this.agentConfigService = agentConfigService;
+        this.settingService = settingService;
+        this.systemLogService = systemLogService;
+        this.eventPublisher = eventPublisher;
+        this.promptBuilderService = promptBuilderService;
+    }
+
     @Override
     @Scheduled(fixedRate = 60000)
     @Transactional("transactionManager")
     public void checkInactiveUsers() {
         SystemSetting setting = settingService.getSetting();
         if (setting.getProactiveEnabled() == null || !setting.getProactiveEnabled()) {
-            //log.debug("主动问候功能已禁用");
             return;
         }
         
@@ -66,16 +81,10 @@ public class ProactiveServiceImpl implements ProactiveService {
             log.info("用户 {} 最后活跃时间: {}，已不活跃 {} 分钟",
                     state.getUserId(), state.getLastActiveTime(), minutesInactive);
 
-            log.debug("检查条件: minutesInactive({}) >= threshold({}), needsGreeting({})",
-                    minutesInactive, inactiveThresholdMinutes, state.getNeedsGreeting());
-
             if (minutesInactive >= inactiveThresholdMinutes && !state.getNeedsGreeting()) {
                 boolean canGreet = shouldTriggerGreeting(state.getUserId());
-                log.info("用户 {} 满足不活跃条件，shouldTriggerGreeting={}", state.getUserId(), canGreet);
-                
                 if (canGreet) {
                     state.setNeedsGreeting(true);
-                    log.info("用户 {} 已不活跃 {} 分钟，标记需要问候", state.getUserId(), minutesInactive);
                     systemLogService.info(String.format("用户 %s 不活跃 %d 分钟，标记需要问候", 
                             state.getUserId(), minutesInactive), "PROACTIVE");
                     
@@ -118,9 +127,6 @@ public class ProactiveServiceImpl implements ProactiveService {
                 if (canSendGreeting(state)) {
                     String timeOfDay = getTimeOfDay();
                     String greeting = generateContextualGreeting(state.getUserId(), timeOfDay);
-                    
-                    log.info("为用户 {} 生成问候: {}", state.getUserId(), 
-                            greeting.length() > 50 ? greeting.substring(0, 50) + "..." : greeting);
                     
                     state.setLastGreetTime(LocalDateTime.now());
                     state.setNeedsGreeting(false);
@@ -208,12 +214,10 @@ public class ProactiveServiceImpl implements ProactiveService {
     public boolean shouldTriggerGreeting(String userId) {
         UserState state = userStateRepository.findByUserId(userId).orElse(null);
         if (state == null) {
-            log.info("用户 {} 无状态记录，允许问候", userId);
             return true;
         }
 
         if (state.getLastGreetTime() == null) {
-            log.info("用户 {} 从未被问候过，允许问候", userId);
             return true;
         }
 
@@ -221,10 +225,7 @@ public class ProactiveServiceImpl implements ProactiveService {
         int greetingCooldownSeconds = setting.getGreetingCooldownSeconds() != null ? setting.getGreetingCooldownSeconds() : 300;
         
         long secondsSinceLastGreeting = ChronoUnit.SECONDS.between(state.getLastGreetTime(), LocalDateTime.now());
-        boolean canGreet = secondsSinceLastGreeting >= greetingCooldownSeconds;
-        log.info("用户 {} 上次问候时间: {}，距现在 {} 秒，冷却时间 {} 秒，允许问候: {}",
-                userId, state.getLastGreetTime(), secondsSinceLastGreeting, greetingCooldownSeconds, canGreet);
-        return canGreet;
+        return secondsSinceLastGreeting >= greetingCooldownSeconds;
     }
 
     @Override
@@ -326,6 +327,7 @@ public class ProactiveServiceImpl implements ProactiveService {
                     .streamingChatModel(model)
                     .build();
 
+            // Note: chat method with 3 parameters is defined in RawStreamingAssistant
             assistant.chat(1L, systemPrompt, userPrompt)
                     .onPartialThinking(thinking -> systemLogService.thinking(thinking.text(), "PROACTIVE"))
                     .onPartialResponse(sink::tryEmitNext)

@@ -3,19 +3,21 @@ package com.lingshu.ai.core.service.impl;
 import com.lingshu.ai.core.service.AffinityService;
 import com.lingshu.ai.infrastructure.entity.UserState;
 import com.lingshu.ai.infrastructure.repository.UserStateRepository;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 
-@Slf4j
 @Service
-@RequiredArgsConstructor
 public class AffinityServiceImpl implements AffinityService {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(AffinityServiceImpl.class);
+
     private final UserStateRepository userStateRepository;
+
+    public AffinityServiceImpl(UserStateRepository userStateRepository) {
+        this.userStateRepository = userStateRepository;
+    }
 
     @Override
     public UserState getUserState(String userId) {

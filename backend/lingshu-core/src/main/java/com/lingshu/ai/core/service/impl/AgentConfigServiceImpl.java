@@ -4,16 +4,16 @@ import com.lingshu.ai.core.service.AgentConfigService;
 import com.lingshu.ai.infrastructure.entity.AgentConfig;
 import com.lingshu.ai.infrastructure.repository.AgentConfigRepository;
 import jakarta.annotation.PostConstruct;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
 
-@Slf4j
 @Service
 public class AgentConfigServiceImpl implements AgentConfigService {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(AgentConfigServiceImpl.class);
 
     private static final String DEFAULT_SYSTEM_PROMPT = """
             你名唤『灵枢 (LingShu-AI)』，取意于中医大典《灵枢经》，意为"灵魂的枢纽"。
