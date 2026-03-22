@@ -8,8 +8,7 @@ import com.lingshu.ai.infrastructure.entity.SystemSetting;
 import com.lingshu.ai.infrastructure.entity.UserState;
 import com.lingshu.ai.infrastructure.repository.UserStateRepository;
 import com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant;
-import dev.langchain4j.model.chat.StreamingChatLanguageModel;
-import dev.langchain4j.model.openai.OpenAiTokenizer;
+import dev.langchain4j.model.chat.StreamingChatModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
@@ -46,7 +45,7 @@ public class ProactiveServiceImpl implements ProactiveService {
     public void checkInactiveUsers() {
         SystemSetting setting = settingService.getSetting();
         if (setting.getProactiveEnabled() == null || !setting.getProactiveEnabled()) {
-            log.debug("主动问候功能已禁用");
+            //log.debug("主动问候功能已禁用");
             return;
         }
         
@@ -150,7 +149,7 @@ public class ProactiveServiceImpl implements ProactiveService {
         String timeOfDay = getTimeOfDay();
         String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
 
-        String systemPrompt = promptBuilderService.buildSystemPrompt(agent);
+        String systemPrompt = promptBuilderService.buildMergedSystemPrompt(agent, relationshipPrompt, memoryContext);
         String userPrompt = promptBuilderService.buildGreetingUserPrompt(relationshipPrompt, memoryContext, timeOfDay, agentName);
 
         return executeStreamingChat(systemPrompt, userPrompt);
@@ -169,7 +168,7 @@ public class ProactiveServiceImpl implements ProactiveService {
         String agentName = agent != null ? agent.getDisplayName() : "灵枢";
         String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
 
-        String systemPrompt = promptBuilderService.buildSystemPrompt(agent);
+        String systemPrompt = promptBuilderService.buildMergedSystemPrompt(agent, relationshipPrompt, null);
         String userPrompt = promptBuilderService.buildComfortUserPrompt(relationshipPrompt, 
                 state.getLastEmotion(), state.getLastEmotionIntensity(), agentName);
 
@@ -304,7 +303,7 @@ public class ProactiveServiceImpl implements ProactiveService {
                 return sink.asFlux();
             }
             
-            StreamingChatLanguageModel model;
+            StreamingChatModel model;
 
             if ("ollama".equalsIgnoreCase(setting.getSource()) || 
                 (setting.getSource() == null && setting.getBaseUrl().contains("11434"))) {
@@ -319,18 +318,18 @@ public class ProactiveServiceImpl implements ProactiveService {
                         .baseUrl(url.endsWith("/v1") || url.endsWith("/v1/") ? url : url + (url.endsWith("/") ? "v1" : "/v1"))
                         .apiKey(setting.getApiKey() != null && !setting.getApiKey().isBlank() ? setting.getApiKey() : "no-key")
                         .modelName(setting.getChatModel())
-                        .tokenizer(new OpenAiTokenizer("gpt-3.5-turbo"))
                         .timeout(java.time.Duration.ofMinutes(2))
                         .build();
             }
 
             var assistant = dev.langchain4j.service.AiServices.builder(RawStreamingAssistant.class)
-                    .streamingChatLanguageModel(model)
+                    .streamingChatModel(model)
                     .build();
 
-            assistant.chat(systemPrompt, userPrompt)
-                    .onNext(sink::tryEmitNext)
-                    .onComplete(response -> sink.tryEmitComplete())
+            assistant.chat(1L, systemPrompt, userPrompt)
+                    .onPartialThinking(thinking -> systemLogService.thinking(thinking.text(), "PROACTIVE"))
+                    .onPartialResponse(sink::tryEmitNext)
+                    .onCompleteResponse(response -> sink.tryEmitComplete())
                     .onError(sink::tryEmitError)
                     .start();
         } catch (Exception e) {

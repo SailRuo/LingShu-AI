@@ -44,6 +44,6 @@ public interface EmotionAnalyzer {
                 "keywords": ["关键词1", "关键词2"]
             }
             """)
-    @UserMessage("请分析以下用户消息的情绪状态: {{message}}")
+    @UserMessage("{{message}}")
     EmotionAnalysis analyze(@V("message") String message);
 }

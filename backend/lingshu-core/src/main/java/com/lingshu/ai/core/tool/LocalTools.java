@@ -23,19 +23,37 @@ public class LocalTools {
     }
 
     @Tool("Executes a terminal command and returns the output")
-    @SuppressWarnings("deprecation")
     public String executeCommand(String command) {
         log.info("Executing tool: executeCommand with command: {}", command);
         try {
-            Process process = Runtime.getRuntime().exec(command);
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            StringBuilder output = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                output.append(line).append("\n");
+            ProcessBuilder processBuilder = new ProcessBuilder();
+            // Use cmd /c for Windows to handle built-in commands and pipes
+            if (System.getProperty("os.name").toLowerCase().contains("win")) {
+                processBuilder.command("cmd.exe", "/c", command);
+            } else {
+                processBuilder.command("sh", "-c", command);
             }
+            
+            processBuilder.redirectErrorStream(true); // Combine stdout and stderr
+            Process process = processBuilder.start();
+            
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                }
+            }
+            
+            boolean finished = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                return output.toString() + "\n[Command timed out after 30 seconds]";
+            }
+            
             return output.toString();
         } catch (Exception e) {
+            log.error("Error executing command: {}", command, e);
             return "Error executing command: " + e.getMessage();
         }
     }

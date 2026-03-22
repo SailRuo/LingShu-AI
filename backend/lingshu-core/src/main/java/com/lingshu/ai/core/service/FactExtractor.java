@@ -31,12 +31,9 @@ public interface FactExtractor {
             用户说："我是一名程序员" → 提取："用户的职业是程序员"
             """)
     @UserMessage("""
-            用户最新消息: {{message}}
+            分析以下用户消息：{{message}}
             
             当前已知事实列表: {{currentFacts}}
-            
-            请分析用户消息，提取新事实或标记需要删除的事实。
-            返回 JSON 格式。
             """)
     MemoryUpdate analyze(@V("message") String message, @V("currentFacts") String currentFacts);
 }

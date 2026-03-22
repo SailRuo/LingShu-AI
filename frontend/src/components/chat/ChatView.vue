@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { NScrollbar } from 'naive-ui'
 import { useChat } from '@/composables/useChat'
 import { useWebSocket, type WebSocketMessage } from '@/composables/useWebSocket'
@@ -40,11 +40,16 @@ const prevScrollHeight = ref(0)
 const currentAssistantMessage = ref('')
 let stopHeartbeat: (() => void) | null = null
 
-function scrollToBottom() {
+function scrollToBottom(behavior: 'auto' | 'smooth' = 'smooth') {
   nextTick(() => {
-    scrollRef.value?.scrollTo({ top: 999999, behavior: 'smooth' })
+    scrollRef.value?.scrollTo({ top: 999999, behavior })
   })
 }
+
+// 监听消息变化，自动滚动到最下方
+watch(() => messages.value.length, () => {
+  scrollToBottom()
+}, { flush: 'post' }) // 确保在 DOM 更新后执行
 
 function handleSend() {
   const text = inputMessage.value.trim()
@@ -138,7 +143,10 @@ function handleWebSocketMessage(message: WebSocketMessage) {
 
 onMounted(async () => {
   await initChat()
-  initWelcome()
+  // 仅在由于是新会话导致没有消息记录时，才主动触发欢迎语
+  if (messages.value.length === 0) {
+    initWelcome()
+  }
   await fetchSettings()
 
   connect()
@@ -148,7 +156,7 @@ onMounted(async () => {
   stopHeartbeat = startHeartbeat(30000)
 
   nextTick(() => {
-    scrollToBottom()
+    scrollToBottom('auto') // 初始加载使用立即跳转
   })
 })
 

@@ -30,7 +30,13 @@
         <!-- LangChain4j Integrations -->
         <dependency>
             <groupId>dev.langchain4j</groupId>
-            <artifactId>langchain4j-neo4j</artifactId>
+            <artifactId>langchain4j-community-neo4j</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.neo4j</groupId>
+                    <artifactId>neo4j-cypher-dsl</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
@@ -39,6 +45,11 @@
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-pgvector</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-core</artifactId>
         </dependency>
 
         <dependency>

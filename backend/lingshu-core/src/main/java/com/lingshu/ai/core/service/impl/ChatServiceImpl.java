@@ -18,7 +18,7 @@ public class ChatServiceImpl implements ChatService {
     private final com.lingshu.ai.infrastructure.repository.ChatMessageRepository messageRepository;
     private final com.lingshu.ai.core.config.AiConfig.Assistant assistant;
     private final com.lingshu.ai.core.config.AiConfig.StreamingAssistant streamingAssistant;
-    private final dev.langchain4j.model.chat.StreamingChatLanguageModel streamingChatLanguageModel;
+    private final dev.langchain4j.model.chat.StreamingChatModel streamingChatLanguageModel;
     private final org.springframework.web.client.RestTemplate restTemplate;
     private final com.lingshu.ai.core.service.SettingService settingService;
     private final com.lingshu.ai.core.service.SystemLogService systemLogService;
@@ -26,6 +26,10 @@ public class ChatServiceImpl implements ChatService {
     private final com.lingshu.ai.core.service.EmotionAnalyzer emotionAnalyzer;
     private final com.lingshu.ai.core.service.ProactiveService proactiveService;
     private final com.lingshu.ai.core.service.PromptBuilderService promptBuilderService;
+    private final dev.langchain4j.memory.chat.ChatMemoryProvider chatMemoryProvider;
+    private final com.lingshu.ai.core.tool.LocalTools localTools;
+    private final com.lingshu.ai.core.service.McpService mcpService;
+    private final dev.langchain4j.model.chat.ChatModel chatLanguageModel;
 
     @org.springframework.beans.factory.annotation.Value("${lingshu.ollama.base-url:http://localhost:11434}")
     private String baseUrl;
@@ -36,14 +40,18 @@ public class ChatServiceImpl implements ChatService {
                            com.lingshu.ai.infrastructure.repository.ChatMessageRepository messageRepository,
                            com.lingshu.ai.core.config.AiConfig.Assistant assistant,
                            com.lingshu.ai.core.config.AiConfig.StreamingAssistant streamingAssistant,
-                           dev.langchain4j.model.chat.StreamingChatLanguageModel streamingChatLanguageModel,
+                           dev.langchain4j.model.chat.StreamingChatModel streamingChatLanguageModel,
                            org.springframework.web.client.RestTemplate restTemplate,
                            com.lingshu.ai.core.service.SettingService settingService,
                            com.lingshu.ai.core.service.SystemLogService systemLogService,
                            com.lingshu.ai.core.service.AffinityService affinityService,
                            com.lingshu.ai.core.service.EmotionAnalyzer emotionAnalyzer,
                            com.lingshu.ai.core.service.ProactiveService proactiveService,
-                           com.lingshu.ai.core.service.PromptBuilderService promptBuilderService) {
+                           com.lingshu.ai.core.service.PromptBuilderService promptBuilderService,
+                           dev.langchain4j.memory.chat.ChatMemoryProvider chatMemoryProvider,
+                           com.lingshu.ai.core.tool.LocalTools localTools,
+                           com.lingshu.ai.core.service.McpService mcpService,
+                           dev.langchain4j.model.chat.ChatModel chatLanguageModel) {
         this.memoryService = memoryService;
         this.agentConfigService = agentConfigService;
         this.sessionRepository = sessionRepository;
@@ -58,6 +66,10 @@ public class ChatServiceImpl implements ChatService {
         this.emotionAnalyzer = emotionAnalyzer;
         this.proactiveService = proactiveService;
         this.promptBuilderService = promptBuilderService;
+        this.chatMemoryProvider = chatMemoryProvider;
+        this.localTools = localTools;
+        this.mcpService = mcpService;
+        this.chatLanguageModel = chatLanguageModel;
     }
 
     private com.lingshu.ai.infrastructure.entity.ChatSession getOrCreateSession() {
@@ -94,13 +106,6 @@ public class ChatServiceImpl implements ChatService {
         AgentConfig agent = getAgent(agentId);
         String agentName = agent != null ? agent.getDisplayName() : "灵枢";
         
-        messageRepository.save(com.lingshu.ai.infrastructure.entity.ChatMessage.builder()
-                .session(session)
-                .role("user")
-                .content(message)
-                .createdAt(java.time.LocalDateTime.now())
-                .build());
-        
         systemLogService.info("\n收到用户消息: " + (message.length() > 20 ? message.substring(0, 20) + "..." : message), "CHAT");
 
         analyzeAndUpdateUserState(userId, message);
@@ -110,35 +115,34 @@ public class ChatServiceImpl implements ChatService {
             systemLogService.info("长期记忆检索完成，获取到相关事实。", "MEMORY");
         }
         
-        java.util.List<com.lingshu.ai.infrastructure.entity.ChatMessage> recentLogs = 
-                messageRepository.findTop5BySessionOrderByCreatedAtDesc(session);
-        java.util.Collections.reverse(recentLogs);
-        
-        StringBuilder shortTermContext = new StringBuilder();
-        if (!recentLogs.isEmpty()) {
-            shortTermContext.append("【近期对话流水】\n");
-            recentLogs.forEach(m -> shortTermContext.append(m.getRole()).append(": ").append(m.getContent()).append("\n"));
-        }
-
         String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
 
-        String systemPrompt = promptBuilderService.buildSystemPrompt(agent);
-        String userPrompt = promptBuilderService.buildUserPrompt(relationshipPrompt, longTermContext, shortTermContext.toString(), message);
+        // 使用合并后的 System Prompt (包含规则和上下文)
+        String systemPrompt = promptBuilderService.buildMergedSystemPrompt(agent, relationshipPrompt, longTermContext);
+        // 使用干净的 User Prompt (仅包含当前指令)
+        String userPrompt = promptBuilderService.buildUserPrompt(relationshipPrompt, longTermContext, message);
         
-        log.debug("System Prompt generated for chat (first 100 chars): {}...", systemPrompt.substring(0, Math.min(100, systemPrompt.length())));
-        log.debug("User Prompt generated for chat (first 100 chars): {}...", userPrompt.substring(0, Math.min(100, userPrompt.length())));
+        log.debug("Merged System Prompt generated for chat (first 100 chars): {}...", systemPrompt.substring(0, Math.min(100, systemPrompt.length())));
+        systemLogService.debug("已加载 Agent Prompt (长度: " + systemPrompt.length() + ")", "CHAT");
         
         systemLogService.llmStart("default-model", "ollama", "LLM");
-        String response = assistant.chat(systemPrompt + "\n\n" + userPrompt);
+        
+        dev.langchain4j.service.AiServices<com.lingshu.ai.core.config.AiConfig.Assistant> builder = 
+                dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.config.AiConfig.Assistant.class)
+                .chatModel(chatLanguageModel)
+                .chatMemoryProvider(chatMemoryProvider)
+                .tools(localTools);
+                
+        java.util.List<dev.langchain4j.mcp.client.McpClient> mcpClients = mcpService.getActiveClients();
+        if (!mcpClients.isEmpty()) {
+            builder.toolProvider(dev.langchain4j.mcp.McpToolProvider.builder().mcpClients(mcpClients).build());
+        }
+        
+        com.lingshu.ai.core.config.AiConfig.Assistant dynamicAssistant = builder.build();
+        
+        String response = dynamicAssistant.chat(session.getId(), systemPrompt, userPrompt);
         systemLogService.llmEnd(response != null ? response.length() / 4 : 0, "LLM");
 
-        messageRepository.save(com.lingshu.ai.infrastructure.entity.ChatMessage.builder()
-                .session(session)
-                .role("assistant")
-                .content(response)
-                .createdAt(java.time.LocalDateTime.now())
-                .build());
-        
         memoryService.extractFacts(userId, message);
         
         return response;
@@ -216,90 +220,70 @@ public class ChatServiceImpl implements ChatService {
 
         String longTermContext = memoryService.retrieveContext(userId, message);
         
-        java.util.List<com.lingshu.ai.infrastructure.entity.ChatMessage> recentLogs = 
-                messageRepository.findTop5BySessionOrderByCreatedAtDesc(session);
-        java.util.Collections.reverse(recentLogs);
-        
-        StringBuilder shortTermContext = new StringBuilder();
-        if (!recentLogs.isEmpty()) {
-            shortTermContext.append("【近期对话流水】\n");
-            recentLogs.forEach(m -> shortTermContext.append(m.getRole()).append(": ").append(m.getContent()).append("\n"));
-        }
-
         String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
 
-        String systemPrompt = promptBuilderService.buildSystemPrompt(agent);
-        String userPrompt = promptBuilderService.buildUserPrompt(relationshipPrompt, longTermContext, shortTermContext.toString(), message);
+        String systemPrompt = promptBuilderService.buildMergedSystemPrompt(agent, relationshipPrompt, longTermContext);
+        String userPrompt = promptBuilderService.buildUserPrompt(relationshipPrompt, longTermContext, message);
 
-        log.debug("System Prompt generated for streamChat (first 100 chars): {}...", systemPrompt.substring(0, Math.min(100, systemPrompt.length())));
+        log.debug("Merged System Prompt generated for streamChat (first 100 chars): {}...", systemPrompt.substring(0, Math.min(100, systemPrompt.length())));
         log.debug("User Prompt generated for streamChat (first 100 chars): {}...", userPrompt.substring(0, Math.min(100, userPrompt.length())));
+        systemLogService.debug("已加载 Agent Prompt (长度: " + systemPrompt.length() + ")", "CHAT");
 
-        String effectiveModel = model;
-        String effectiveBaseUrl = baseUrl;
-        String effectiveApiKey = apiKey;
-        String effectiveSource = null;
-
-        if (effectiveModel == null || effectiveBaseUrl == null) {
-            com.lingshu.ai.infrastructure.entity.SystemSetting setting = settingService.getSetting();
-            if (effectiveModel == null) effectiveModel = setting.getChatModel();
-            if (effectiveBaseUrl == null) effectiveBaseUrl = setting.getBaseUrl();
-            if (effectiveApiKey == null) effectiveApiKey = setting.getApiKey();
-            effectiveSource = setting.getSource();
-        }
-
-        systemLogService.info(String.format("准备LLM调用 | 智能体: %s | 模型: %s | 来源: %s | 端点: %s", 
-            agentName, effectiveModel, effectiveSource, effectiveBaseUrl), "LLM");
         systemLogService.startTimer("llm_LLM");
 
-        com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant rawAssistant;
+        com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant assistantToUse;
+        dev.langchain4j.service.AiServices<com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant> builder;
 
-        if (effectiveModel != null && effectiveBaseUrl != null) {
-            dev.langchain4j.model.chat.StreamingChatLanguageModel dynamicModel;
-            
-            if ("ollama".equalsIgnoreCase(effectiveSource) || (effectiveSource == null && effectiveBaseUrl.contains("11434"))) {
-                dynamicModel = dev.langchain4j.model.ollama.OllamaStreamingChatModel.builder()
-                        .baseUrl(effectiveBaseUrl)
-                        .modelName(effectiveModel)
+        if (model != null && baseUrl != null) {
+            // 如果提供了显式参数，则构建临时模型（例如预览功能）
+            dev.langchain4j.model.chat.StreamingChatModel tempModel;
+            if ("ollama".equalsIgnoreCase(baseUrl) || baseUrl.contains("11434")) {
+                tempModel = dev.langchain4j.model.ollama.OllamaStreamingChatModel.builder()
+                        .baseUrl(baseUrl)
+                        .modelName(model)
                         .timeout(java.time.Duration.ofMinutes(2))
                         .build();
             } else {
-                dynamicModel = dev.langchain4j.model.openai.OpenAiStreamingChatModel.builder()
-                        .baseUrl(effectiveBaseUrl.endsWith("/v1") || effectiveBaseUrl.endsWith("/v1/") ? effectiveBaseUrl : effectiveBaseUrl + (effectiveBaseUrl.endsWith("/") ? "v1" : "/v1"))
-                        .apiKey(effectiveApiKey != null && !effectiveApiKey.isBlank() ? effectiveApiKey : "no-key")
-                        .modelName(effectiveModel)
-                        .tokenizer(new dev.langchain4j.model.openai.OpenAiTokenizer("gpt-3.5-turbo"))
+                tempModel = dev.langchain4j.model.openai.OpenAiStreamingChatModel.builder()
+                        .baseUrl(baseUrl.endsWith("/v1") || baseUrl.endsWith("/v1/") ? baseUrl : baseUrl + (baseUrl.endsWith("/") ? "v1" : "/v1"))
+                        .apiKey(apiKey != null ? apiKey : "no-key")
+                        .modelName(model)
                         .timeout(java.time.Duration.ofMinutes(2))
                         .build();
             }
-            
-            rawAssistant = dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant.class)
-                    .streamingChatLanguageModel(dynamicModel)
-                    .build();
+            builder = dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant.class)
+                    .streamingChatModel(tempModel)
+                    .chatMemoryProvider(chatMemoryProvider)
+                    .tools(localTools);
         } else {
-            rawAssistant = dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant.class)
-                    .streamingChatLanguageModel(streamingChatLanguageModel)
-                    .build();
+            // 使用注入的单例 bean，它现在已具备动态切换能力
+            builder = dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant.class)
+                    .streamingChatModel(streamingChatLanguageModel)
+                    .chatMemoryProvider(chatMemoryProvider)
+                    .tools(localTools);
         }
+        
+        java.util.List<dev.langchain4j.mcp.client.McpClient> mcpClients = mcpService.getActiveClients();
+        if (!mcpClients.isEmpty()) {
+            builder.toolProvider(dev.langchain4j.mcp.McpToolProvider.builder().mcpClients(mcpClients).build());
+        }
+        assistantToUse = builder.build();
 
-        rawAssistant.chat(systemPrompt, userPrompt)
-                .onNext(token -> {
+        assistantToUse.chat(session.getId(), systemPrompt, userPrompt)
+                .onPartialThinking(thinking -> {
+                    systemLogService.thinking(thinking.text(), "LLM");
+                })
+                .onPartialResponse(token -> {
                     if (assistantResponseStore.length() == 0) {
                         systemLogService.info("流式输出已开启，接收首个 token...", "LLM");
                     }
                     assistantResponseStore.append(token);
                     sink.tryEmitNext(token);
                 })
-                .onComplete(response -> {
+                .onCompleteResponse(response -> {
                     int tokenCount = assistantResponseStore.length() / 4;
                     systemLogService.llmEnd(tokenCount, "LLM");
                     
-                    messageRepository.save(com.lingshu.ai.infrastructure.entity.ChatMessage.builder()
-                            .session(session)
-                            .role("assistant")
-                            .content(assistantResponseStore.toString())
-                            .createdAt(java.time.LocalDateTime.now())
-                            .build());
-
                     systemLogService.success("对话完成，回复长度: " + assistantResponseStore.length() + " 字符", "CHAT");
                     sink.tryEmitComplete();
                     memoryService.extractFacts(userId, message);
@@ -320,82 +304,59 @@ public class ChatServiceImpl implements ChatService {
 
     @Override
     public Flux<String> streamWelcome(String userId) {
+        com.lingshu.ai.infrastructure.entity.ChatSession session = getOrCreateSession();
         systemLogService.info("生成欢迎消息...", "CHAT");
         
-        java.util.List<com.lingshu.ai.infrastructure.entity.ChatMessage> lastMessages = messageRepository.findTop5ByOrderByCreatedAtDesc();
+        // 历史对话现在由 ChatMemoryProvider 自动处理
+        // java.util.List<com.lingshu.ai.infrastructure.entity.ChatMessage> lastMessages = messageRepository.findTop5ByOrderByCreatedAtDesc();
         
-        if (lastMessages.isEmpty()) {
-            systemLogService.info("无历史对话，使用默认欢迎语", "CHAT");
-            return Flux.just("欢迎回来。我是灵枢 (LingShu-AI)，你的感官与记忆中枢。今天有什么我可以帮你的吗？");
-        }
+        // if (lastMessages.isEmpty()) {
+        //     systemLogService.info("无历史对话，使用默认欢迎语", "CHAT");
+        //     return Flux.just("欢迎回来。我是灵枢 (LingShu-AI)，你的感官与记忆中枢。今天有什么我可以帮你的吗？");
+        // }
 
-        StringBuilder historyContext = new StringBuilder("最近的对话记录：\n");
-        for (int i = lastMessages.size() - 1; i >= 0; i--) {
-            historyContext.append(lastMessages.get(i).getRole()).append(": ")
-                          .append(lastMessages.get(i).getContent()).append("\n");
-        }
+        // StringBuilder historyContext = new StringBuilder("最近的对话记录：\n");
+        // for (int i = lastMessages.size() - 1; i >= 0; i--) {
+        //     historyContext.append(lastMessages.get(i).getRole()).append(": ")
+        //                   .append(lastMessages.get(i).getContent()).append("\n");
+        // }
 
         AgentConfig defaultAgent = agentConfigService.getDefaultAgent().orElse(null);
         String agentName = defaultAgent != null ? defaultAgent.getDisplayName() : "灵枢";
         String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
         
-        String systemPrompt = promptBuilderService.buildSystemPrompt(defaultAgent);
-        String userPrompt = promptBuilderService.buildWelcomeUserPrompt(relationshipPrompt, historyContext.toString(), agentName);
+        String memoryContext = memoryService.retrieveContext(userId, "用户身份与基本事实");
+        String systemPrompt = promptBuilderService.buildMergedSystemPrompt(defaultAgent, relationshipPrompt, memoryContext);
+        String userPrompt = promptBuilderService.buildWelcomeUserPrompt(relationshipPrompt, agentName);
 
-        com.lingshu.ai.infrastructure.entity.SystemSetting setting = settingService.getSetting();
-
-        String effectiveModel = setting.getChatModel();
-        String effectiveSource = setting.getSource();
-
-        systemLogService.info(String.format("欢迎消息LLM调用 | 模型: %s | 来源: %s | 端点: %s",
-            effectiveModel, effectiveSource, setting.getBaseUrl()), "LLM");
         systemLogService.startTimer("llm_welcome");
 
-        com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant rawAssistant;
-
-        if (setting.getChatModel() != null && setting.getBaseUrl() != null) {
-            dev.langchain4j.model.chat.StreamingChatLanguageModel dynamicModel;
-            if ("ollama".equalsIgnoreCase(setting.getSource()) || (setting.getSource() == null && setting.getBaseUrl().contains("11434"))) {
-                dynamicModel = dev.langchain4j.model.ollama.OllamaStreamingChatModel.builder()
-                        .baseUrl(setting.getBaseUrl())
-                        .modelName(setting.getChatModel())
-                        .timeout(java.time.Duration.ofMinutes(2))
-                        .build();
-            } else {
-                String u = setting.getBaseUrl();
-                dynamicModel = dev.langchain4j.model.openai.OpenAiStreamingChatModel.builder()
-                        .baseUrl(u.endsWith("/v1") || u.endsWith("/v1/") ? u : u + (u.endsWith("/") ? "v1" : "/v1"))
-                        .apiKey(setting.getApiKey() != null && !setting.getApiKey().isBlank() ? setting.getApiKey() : "no-key")
-                        .modelName(setting.getChatModel())
-                        .tokenizer(new dev.langchain4j.model.openai.OpenAiTokenizer("gpt-3.5-turbo"))
-                        .timeout(java.time.Duration.ofMinutes(2))
-                        .build();
-            }
-            rawAssistant = dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant.class)
-                    .streamingChatLanguageModel(dynamicModel)
-                    .build();
-        } else {
-            rawAssistant = dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant.class)
-                    .streamingChatLanguageModel(streamingChatLanguageModel)
-                    .build();
-        }
+        com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant rawAssistant = 
+            dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant.class)
+                .streamingChatModel(streamingChatLanguageModel)
+                .build();
 
         Sinks.Many<String> sink = Sinks.many().unicast().onBackpressureBuffer();
         StringBuilder welcomeBuilder = new StringBuilder();
 
-        rawAssistant.chat(systemPrompt, userPrompt)
-                .onNext(token -> {
+        rawAssistant.chat(session.getId(), systemPrompt, userPrompt)
+                .onPartialResponse(token -> {
                     welcomeBuilder.append(token);
                     sink.tryEmitNext(token);
                 })
-                .onComplete(response -> {
-                    systemLogService.endTimer("llm_welcome", "欢迎消息生成完成", "LLM");
-                    systemLogService.success("欢迎消息长度: " + welcomeBuilder.length() + " 字符", "CHAT");
+                .onCompleteResponse(response -> {
+                    log.info("欢迎语生成完成，正在手动保存到数据库...");
+                    com.lingshu.ai.infrastructure.entity.ChatMessage welcomeMsg = 
+                        com.lingshu.ai.infrastructure.entity.ChatMessage.builder()
+                            .session(session)
+                            .role("assistant")
+                            .content(welcomeBuilder.toString())
+                            .createdAt(java.time.LocalDateTime.now())
+                            .build();
+                    messageRepository.save(welcomeMsg);
                     sink.tryEmitComplete();
                 })
                 .onError(err -> {
-                    systemLogService.endTimer("llm_welcome", "欢迎消息生成失败", "LLM");
-                    systemLogService.error(err.getMessage(), "LLM");
                     sink.tryEmitNext("欢迎回来。系统已就绪，随时准备与你共同探索。");
                     sink.tryEmitComplete();
                 })

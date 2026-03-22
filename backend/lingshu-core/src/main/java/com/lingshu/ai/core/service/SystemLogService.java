@@ -49,6 +49,7 @@ public class SystemLogService {
     public void trace(String content, String section) { log(content, "trace", section); }
     public void warn(String content, String section) { log(content, "warn", section); }
     public void success(String content, String section) { log(content, "success", section); }
+    public void thinking(String content, String section) { log(content, "thinking", section); }
 
     public void startTimer(String key) {
         timers.put(key, System.currentTimeMillis());

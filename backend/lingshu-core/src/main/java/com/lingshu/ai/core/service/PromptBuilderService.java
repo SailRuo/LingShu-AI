@@ -10,10 +10,12 @@ public interface PromptBuilderService {
     
     String buildWelcomePrompt(AgentConfig config, String relationshipPrompt, String historyContext);
     
-    String buildUserPrompt(String relationshipPrompt, String longTermContext, String shortTermContext, String message);
+    String buildMergedSystemPrompt(AgentConfig config, String relationshipPrompt, String longTermContext);
     
-    String buildWelcomeUserPrompt(String relationshipPrompt, String historyContext, String agentName);
+    String buildUserPrompt(String relationshipPrompt, String longTermContext, String message);
     
+    String buildWelcomeUserPrompt(String relationshipPrompt, String agentName);
+
     String buildGreetingUserPrompt(String relationshipPrompt, String memoryContext, String timeOfDay, String agentName);
     
     String buildComfortUserPrompt(String relationshipPrompt, String emotion, double intensity, String agentName);

@@ -6,9 +6,14 @@ import com.lingshu.ai.infrastructure.entity.FactNode;
 import com.lingshu.ai.infrastructure.entity.UserNode;
 import com.lingshu.ai.infrastructure.repository.UserRepository;
 import com.lingshu.ai.infrastructure.repository.FactRepository;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
+import dev.langchain4j.service.TokenStream;
 import dev.langchain4j.store.embedding.filter.MetadataFilterBuilder;
+import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
+import dev.langchain4j.store.embedding.EmbeddingSearchResult;
+import dev.langchain4j.store.embedding.EmbeddingMatch;
+import dev.langchain4j.data.segment.TextSegment;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -33,35 +38,36 @@ public class MemoryServiceImpl implements MemoryService {
     );
 
     private final UserRepository userRepository;
-    private final ChatLanguageModel model;
     private final dev.langchain4j.model.embedding.EmbeddingModel embeddingModel;
-    private final dev.langchain4j.store.embedding.EmbeddingStore<dev.langchain4j.data.segment.TextSegment> embeddingStore;
+    private final dev.langchain4j.store.embedding.EmbeddingStore<TextSegment> embeddingStore;
     private final FactRepository factRepository;
     private final com.lingshu.ai.core.service.SystemLogService systemLogService;
+    private final ChatModel chatLanguageModel;
+    private final com.lingshu.ai.core.service.SettingService settingService;
     private FactExtractor factExtractor;
 
     public MemoryServiceImpl(UserRepository userRepository, 
-                             ChatLanguageModel model,
                              dev.langchain4j.model.embedding.EmbeddingModel embeddingModel,
-                             dev.langchain4j.store.embedding.EmbeddingStore<dev.langchain4j.data.segment.TextSegment> embeddingStore,
+                             dev.langchain4j.store.embedding.EmbeddingStore<TextSegment> embeddingStore,
                              FactRepository factRepository,
-                             com.lingshu.ai.core.service.SystemLogService systemLogService) {
+                             com.lingshu.ai.core.service.SystemLogService systemLogService,
+                             com.lingshu.ai.core.service.SettingService settingService,
+                             ChatModel chatLanguageModel) {
         this.userRepository = userRepository;
-        this.model = model;
         this.embeddingModel = embeddingModel;
         this.embeddingStore = embeddingStore;
         this.factRepository = factRepository;
         this.systemLogService = systemLogService;
+        this.settingService = settingService;
+        this.chatLanguageModel = chatLanguageModel;
     }
 
-    @PostConstruct
-    public void init() {
-        this.factExtractor = AiServices.create(FactExtractor.class, model);
-    }
 
-    @Async("taskExecutor")
     @Override
     public void extractFacts(String userId, String message) {
+        this.factExtractor = AiServices.builder(FactExtractor.class)
+                .chatModel(chatLanguageModel)
+                .build();
         log.debug("Memory pulse: Analyzing input for cognitive facts: {}", message);
         systemLogService.info("记忆脉冲: 启动认知事实分析...", "MEMORY");
         systemLogService.startTimer("fact_extraction");
@@ -108,8 +114,16 @@ public class MemoryServiceImpl implements MemoryService {
 
         if (report.getDeletedFactIds() != null && !report.getDeletedFactIds().isEmpty()) {
             for (Long id : report.getDeletedFactIds()) {
-                log.info("Memory corrected: Removing fact ID {}", id);
-                systemLogService.info("记忆修正: 移除过时事实 ID " + id, "MEMORY");
+                String factContent = "Unknown";
+                if (user != null && user.getFacts() != null) {
+                    factContent = user.getFacts().stream()
+                            .filter(f -> f.getId() != null && f.getId().equals(id))
+                            .map(f -> f.getContent())
+                            .findFirst()
+                            .orElse("Unknown");
+                }
+                log.info("Memory corrected: Removing outdated fact [{}] (ID: {})", factContent, id);
+                systemLogService.info("记忆修正: 移除过时事实 [" + (factContent.length() > 30 ? factContent.substring(0, 30) + "..." : factContent) + "]", "MEMORY");
                 this.deleteFact(id);
             }
         }
@@ -129,7 +143,19 @@ public class MemoryServiceImpl implements MemoryService {
                     continue;
                 }
                 
-                log.info("Aha! New persistent fact: {}", fact);
+                log.info("Aha! New persistent fact candidate: {}", fact);
+                
+                // 查重逻辑：如果该事实已存在于用户的记忆事实列表中，则跳过保存
+                if (user != null && user.getFacts() != null) {
+                    boolean exists = user.getFacts().stream()
+                            .anyMatch(f -> f.getContent().equalsIgnoreCase(fact.trim()));
+                    if (exists) {
+                        log.debug("Memory pulse: Fact already exists, skipping persistence: {}", fact);
+                        systemLogService.debug("事实已存在，跳过持久化: " + (fact.length() > 30 ? fact.substring(0, 30) + "... " : fact), "MEMORY");
+                        continue;
+                    }
+                }
+                
                 systemLogService.info("持久化新事实: " + (fact.length() > 30 ? fact.substring(0, 30) + "..." : fact), "MEMORY");
                 
                 FactNode factNode = FactNode.builder()
@@ -154,7 +180,7 @@ public class MemoryServiceImpl implements MemoryService {
                     metadata.put("fact_id", savedFact.getId().toString());
                 }
                 
-                dev.langchain4j.data.segment.TextSegment segment = dev.langchain4j.data.segment.TextSegment.from(fact, new dev.langchain4j.data.document.Metadata(metadata));
+                TextSegment segment = TextSegment.from(fact, new dev.langchain4j.data.document.Metadata(metadata));
                 
                 systemLogService.embeddingStart(fact.length(), "MEMORY");
                 try {
@@ -180,13 +206,21 @@ public class MemoryServiceImpl implements MemoryService {
         StringBuilder contextBuilder = new StringBuilder();
 
         systemLogService.dbStart("neo4j_query", "User.facts", "MEMORY");
-        userRepository.findByName(userId).ifPresent(user -> {
-            log.debug("Graph Retrieval: Found {} facts for user {}", user.getFacts() != null ? user.getFacts().size() : 0, userId);
+        userRepository.findByName(userId).ifPresentOrElse(user -> {
+            log.info("Graph Retrieval: Found {} facts for user {}", user.getFacts() != null ? user.getFacts().size() : 0, userId);
             int factCount = user.getFacts() != null ? user.getFacts().size() : 0;
-            systemLogService.debug("图谱检索: 用户 " + userId + " 有 " + factCount + " 条事实", "MEMORY");
+            systemLogService.info("图谱检索: 找到用户 " + userId + " 的 " + factCount + " 条既定事实", "MEMORY");
             contextBuilder.append("Known facts from your profile: ");
-            user.getFacts().forEach(f -> contextBuilder.append(f.getContent()).append("; "));
+            if (user.getFacts() != null) {
+                user.getFacts().forEach(f -> {
+                    log.debug("  Fact: {}", f.getContent());
+                    contextBuilder.append(f.getContent()).append("; ");
+                });
+            }
             contextBuilder.append("\n");
+        }, () -> {
+            log.warn("Graph Retrieval: User {} not found in Neo4j", userId);
+            systemLogService.warn("图谱检索: 未在 Neo4j 中找到用户 " + userId + " 的节点", "MEMORY");
         });
         systemLogService.dbEnd("neo4j_query", "MEMORY");
 
@@ -200,9 +234,15 @@ public class MemoryServiceImpl implements MemoryService {
         systemLogService.embeddingEnd("MEMORY");
         
         systemLogService.dbStart("pgvector_query", "embeddingStore", "MEMORY");
-        @SuppressWarnings("deprecation")
-        List<dev.langchain4j.store.embedding.EmbeddingMatch<dev.langchain4j.data.segment.TextSegment>> matches = 
-                embeddingStore.findRelevant(queryEmbedding, 5, 0.6);
+        
+        EmbeddingSearchRequest searchRequest = EmbeddingSearchRequest.builder()
+                .queryEmbedding(queryEmbedding)
+                .maxResults(5)
+                .minScore(0.6)
+                .build();
+        EmbeddingSearchResult<TextSegment> searchResult = embeddingStore.search(searchRequest);
+        List<EmbeddingMatch<TextSegment>> matches = searchResult.matches();
+        
         systemLogService.dbEnd("pgvector_query", "MEMORY");
         
         if (!matches.isEmpty()) {
@@ -335,8 +375,12 @@ public class MemoryServiceImpl implements MemoryService {
 
     @Override
     public void deleteFact(Long factId) {
-        log.info("Cognitive cleanup: Removing fact node #{}", factId);
-        systemLogService.info("认知清理: 删除事实节点 #" + factId, "MEMORY");
+        String factContent = factRepository.findById(factId)
+                .map(f -> f.getContent())
+                .orElse("未知内容");
+        
+        log.info("Cognitive cleanup: Removing fact node [{}] (ID: #{})", factContent, factId);
+        systemLogService.info("认知清理: 删除事实节点 [" + (factContent.length() > 30 ? factContent.substring(0, 30) + "..." : factContent) + "]", "MEMORY");
         
         systemLogService.dbStart("neo4j_delete", "FactNode#" + factId, "MEMORY");
         try {
