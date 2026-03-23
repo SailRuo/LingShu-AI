@@ -141,7 +141,7 @@ async function saveServer() {
 
 async function toggleActive(server: any) {
   try {
-    const res = await fetch(`/api/mcp/${server.id}/toggle`, { method: 'PUT' })
+    const res = await fetch(`/api/mcp/${server.id}/toggle`, { method: 'POST' })
     if (res.ok) {
       server.isActive = !server.isActive
       message.success(server.isActive ? '服务已启用' : '服务已停用')
