@@ -1,0 +1,14 @@
+{
+    "mcpServers": {
+        "postgres": {
+            "command": "uvx",
+            "args": [
+                "postgres-mcp",
+                "--access-mode=unrestricted"
+            ],
+            "env": {
+                "DATABASE_URI": "postgresql://postgres:lingshu123@localhost:5432/lingshu"
+            }
+        }
+    }
+}
