@@ -25,4 +25,6 @@ public interface AgentConfigService {
     AgentConfig setAsDefault(Long id);
     
     void initializeDefaultAgent();
+
+    AgentConfig getDefaultAgentConfig();
 }

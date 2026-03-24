@@ -1,8 +1,12 @@
 package com.lingshu.ui.stages;
 
+import com.lingshu.core.AppConfig;
+import com.lingshu.core.AppConfigService;
+import com.lingshu.core.AsrService;
 import com.lingshu.core.AudioStreamService;
 import com.lingshu.core.ThemeManager;
 import com.lingshu.ui.components.SpeechBubble;
+import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.geometry.Rectangle2D;
@@ -32,6 +36,8 @@ public class MainMascotStage extends Stage {
     private final ImageView aiView;
     private final SpeechBubble speechBubble;
     private final AudioStreamService audioService;
+    private final AsrService asrService;
+    private final AppConfigService appConfigService;
     private double xOffset = 0;
     private double yOffset = 0;
 
@@ -40,29 +46,28 @@ public class MainMascotStage extends Stage {
         this.setAlwaysOnTop(true);
         this.setTitle("LingShu AI Mascot");
 
-        // 1. 初始化服务
-        this.audioService = new AudioStreamService();
+        this.appConfigService = AppConfigService.getInstance();
 
-        // 2. 初始化 AI 形象
+        this.audioService = new AudioStreamService();
+        this.asrService = new AsrService();
+
         aiView = new ImageView();
         try {
             Image aiImage = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/icon/ai.png")));
             aiView.setImage(aiImage);
             aiView.setPreserveRatio(true);
             aiView.setFitWidth(250);
-            aiView.setPickOnBounds(true); // 关键：使透明区域也可点击
+            aiView.setPickOnBounds(true);
         } catch (Exception e) {
             logger.error("加载 AI 图片失败", e);
         }
 
-        // 3. 初始化气泡组件
         speechBubble = new SpeechBubble();
         speechBubble.setTranslateY(-1.0);
 
-        // 4. 基础交互逻辑
         initDragEvents();
+        initAsrCallback();
 
-        // 5. 组装布局
         StackPane layoutNode = new StackPane(aiView, speechBubble);
         layoutNode.setAlignment(Pos.BOTTOM_CENTER);
         layoutNode.setStyle("-fx-background-color: transparent;");
@@ -72,15 +77,38 @@ public class MainMascotStage extends Stage {
         root.setPickOnBounds(false); 
         root.setStyle("-fx-background-color: transparent;");
 
-        // 6. 加载场景与主题
         Scene scene = new Scene(root, 400, 750, Color.TRANSPARENT);
+        ThemeManager.getInstance().applyTheme(root);
         ThemeManager.getInstance().loadStylesheet(scene);
         this.setScene(scene);
 
-        // 7. 默认位置 (屏幕右下角)
         Rectangle2D bounds = Screen.getPrimary().getVisualBounds();
         this.setX(bounds.getMaxX() - 400);
         this.setY(bounds.getMaxY() - 750);
+
+        initAsrFromConfig();
+    }
+
+    private void initAsrCallback() {
+        asrService.setOnRecognitionResult(text -> {
+            Platform.runLater(() -> {
+                logger.info("ASR 识别结果: {}", text);
+                speechBubble.streamText("你说: " + text);
+                
+                AppConfig config = appConfigService.load();
+                if (config.ttsEnabled()) {
+                    audioService.speak(text, "taozi");
+                }
+            });
+        });
+    }
+
+    private void initAsrFromConfig() {
+        AppConfig config = appConfigService.load();
+        if (config.asrEnabled()) {
+            logger.info("根据配置启动 ASR 持续监听");
+            asrService.startListening();
+        }
     }
 
     private void initDragEvents() {
@@ -101,14 +129,17 @@ public class MainMascotStage extends Stage {
         aiView.addEventHandler(MouseEvent.MOUSE_ENTERED, e -> logger.debug("鼠标进入 AI 区域"));
         aiView.addEventHandler(MouseEvent.MOUSE_EXITED, e -> logger.debug("鼠标离开 AI 区域"));
 
-        // 点击 Mascot 唤醒语音与文字气泡 (改用 addEventHandler 避免冲突)
         aiView.addEventHandler(MouseEvent.MOUSE_CLICKED, event -> {
             logger.info("Mascot 被点击: {}, Count: {}", event.getButton(), event.getClickCount());
             if (event.getButton() == MouseButton.PRIMARY && event.getClickCount() == 1) {
-                String welcomeText = "你好！我是灵枢 AI 助手，很高兴为你服务。你可以通过拖拽来调整我的位置。";
+                String welcomeText = "你好！我是灵枢 AI 助手，很高兴为你服务。你可以通过拖拽来调整我的位置，右键打开菜单。";
                 logger.info("正在显示气泡并调用语音服务...");
                 speechBubble.streamText(welcomeText);
-                audioService.speak(welcomeText, "taozi");
+                
+                AppConfig config = appConfigService.load();
+                if (config.ttsEnabled()) {
+                    audioService.speak(welcomeText, "taozi");
+                }
             }
         });
     }
@@ -123,5 +154,9 @@ public class MainMascotStage extends Stage {
 
     public AudioStreamService getAudioService() {
         return audioService;
+    }
+
+    public AsrService getAsrService() {
+        return asrService;
     }
 }

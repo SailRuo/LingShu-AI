@@ -1,12 +1,16 @@
 package com.lingshu.ui.stages;
 
+import com.lingshu.core.AppConfig;
+import com.lingshu.core.AppConfigService;
 import com.lingshu.core.ThemeManager;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
@@ -16,88 +20,111 @@ import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 
 /**
- * 设置弹窗窗口类
- * 实现左右结构布局、毛玻璃 UI 和全局主题切换。
+ * 系统设置窗口。
  */
 public class SettingsStage extends Stage {
 
-    private double xOffset = 0;
-    private double yOffset = 0;
+    private final AppConfigService appConfigService = AppConfigService.getInstance();
+    private double xOffset;
+    private double yOffset;
 
     public SettingsStage() {
         this.initStyle(StageStyle.TRANSPARENT);
         this.setAlwaysOnTop(true);
-        this.setTitle("灵枢 AI - 系统设置");
+        this.setTitle("LingShu AI - 系统设置");
 
-        // 1. 基准容器 (StackPane 用于叠加关闭按钮)
+        AppConfig config = appConfigService.load();
+        
+        // Initialize ThemeManager state
+        ThemeManager.getInstance().setThemeColor(config.themeColor());
+        ThemeManager.getInstance().setThemeMode(ThemeManager.ThemeMode.valueOf(config.themeMode()));
+
         StackPane root = new StackPane();
         root.getStyleClass().add("glass-pane");
-        root.setPrefSize(500, 380);
+        root.setPrefSize(640, 480);
 
-        // 主布局 (左导航 + 右内容)
-        HBox mainLayout = new HBox(0);
+        HBox mainLayout = new HBox();
         mainLayout.setAlignment(Pos.TOP_LEFT);
 
-        // 注入全局主题色变量并同步
         ThemeManager.getInstance().applyTheme(root);
 
-        // --- 左侧导航栏 ---
-        VBox leftNav = new VBox(15);
+        // --- Left Nav ---
+        VBox leftNav = new VBox(10);
         leftNav.getStyleClass().add("nav-container");
         leftNav.setPadding(new Insets(40, 0, 20, 0));
-        leftNav.setPrefWidth(140);
+        leftNav.setPrefWidth(160);
         leftNav.setAlignment(Pos.TOP_CENTER);
 
         Label navTitle = new Label("设置中心");
         navTitle.getStyleClass().add("nav-title");
-        
-        Button generalBtn = new Button("外观设置");
-        generalBtn.getStyleClass().addAll("nav-item", "active");
-        
-        Button modelBtn = new Button("模型配置");
-        modelBtn.getStyleClass().add("nav-item");
 
-        Button aboutBtn = new Button("关于灵枢");
-        aboutBtn.getStyleClass().add("nav-item");
+        Button appearanceBtn = createNavBtn("外观设置", true);
+        Button serviceBtn = createNavBtn("服务配置", false);
+        Button aboutBtn = createNavBtn("关于灵枢", false);
 
-        leftNav.getChildren().addAll(navTitle, generalBtn, modelBtn, aboutBtn);
+        leftNav.getChildren().addAll(navTitle, appearanceBtn, serviceBtn, aboutBtn);
 
-        // --- 右侧内容区 ---
         VBox rightContent = new VBox(25);
-        rightContent.setPadding(new Insets(45, 30, 30, 30));
+        rightContent.setPadding(new Insets(45, 35, 35, 35));
         HBox.setHgrow(rightContent, Priority.ALWAYS);
         rightContent.setAlignment(Pos.TOP_LEFT);
 
-        // 标题区
-        VBox header = new VBox(5);
-        Label title = new Label("外观设置");
+        VBox header = new VBox(8);
+        Label title = new Label("个性化与服务");
         title.getStyleClass().add("title-text");
-        Label subtitle = new Label("个性化您的灵枢 AI 服务端");
+        Label subtitle = new Label("自定义您的 AI 助手外观，并配置核心服务地址。");
         subtitle.getStyleClass().add("subtitle-text");
         header.getChildren().addAll(title, subtitle);
 
-        // 设置项
-        VBox settingsArea = new VBox(15);
-        
-        Label colorLabel = new Label("系统主题色 (神经通路颜色)");
-        colorLabel.getStyleClass().add("accent-label");
+        VBox settingsArea = new VBox(18);
 
-        // 下拉框
-        ComboBox<String> themeBox = new ComboBox<>();
-        themeBox.getItems().addAll("深邃海洋 (蓝色)", "黑客帝国 (绿色)", "霓虹城市 (紫色)", "烈日骄阳 (橙色)");
-        themeBox.getStyleClass().add("modern-combo-box");
-        themeBox.setMaxWidth(Double.MAX_VALUE);
+        // Mode Toggle
+        VBox modeSection = new VBox(8);
+        Label modeLabel = new Label("界面模式");
+        modeLabel.getStyleClass().add("accent-label");
         
-        // 读取管理器当前状态
-        String currentColor = ThemeManager.getInstance().getThemeColor();
-        ThemeManager.getInstance().themeColorProperty().addListener((obs, old, newVal) -> {
-            colorLabel.setTextFill(Color.web(newVal));
+        HBox modeToggle = new HBox(0);
+        modeToggle.getStyleClass().add("theme-toggle-group");
+        Button lightBtn = new Button("浅色模式");
+        Button darkBtn = new Button("深色模式");
+        lightBtn.getStyleClass().add("theme-toggle-item");
+        darkBtn.getStyleClass().add("theme-toggle-item");
+        
+        lightBtn.setOnAction(e -> {
+            lightBtn.getStyleClass().add("selected");
+            darkBtn.getStyleClass().remove("selected");
+            ThemeManager.getInstance().setThemeMode(ThemeManager.ThemeMode.LIGHT);
+        });
+        darkBtn.setOnAction(e -> {
+            darkBtn.getStyleClass().add("selected");
+            lightBtn.getStyleClass().remove("selected");
+            ThemeManager.getInstance().setThemeMode(ThemeManager.ThemeMode.DARK);
         });
         
-        if (currentColor.equals("#0078D7")) themeBox.setValue("深邃海洋 (蓝色)");
-        else if (currentColor.equals("#00C853")) themeBox.setValue("黑客帝国 (绿色)");
-        else if (currentColor.equals("#D500F9")) themeBox.setValue("霓虹城市 (紫色)");
-        else if (currentColor.equals("#FF9100")) themeBox.setValue("烈日骄阳 (橙色)");
+        if (ThemeManager.getInstance().getThemeMode() == ThemeManager.ThemeMode.LIGHT) {
+            lightBtn.getStyleClass().add("selected");
+        } else {
+            darkBtn.getStyleClass().add("selected");
+        }
+        
+        modeToggle.getChildren().addAll(lightBtn, darkBtn);
+        modeSection.getChildren().addAll(modeLabel, modeToggle);
+
+        // Color Picker
+        VBox colorSection = new VBox(8);
+        Label colorLabel = new Label("系统风格色");
+        colorLabel.getStyleClass().add("accent-label");
+
+        ComboBox<String> themeBox = new ComboBox<>();
+        themeBox.getItems().addAll("深海海洋 (蓝色)", "黑客帝国 (绿色)", "霓虹城市 (紫色)", "烈日骄阳 (橙色)");
+        themeBox.getStyleClass().add("modern-combo-box");
+        themeBox.setMaxWidth(Double.MAX_VALUE);
+
+        String currentColor = ThemeManager.getInstance().getThemeColor();
+        if ("#0078D7".equals(currentColor)) themeBox.setValue("深海海洋 (蓝色)");
+        else if ("#00C853".equals(currentColor)) themeBox.setValue("黑客帝国 (绿色)");
+        else if ("#D500F9".equals(currentColor)) themeBox.setValue("霓虹城市 (紫色)");
+        else if ("#FF9100".equals(currentColor)) themeBox.setValue("烈日骄阳 (橙色)");
 
         themeBox.valueProperty().addListener((obs, oldVal, newVal) -> {
             String color = switch (newVal) {
@@ -108,20 +135,75 @@ public class SettingsStage extends Stage {
             };
             ThemeManager.getInstance().setThemeColor(color);
         });
+        colorSection.getChildren().addAll(colorLabel, themeBox);
 
-        settingsArea.getChildren().addAll(colorLabel, themeBox);
+        VBox asrSection = new VBox(8);
+        Label asrToggleLabel = new Label("语音识别 (ASR)");
+        asrToggleLabel.getStyleClass().add("accent-label");
+        
+        CheckBox asrEnabledCheckBox = new CheckBox("启用语音识别功能");
+        asrEnabledCheckBox.setSelected(config.asrEnabled());
+        asrEnabledCheckBox.getStyleClass().add("modern-checkbox");
+        
+        asrSection.getChildren().addAll(asrToggleLabel, asrEnabledCheckBox);
 
-        // 应用按钮
-        Button applyBtn = new Button("保存设置");
+        VBox ttsSection = new VBox(8);
+        Label ttsToggleLabel = new Label("语音合成 (TTS)");
+        ttsToggleLabel.getStyleClass().add("accent-label");
+        
+        CheckBox ttsEnabledCheckBox = new CheckBox("启用语音合成功能");
+        ttsEnabledCheckBox.setSelected(config.ttsEnabled());
+        ttsEnabledCheckBox.getStyleClass().add("modern-checkbox");
+        
+        ttsSection.getChildren().addAll(ttsToggleLabel, ttsEnabledCheckBox);
+
+        // Service URLs
+        VBox urlSection = new VBox(12);
+        Label ttsLabel = new Label("TTS 服务地址");
+        ttsLabel.getStyleClass().add("accent-label");
+        TextField ttsUrlField = createUrlField(config.ttsWsUrl());
+        
+        Label asrLabel = new Label("ASR 服务地址");
+        asrLabel.getStyleClass().add("accent-label");
+        TextField asrUrlField = createUrlField(config.asrWsUrl());
+        
+        urlSection.getChildren().addAll(ttsLabel, ttsUrlField, asrLabel, asrUrlField);
+
+        Label saveStatus = createHintLabel("");
+        saveStatus.setWrapText(true);
+
+        settingsArea.getChildren().addAll(modeSection, colorSection, asrSection, ttsSection, urlSection, saveStatus);
+
+               HBox actionBar = new HBox(12);
+        actionBar.setAlignment(Pos.CENTER_LEFT);
+
+        Button applyBtn = new Button("保存并应用");
         applyBtn.getStyleClass().add("action-button");
-        applyBtn.setPrefWidth(120);
-        applyBtn.setOnAction(e -> this.close());
+        applyBtn.setPrefWidth(140);
+        applyBtn.setOnAction(e -> {
+            AppConfig updatedConfig = new AppConfig(
+                ttsUrlField.getText(), 
+                asrUrlField.getText(),
+                ThemeManager.getInstance().getThemeColor(),
+                ThemeManager.getInstance().getThemeMode().name(),
+                asrEnabledCheckBox.isSelected(),
+                ttsEnabledCheckBox.isSelected()
+            );
+            appConfigService.save(updatedConfig);
+            saveStatus.setTextFill(Color.web(ThemeManager.getInstance().getThemeColor()));
+            saveStatus.setText("设置已保存并实时生效。");
+        });
 
-        rightContent.getChildren().addAll(header, settingsArea, applyBtn);
+        Button closeBtnInline = new Button("取消");
+        closeBtnInline.getStyleClass().add("action-button");
+        closeBtnInline.setStyle("-fx-background-color: transparent; -fx-border-color: -nav-border; -fx-border-radius: 12;");
+        closeBtnInline.setOnAction(e -> this.close());
+
+        actionBar.getChildren().addAll(applyBtn, closeBtnInline);
+        rightContent.getChildren().addAll(header, settingsArea, actionBar);
 
         mainLayout.getChildren().addAll(leftNav, rightContent);
 
-        // --- 右上角关闭按钮 ---
         Button closeBtn = new Button("×");
         closeBtn.getStyleClass().add("close-button");
         StackPane.setAlignment(closeBtn, Pos.TOP_RIGHT);
@@ -130,7 +212,6 @@ public class SettingsStage extends Stage {
 
         root.getChildren().addAll(mainLayout, closeBtn);
 
-        // 3. 实现拖拽逻辑 (主要通过左侧导航栏拖拽)
         root.setOnMousePressed(event -> {
             xOffset = event.getSceneX();
             yOffset = event.getSceneY();
@@ -140,9 +221,30 @@ public class SettingsStage extends Stage {
             this.setY(event.getScreenY() - yOffset);
         });
 
-        // 4. 加载场景
-        Scene scene = new Scene(root, 550, 400, Color.TRANSPARENT);
+        Scene scene = new Scene(root, 640, 480, Color.TRANSPARENT);
         ThemeManager.getInstance().loadStylesheet(scene);
         this.setScene(scene);
+    }
+
+    private Button createNavBtn(String text, boolean active) {
+        Button btn = new Button(text);
+        btn.getStyleClass().add("nav-item");
+        if (active) btn.getStyleClass().add("active");
+        btn.setDisable(!active);
+        return btn;
+    }
+
+    private TextField createUrlField(String value) {
+        TextField textField = new TextField(value);
+        textField.setMaxWidth(Double.MAX_VALUE);
+        textField.getStyleClass().add("modern-text-field");
+        return textField;
+    }
+
+    private Label createHintLabel(String text) {
+        Label label = new Label(text);
+        label.getStyleClass().add("subtitle-text");
+        label.setStyle("-fx-font-size: 12px;");
+        return label;
     }
 }

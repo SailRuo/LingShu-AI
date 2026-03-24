@@ -12,8 +12,13 @@ import javafx.scene.layout.Region;
 public class ThemeManager {
     private static final ThemeManager instance = new ThemeManager();
 
-    // 默认主题色
+    public enum ThemeMode {
+        LIGHT, DARK
+    }
+
+    // 默认值
     private final StringProperty currentThemeColor = new SimpleStringProperty("#0078D7");
+    private final SimpleStringProperty currentThemeMode = new SimpleStringProperty("DARK");
 
     private ThemeManager() {}
 
@@ -33,13 +38,36 @@ public class ThemeManager {
         currentThemeColor.set(color);
     }
 
+    public StringProperty themeModeProperty() {
+        return currentThemeMode;
+    }
+
+    public ThemeMode getThemeMode() {
+        return ThemeMode.valueOf(currentThemeMode.get());
+    }
+
+    public void setThemeMode(ThemeMode mode) {
+        currentThemeMode.set(mode.name());
+    }
+
     /**
-     * 将主题色 CSS 变量注入到指定的根节点上
+     * 将主题变量和模式类注入到指定的根节点上
      * @param root 场景的根节点或其他容器
      */
     public void applyTheme(Region root) {
-        // 绑定节点样式到主题色变量
-        root.styleProperty().bind(currentThemeColor.map(color -> "-theme-color: " + color + ";"));
+        root.styleProperty().bind(currentThemeColor.map(color -> 
+            "-theme-color: " + color + "; -fx-background-color: transparent;"));
+        
+        root.getStyleClass().remove("light-mode");
+        root.getStyleClass().remove("dark-mode");
+        
+        currentThemeMode.addListener((obs, old, newVal) -> {
+            root.getStyleClass().remove("light-mode");
+            root.getStyleClass().remove("dark-mode");
+            root.getStyleClass().add(newVal.toLowerCase() + "-mode");
+        });
+        
+        root.getStyleClass().add(currentThemeMode.get().toLowerCase() + "-mode");
     }
 
     /**

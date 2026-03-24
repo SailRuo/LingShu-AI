@@ -9,6 +9,15 @@
             "env": {
                 "DATABASE_URI": "postgresql://postgres:lingshu123@localhost:5432/lingshu"
             }
+        },
+        "Sqlite": {
+            "command": "uvx",
+            "args": [
+                "mcp-server-sqlite",
+                "--db-path",
+                "E:\\Project\\LingShu-AI\\lingshu.db"
+            ],
+            "env": {}
         }
     }
 }

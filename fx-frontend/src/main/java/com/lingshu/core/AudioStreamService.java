@@ -40,16 +40,16 @@ import java.util.concurrent.atomic.AtomicReference;
 public class AudioStreamService {
 
     private static final Logger logger = LoggerFactory.getLogger(AudioStreamService.class);
-    private static final String WS_URL = "ws://127.0.0.1:8000/ws";
     private static final String STREAM_FORMAT = "aac";
     private static final int PIPE_BUFFER_SIZE = 1024 * 1024;
-    private static final int PCM_BUFFER_SIZE = 8192;
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final AtomicReference<StreamingPlaybackSession> currentSession = new AtomicReference<>();
+    private final AppConfigService appConfigService;
 
     private CompletableFuture<WebSocket> webSocketFuture;
+    private String activeWsUrl;
     private FileOutputStream debugFileOut;
     private Path debugAudioPath;
 
@@ -58,13 +58,15 @@ public class AudioStreamService {
                 .proxy(ProxySelector.of(null))
                 .build();
         this.objectMapper = new ObjectMapper();
-        this.webSocketFuture = connectWebSocket();
+        this.appConfigService = AppConfigService.getInstance();
+        this.webSocketFuture = connectWebSocket(getConfiguredWsUrl());
     }
 
-    private CompletableFuture<WebSocket> connectWebSocket() {
-        logger.info("建立长连接 WebSocket: {}", WS_URL);
+    private CompletableFuture<WebSocket> connectWebSocket(String wsUrl) {
+        activeWsUrl = wsUrl;
+        logger.info("建立长连接 WebSocket: {}", wsUrl);
         return httpClient.newWebSocketBuilder()
-                .buildAsync(URI.create(WS_URL), new WebSocketListener())
+                .buildAsync(URI.create(wsUrl), new WebSocketListener())
                 .thenApply(ws -> {
                     logger.info("TTS 核心通道就绪");
                     return ws;
@@ -76,9 +78,33 @@ public class AudioStreamService {
     }
 
     private synchronized void ensureWebSocket() {
+        String configuredWsUrl = getConfiguredWsUrl();
+        if (activeWsUrl == null || !activeWsUrl.equals(configuredWsUrl)) {
+            closeWebSocketQuietly();
+            webSocketFuture = connectWebSocket(configuredWsUrl);
+            return;
+        }
         if (webSocketFuture == null || webSocketFuture.isCompletedExceptionally()
                 || (webSocketFuture.isDone() && webSocketFuture.join() == null)) {
-            webSocketFuture = connectWebSocket();
+            webSocketFuture = connectWebSocket(configuredWsUrl);
+        }
+    }
+
+    private String getConfiguredWsUrl() {
+        return appConfigService.load().ttsWsUrl();
+    }
+
+    private void closeWebSocketQuietly() {
+        if (webSocketFuture == null || !webSocketFuture.isDone()) {
+            return;
+        }
+        try {
+            WebSocket webSocket = webSocketFuture.getNow(null);
+            if (webSocket != null) {
+                webSocket.sendClose(WebSocket.NORMAL_CLOSURE, "reconfigure").join();
+            }
+        } catch (Exception e) {
+            logger.debug("关闭旧 WebSocket 失败", e);
         }
     }
 
@@ -235,6 +261,7 @@ public class AudioStreamService {
 
     private final class StreamingPlaybackSession {
         private final AtomicBoolean stopped = new AtomicBoolean(false);
+        private final AtomicBoolean inputFinished = new AtomicBoolean(false);
         private final AtomicBoolean started = new AtomicBoolean(false);
         private final PipedInputStream aacInput;
         private final PipedOutputStream aacOutput;
@@ -275,7 +302,7 @@ public class AudioStreamService {
         }
 
         private void finish() {
-            if (stopped.compareAndSet(false, true)) {
+            if (inputFinished.compareAndSet(false, true)) {
                 try {
                     aacOutput.close();
                 } catch (IOException e) {
@@ -286,16 +313,17 @@ public class AudioStreamService {
 
         private void stop() {
             if (stopped.compareAndSet(false, true)) {
+                inputFinished.set(true);
                 closeQuietly(aacOutput);
                 closeQuietly(aacInput);
-            }
-            if (line != null) {
-                line.stop();
-                line.flush();
-                line.close();
-            }
-            if (playbackThread != null) {
-                playbackThread.interrupt();
+                if (line != null) {
+                    line.stop();
+                    line.flush();
+                    line.close();
+                }
+                if (playbackThread != null) {
+                    playbackThread.interrupt();
+                }
             }
         }
 
@@ -311,13 +339,17 @@ public class AudioStreamService {
                     try {
                         frame = demultiplexer.readNextFrame();
                     } catch (IOException eof) {
-                        if (stopped.get()) {
+                        // 如果明确要求停止，或者输入已完成且管道读空（EOF），则正常退出
+                        if (stopped.get() || inputFinished.get()) {
                             break;
                         }
                         throw eof;
                     }
 
                     if (frame == null || frame.length == 0) {
+                        if (inputFinished.get()) {
+                            break;
+                        }
                         continue;
                     }
 
@@ -346,12 +378,15 @@ public class AudioStreamService {
                     }
                 }
 
+                // 播放剩余缓存
                 if (!stopped.get() && line != null) {
                     line.drain();
                 }
                 logger.info("流式播放结束");
             } catch (Exception e) {
-                logger.error("AAC 解码或播放失败", e);
+                if (!stopped.get()) {
+                    logger.error("AAC 解码或播放失败", e);
+                }
             } finally {
                 stop();
             }

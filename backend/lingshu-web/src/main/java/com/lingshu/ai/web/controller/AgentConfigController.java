@@ -34,6 +34,11 @@ public class AgentConfigController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @GetMapping("/defaults")
+    public ResponseEntity<AgentConfig> getDefaultPrompts() {
+        return ResponseEntity.ok(agentConfigService.getDefaultAgentConfig());
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<AgentConfig> getAgentById(@PathVariable Long id) {
         return agentConfigService.getAgentById(id)

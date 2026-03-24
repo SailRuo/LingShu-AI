@@ -32,8 +32,8 @@ public class SpeechBubble extends VBox {
         speechLabel = new Label("");
         speechLabel.setWrapText(true);
         speechLabel.setMaxWidth(240);
+        speechLabel.getStyleClass().add("bubble-text");
         speechLabel.setFont(Font.font("Microsoft YaHei", FontWeight.BOLD, 15));
-        speechLabel.setTextFill(Color.WHITE);
         speechLabel.setAlignment(Pos.CENTER);
 
         VBox labelContainer = new VBox(speechLabel);
@@ -47,19 +47,23 @@ public class SpeechBubble extends VBox {
         bubbleTail.getPoints().addAll(0.0, 0.0, 12.0, 15.0, -12.0, 15.0);
         bubbleTail.setRotate(180);
         
-        // 绑定尾巴的线条颜色到全局主题
-        bubbleTail.setFill(Color.web("#141414", 0.95));
-        ThemeManager.getInstance().themeColorProperty().addListener((obs, old, color) -> {
-            bubbleTail.setStroke(Color.web(color, 0.5));
-        });
-        bubbleTail.setStroke(Color.web(ThemeManager.getInstance().getThemeColor(), 0.5));
-        bubbleTail.setStrokeWidth(1.5);
+        // 绑定尾巴的颜色到全局主题
+        updateTailStyle();
+        ThemeManager.getInstance().themeColorProperty().addListener((obs, old, color) -> updateTailStyle());
+        ThemeManager.getInstance().themeModeProperty().addListener((obs, old, mode) -> updateTailStyle());
 
         // 3. 组装组件
         this.getChildren().addAll(labelContainer, bubbleTail);
         
         // 4. 注入全局主题 CSS 变量
         ThemeManager.getInstance().applyTheme(this);
+    }
+
+    private void updateTailStyle() {
+        boolean isLight = ThemeManager.getInstance().getThemeMode() == ThemeManager.ThemeMode.LIGHT;
+        bubbleTail.setFill(isLight ? Color.web("#FFFFFF", 0.9) : Color.web("#191919", 0.85));
+        bubbleTail.setStroke(Color.web(ThemeManager.getInstance().getThemeColor(), 0.5));
+        bubbleTail.setStrokeWidth(1.5);
     }
 
     /**
