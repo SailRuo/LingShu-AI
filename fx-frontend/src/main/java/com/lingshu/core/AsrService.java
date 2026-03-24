@@ -31,14 +31,16 @@ public class AsrService {
     private static final boolean SIGNED = true;
     private static final boolean BIG_ENDIAN = false;
     private static final int BUFFER_SIZE = 4096;
-    private static final int SILENCE_DURATION_MS = 1500;
-    private static final int MIN_SPEECH_DURATION_MS = 500;
+    private static final int SILENCE_DURATION_MS = 800;
+    private static final int MIN_SPEECH_DURATION_MS = 300;
+    private static final int CALIBRATION_FRAMES = 50;
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final AppConfigService appConfigService;
     private final AtomicBoolean isRecording = new AtomicBoolean(false);
     private final AtomicBoolean isListening = new AtomicBoolean(false);
+    private final AtomicBoolean isMuted = new AtomicBoolean(false);
     private TargetDataLine targetDataLine;
     private ByteArrayOutputStream audioBuffer;
     private Consumer<String> onRecognitionResult;
@@ -50,6 +52,15 @@ public class AsrService {
                 .build();
         this.objectMapper = new ObjectMapper();
         this.appConfigService = AppConfigService.getInstance();
+    }
+
+    public void setMuted(boolean muted) {
+        this.isMuted.set(muted);
+        if (muted) {
+            logger.info("ASR 进入静音模式 (TTS 播放中)");
+        } else {
+            logger.info("ASR 静音模式解除");
+        }
     }
 
     public boolean isRecording() {
@@ -86,11 +97,14 @@ public class AsrService {
                 targetDataLine.open(format);
                 targetDataLine.start();
 
-                AppConfig config = appConfigService.load();
-                int vadThreshold = config.vadThreshold();
+                logger.info("开始校准环境噪音...");
+                
+                double noiseFloor = calibrateNoiseFloor();
+                double vadMultiplier = appConfigService.load().vadMultiplier();
+                final int vadThreshold = Math.max(50, (int) (noiseFloor * vadMultiplier));
 
-                System.out.println("[ASR] 开始持续监听模式 (VAD阈值: " + vadThreshold + ")");
-                logger.info("开始持续监听模式 (VAD)");
+                logger.info("环境噪音基准: {}, VAD阈值: {}, 乘数: {}", 
+                        String.format("%.1f", noiseFloor), vadThreshold, String.format("%.1f", vadMultiplier));
 
                 listeningThread = new Thread(() -> {
                     byte[] buffer = new byte[BUFFER_SIZE];
@@ -99,22 +113,40 @@ public class AsrService {
                     long speechStartTime = 0;
                     long lastSpeechTime = 0;
                     int frameCount = 0;
+                    
+                    double currentMultiplier = vadMultiplier;
+                    int currentThreshold = vadThreshold;
 
                     while (isListening.get()) {
                         int count = targetDataLine.read(buffer, 0, buffer.length);
                         if (count > 0) {
+                            if (isMuted.get()) {
+                                if (inSpeech) {
+                                    speechBuffer.reset();
+                                    inSpeech = false;
+                                }
+                                continue;
+                            }
+                            
                             double rms = calculateRms(buffer, count);
                             frameCount++;
                             
-                            if (frameCount % 50 == 0) {
-                                System.out.println("[ASR] RMS: " + String.format("%.1f", rms) + " (threshold: " + vadThreshold + ")");
+                            // 每 20 帧 (约 2.5 秒) 重新获取一次最新的灵敏度倍数
+                            if (frameCount % 20 == 0) {
+                                currentMultiplier = appConfigService.load().vadMultiplier();
+                                currentThreshold = Math.max(50, (int) (noiseFloor * currentMultiplier));
                             }
 
-                            if (rms > vadThreshold) {
+                            if (frameCount % 50 == 0) {
+                                logger.debug("RMS: {} (threshold: {}, multiplier: {})", 
+                                        String.format("%.1f", rms), currentThreshold, String.format("%.1f", currentMultiplier));
+                            }
+
+                            if (rms > currentThreshold) {
                                 if (!inSpeech) {
                                     inSpeech = true;
                                     speechStartTime = System.currentTimeMillis();
-                                    System.out.println("[ASR] 检测到语音开始, RMS: " + String.format("%.1f", rms));
+                                    logger.debug("检测到语音开始, RMS: {}, Threshold: {}", String.format("%.1f", rms), currentThreshold);
                                 }
                                 speechBuffer.write(buffer, 0, count);
                                 lastSpeechTime = System.currentTimeMillis();
@@ -125,16 +157,16 @@ public class AsrService {
                                 long speechDuration = lastSpeechTime - speechStartTime;
 
                                 if (silenceDuration > SILENCE_DURATION_MS && speechDuration > MIN_SPEECH_DURATION_MS) {
-                                    System.out.println("[ASR] 检测到语音结束，语音时长: " + speechDuration + "ms");
+                                    logger.debug("检测到语音结束，语音时长: {}ms", speechDuration);
                                     
                                     byte[] speechData = speechBuffer.toByteArray();
                                     speechBuffer.reset();
                                     inSpeech = false;
 
                                     if (speechData.length > 0) {
-                                        System.out.println("[ASR] 开始识别，音频大小: " + speechData.length + " bytes");
+                                        logger.info("开始识别，音频大小: {} bytes", speechData.length);
                                         recognize(speechData).thenAccept(text -> {
-                                            System.out.println("[ASR] 识别结果: " + text);
+                                            logger.info("识别结果: {}", text);
                                             if (onRecognitionResult != null && !text.isBlank()) {
                                                 onRecognitionResult.accept(text);
                                             }
@@ -166,6 +198,32 @@ public class AsrService {
             }
             logger.info("停止持续监听模式");
         }
+    }
+
+    private double calibrateNoiseFloor() {
+        byte[] buffer = new byte[BUFFER_SIZE];
+        double maxRms = 0;
+        double sumRms = 0;
+        int validFrames = 0;
+
+        for (int i = 0; i < CALIBRATION_FRAMES && isListening.get(); i++) {
+            int count = targetDataLine.read(buffer, 0, buffer.length);
+            if (count > 0) {
+                double rms = calculateRms(buffer, count);
+                maxRms = Math.max(maxRms, rms);
+                sumRms += rms;
+                validFrames++;
+                logger.debug("校准帧 {}: RMS={}", i, String.format("%.1f", rms));
+            }
+        }
+
+        double avgRms = validFrames > 0 ? sumRms / validFrames : 100;
+        double threshold = Math.max(maxRms, avgRms * 1.5);
+        logger.info("校准结果: 平均={}, 最大={}, 基准={}", 
+                String.format("%.1f", avgRms), 
+                String.format("%.1f", maxRms), 
+                String.format("%.1f", threshold));
+        return threshold;
     }
 
     private double calculateRms(byte[] buffer, int length) {
@@ -256,14 +314,13 @@ public class AsrService {
     public CompletableFuture<String> recognize(byte[] pcmData) {
         String asrUrl = getAsrUrl();
         if (asrUrl == null || asrUrl.isBlank()) {
-            System.out.println("[ASR] 错误: ASR 服务地址未配置");
             logger.error("ASR 服务地址未配置");
             return CompletableFuture.completedFuture("");
         }
 
-        System.out.println("[ASR] 发送识别请求到: " + asrUrl);
+        logger.debug("发送识别请求到: {}", asrUrl);
         byte[] wavData = convertPcmToWav(pcmData);
-        System.out.println("[ASR] WAV 数据大小: " + wavData.length + " bytes");
+        logger.debug("WAV 数据大小: {} bytes", wavData.length);
 
         String boundary = "----LingShuASRBoundary" + System.currentTimeMillis();
         String crlf = "\r\n";
@@ -302,28 +359,23 @@ public class AsrService {
 
         return httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .thenApply(response -> {
-                    System.out.println("[ASR] HTTP 响应状态码: " + response.statusCode());
+                    logger.debug("HTTP 响应状态码: {}", response.statusCode());
                     if (response.statusCode() == 200) {
                         try {
                             AsrResponse asrResponse = objectMapper.readValue(response.body(), AsrResponse.class);
-                            System.out.println("[ASR] 识别成功: " + asrResponse.text());
-                            logger.info("ASR 识别结果: {}", asrResponse.text());
-                            return asrResponse.text();
+                            logger.info("识别成功: {}", asrResponse.cleanText());
+                            return asrResponse.cleanText();
                         } catch (Exception e) {
-                            System.out.println("[ASR] 解析响应失败: " + response.body());
-                            logger.error("解析 ASR 响应失败: {}", response.body(), e);
+                            logger.error("解析响应失败: {}", response.body(), e);
                             return "";
                         }
                     } else {
-                        System.out.println("[ASR] 请求失败，状态码: " + response.statusCode() + ", 响应: " + response.body());
-                        logger.error("ASR 请求失败，状态码: {}, 响应: {}", response.statusCode(), response.body());
+                        logger.error("请求失败，状态码: {}, 响应: {}", response.statusCode(), response.body());
                         return "";
                     }
                 })
                 .exceptionally(ex -> {
-                    System.out.println("[ASR] 请求异常: " + ex.getMessage());
-                    ex.printStackTrace();
-                    logger.error("ASR 请求异常", ex);
+                    logger.error("请求异常", ex);
                     return "";
                 });
     }
@@ -373,5 +425,10 @@ public class AsrService {
         return url;
     }
 
-    private record AsrResponse(String text) {}
+    private record AsrResponse(String text) {
+        String cleanText() {
+            if (text == null) return "";
+            return text.replaceAll("<\\|[^|]*\\|>", "").trim();
+        }
+    }
 }

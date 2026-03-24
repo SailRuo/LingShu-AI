@@ -10,6 +10,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.Slider;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -19,9 +20,6 @@ import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 
-/**
- * 系统设置窗口。
- */
 public class SettingsStage extends Stage {
 
     private final AppConfigService appConfigService = AppConfigService.getInstance();
@@ -35,7 +33,6 @@ public class SettingsStage extends Stage {
 
         AppConfig config = appConfigService.load();
         
-        // Initialize ThemeManager state
         ThemeManager.getInstance().setThemeColor(config.themeColor());
         ThemeManager.getInstance().setThemeMode(ThemeManager.ThemeMode.valueOf(config.themeMode()));
 
@@ -48,7 +45,6 @@ public class SettingsStage extends Stage {
 
         ThemeManager.getInstance().applyTheme(root);
 
-        // --- Left Nav ---
         VBox leftNav = new VBox(10);
         leftNav.getStyleClass().add("nav-container");
         leftNav.setPadding(new Insets(40, 0, 20, 0));
@@ -78,7 +74,6 @@ public class SettingsStage extends Stage {
 
         VBox settingsArea = new VBox(18);
 
-        // Mode Toggle
         VBox modeSection = new VBox(8);
         Label modeLabel = new Label("界面模式");
         modeLabel.getStyleClass().add("accent-label");
@@ -110,7 +105,6 @@ public class SettingsStage extends Stage {
         modeToggle.getChildren().addAll(lightBtn, darkBtn);
         modeSection.getChildren().addAll(modeLabel, modeToggle);
 
-        // Color Picker
         VBox colorSection = new VBox(8);
         Label colorLabel = new Label("系统风格色");
         colorLabel.getStyleClass().add("accent-label");
@@ -147,6 +141,20 @@ public class SettingsStage extends Stage {
         
         asrSection.getChildren().addAll(asrToggleLabel, asrEnabledCheckBox);
 
+        VBox sensitivitySection = new VBox(8);
+        Label sensitivityLabel = new Label("ASR 灵敏度");
+        sensitivityLabel.getStyleClass().add("accent-label");
+        
+        Slider sensitivitySlider = new Slider(1.5, 5.0, config.vadMultiplier());
+        sensitivitySlider.setShowTickLabels(false);
+        sensitivitySlider.setShowTickMarks(true);
+        sensitivitySlider.setMajorTickUnit(1.0);
+        sensitivitySlider.setBlockIncrement(0.1);
+        sensitivitySlider.getStyleClass().add("modern-slider");
+        
+        Label sensitivityHint = createHintLabel("数值越小越灵敏 (默认 3.0)");
+        sensitivitySection.getChildren().addAll(sensitivityLabel, sensitivitySlider, sensitivityHint);
+
         VBox ttsSection = new VBox(8);
         Label ttsToggleLabel = new Label("语音合成 (TTS)");
         ttsToggleLabel.getStyleClass().add("accent-label");
@@ -156,20 +164,7 @@ public class SettingsStage extends Stage {
         ttsEnabledCheckBox.getStyleClass().add("modern-checkbox");
         
         ttsSection.getChildren().addAll(ttsToggleLabel, ttsEnabledCheckBox);
-        
-        VBox vadSection = new VBox(8);
-        Label vadLabel = new Label("ASR 灵敏度 (VAD 阈值)");
-        vadLabel.getStyleClass().add("accent-label");
-        Label vadHint = new Label("数值越小越灵敏。如果 ASR 没反应，请尝试调低该值（如 50-100）。");
-        vadHint.getStyleClass().add("subtitle-text");
-        vadHint.setStyle("-fx-font-size: 11px;");
-        
-        TextField vadThresholdField = new TextField(String.valueOf(config.vadThreshold()));
-        vadThresholdField.getStyleClass().add("modern-text-field");
-        
-        vadSection.getChildren().addAll(vadLabel, vadHint, vadThresholdField);
 
-        // Service URLs
         VBox urlSection = new VBox(12);
         Label ttsLabel = new Label("TTS 服务地址");
         ttsLabel.getStyleClass().add("accent-label");
@@ -184,9 +179,9 @@ public class SettingsStage extends Stage {
         Label saveStatus = createHintLabel("");
         saveStatus.setWrapText(true);
 
-        settingsArea.getChildren().addAll(modeSection, colorSection, asrSection, ttsSection, vadSection, urlSection, saveStatus);
+        settingsArea.getChildren().addAll(modeSection, colorSection, asrSection, sensitivitySection, ttsSection, urlSection, saveStatus);
 
-               HBox actionBar = new HBox(12);
+        HBox actionBar = new HBox(12);
         actionBar.setAlignment(Pos.CENTER_LEFT);
 
         Button applyBtn = new Button("保存并应用");
@@ -200,7 +195,7 @@ public class SettingsStage extends Stage {
                 ThemeManager.getInstance().getThemeMode().name(),
                 asrEnabledCheckBox.isSelected(),
                 ttsEnabledCheckBox.isSelected(),
-                Integer.parseInt(vadThresholdField.getText().trim())
+                sensitivitySlider.getValue()
             );
             appConfigService.save(updatedConfig);
             saveStatus.setTextFill(Color.web(ThemeManager.getInstance().getThemeColor()));

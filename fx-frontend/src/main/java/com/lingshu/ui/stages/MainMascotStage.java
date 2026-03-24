@@ -86,6 +86,7 @@ public class MainMascotStage extends Stage {
         this.setX(bounds.getMaxX() - 400);
         this.setY(bounds.getMaxY() - 750);
 
+        audioService.setPlaybackStateListener(asrService::setMuted);
         initAsrFromConfig();
     }
 

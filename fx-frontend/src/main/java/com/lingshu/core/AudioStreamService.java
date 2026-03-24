@@ -10,7 +10,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.DataLine;
-import javax.sound.sampled.LineUnavailableException;
 import javax.sound.sampled.SourceDataLine;
 import java.io.BufferedInputStream;
 import java.io.FileOutputStream;
@@ -32,6 +31,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /**
  * 语音流服务类。
@@ -47,6 +47,7 @@ public class AudioStreamService {
     private final ObjectMapper objectMapper;
     private final AtomicReference<StreamingPlaybackSession> currentSession = new AtomicReference<>();
     private final AppConfigService appConfigService;
+    private Consumer<Boolean> playbackStateListener;
 
     private CompletableFuture<WebSocket> webSocketFuture;
     private String activeWsUrl;
@@ -110,6 +111,7 @@ public class AudioStreamService {
 
     public void speak(String text, String speaker) {
         stopPlayback();
+        notifyPlaybackState(true);
 
         StreamingPlaybackSession session = new StreamingPlaybackSession();
         currentSession.set(session);
@@ -192,6 +194,16 @@ public class AudioStreamService {
             } finally {
                 debugFileOut = null;
             }
+        }
+    }
+
+    public void setPlaybackStateListener(Consumer<Boolean> listener) {
+        this.playbackStateListener = listener;
+    }
+
+    private void notifyPlaybackState(boolean active) {
+        if (playbackStateListener != null) {
+            playbackStateListener.accept(active);
         }
     }
 
@@ -324,6 +336,7 @@ public class AudioStreamService {
                 if (playbackThread != null) {
                     playbackThread.interrupt();
                 }
+                notifyPlaybackState(false);
             }
         }
 

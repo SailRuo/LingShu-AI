@@ -110,7 +110,7 @@ public class TrayService {
                 config.themeMode(),
                 enabled,
                 config.ttsEnabled(),
-                config.vadThreshold()
+                config.vadMultiplier()
         );
         appConfigService.save(newConfig);
         logger.info("ASR 状态已更新: {}", enabled);
@@ -134,7 +134,7 @@ public class TrayService {
                 config.themeMode(),
                 config.asrEnabled(),
                 enabled,
-                config.vadThreshold()
+                config.vadMultiplier()
         );
         appConfigService.save(newConfig);
         logger.info("TTS 状态已更新: {}", enabled);
