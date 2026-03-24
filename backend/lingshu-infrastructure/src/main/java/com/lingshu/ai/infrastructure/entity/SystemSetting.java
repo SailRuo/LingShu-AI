@@ -21,6 +21,11 @@ public class SystemSetting {
     private String baseUrl;
     
     private String apiKey;
+
+    private String embedSource;
+    private String embedModel;
+    private String embedBaseUrl;
+    private String embedApiKey;
     
     private Boolean proactiveEnabled;
     

@@ -15,6 +15,9 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
 
 /**
@@ -26,6 +29,7 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
 
     private final ChatMessageRepository messageRepository;
     private final ChatSessionRepository sessionRepository;
+    private final ConcurrentMap<Long, SystemMessage> sessionSystemMessages = new ConcurrentHashMap<>();
 
     public DatabaseChatMemoryStore(ChatMessageRepository messageRepository, 
                                    ChatSessionRepository sessionRepository) {
@@ -47,15 +51,34 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
         // 翻转回正序供 LangChain4j 使用
         java.util.Collections.reverse(dbMessages);
         
-        return dbMessages.stream()
+        List<ChatMessage> messages = dbMessages.stream()
                 .map(this::toLangChain4jMessage)
                 .filter(java.util.Objects::nonNull)
                 .collect(Collectors.toList());
+
+        SystemMessage systemMessage = sessionSystemMessages.get(sessionId);
+        if (systemMessage != null) {
+            messages.add(0, systemMessage);
+        }
+
+        return messages;
     }
 
     @Override
     public void updateMessages(Object memoryId, List<ChatMessage> messages) {
         if (messages == null || messages.isEmpty()) return;
+
+        Long sessionId = parseId(memoryId);
+
+        Optional<SystemMessage> systemMessage = messages.stream()
+                .filter(SystemMessage.class::isInstance)
+                .map(SystemMessage.class::cast)
+                .reduce((first, second) -> second);
+        if (systemMessage.isPresent()) {
+            sessionSystemMessages.put(sessionId, systemMessage.get());
+        } else {
+            sessionSystemMessages.remove(sessionId);
+        }
         
         // 过滤掉 SystemMessage，因为 system prompt 由 ChatServiceImpl 每次动态注入，不应持久化
         java.util.List<ChatMessage> persistableMessages = messages.stream()
@@ -64,7 +87,6 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
         if (persistableMessages.isEmpty()) return;
         
         log.debug("Memory update: Syncing {} messages for session ID: {}", messages.size(), memoryId);
-        Long sessionId = parseId(memoryId);
         ChatSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
 
@@ -129,6 +151,7 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
     public void deleteMessages(Object memoryId) {
         log.debug("Memory deletion: Clearing history for session ID: {}", memoryId);
         Long sessionId = parseId(memoryId);
+        sessionSystemMessages.remove(sessionId);
         // 通常我们不真正删除历史，只是逻辑分离。根据需求实现。
     }
 

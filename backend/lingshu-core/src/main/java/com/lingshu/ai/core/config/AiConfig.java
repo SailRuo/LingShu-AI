@@ -59,6 +59,11 @@ public class AiConfig {
             public void onRequest(dev.langchain4j.model.chat.listener.ChatModelRequestContext requestContext) {
                 dev.langchain4j.model.chat.request.ChatRequest request = requestContext.chatRequest();
                 log.info("LLM Request Messages (Count: {}):", request.messages().size());
+                long systemCount = request.messages().stream().filter(m -> m.type() == dev.langchain4j.data.message.ChatMessageType.SYSTEM).count();
+                long userCount = request.messages().stream().filter(m -> m.type() == dev.langchain4j.data.message.ChatMessageType.USER).count();
+                long assistantCount = request.messages().stream().filter(m -> m.type() == dev.langchain4j.data.message.ChatMessageType.AI).count();
+                long toolCount = request.messages().stream().filter(m -> m.type() == dev.langchain4j.data.message.ChatMessageType.TOOL_EXECUTION_RESULT).count();
+                log.info("LLM Request Role Summary => system: {}, user: {}, assistant: {}, tool: {}", systemCount, userCount, assistantCount, toolCount);
                 request.messages().forEach(m -> {
                     log.info("  Role: {}, Content: {}", m.type(), m.toString());
                 });

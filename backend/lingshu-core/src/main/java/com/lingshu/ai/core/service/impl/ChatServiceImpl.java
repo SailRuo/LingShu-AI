@@ -149,11 +149,10 @@ public class ChatServiceImpl implements ChatService {
         String actualSource = sysSetting.getSource() != null ? sysSetting.getSource() : "ollama";
         systemLogService.llmStart(actualModel, actualSource, "LLM");
         
-        dev.langchain4j.service.AiServices<com.lingshu.ai.core.config.AiConfig.PlainAssistant> builder = 
-                dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.config.AiConfig.PlainAssistant.class)
+        dev.langchain4j.service.AiServices<com.lingshu.ai.core.config.AiConfig.Assistant> builder = 
+                dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.config.AiConfig.Assistant.class)
                 .chatModel(chatLanguageModel)
                 .chatMemoryProvider(chatMemoryProvider)
-                .systemMessageProvider(memoryId -> systemPrompt)
                 .tools(localTools);
                 
         List<McpClient> mcpClients = mcpService.getActiveClients();
@@ -161,11 +160,11 @@ public class ChatServiceImpl implements ChatService {
             builder.toolProvider(McpToolProvider.builder().mcpClients(mcpClients).build());
         }
         
-        AiConfig.PlainAssistant dynamicAssistant = builder.build();
+        AiConfig.Assistant dynamicAssistant = builder.build();
         
         systemLogService.debug("准备发送对话请求，SystemPrompt 长度: " + systemPrompt.length(), "CHAT");
         
-        String response = dynamicAssistant.chat(session.getId(), message);
+        String response = dynamicAssistant.chat(session.getId(), message, systemPrompt);
         systemLogService.llmEnd(response != null ? response.length() / 4 : 0, "LLM");
 
         memoryService.extractFacts(userId, message);
@@ -246,8 +245,8 @@ public class ChatServiceImpl implements ChatService {
 
         systemLogService.startTimer("llm_LLM");
 
-        AiConfig.PlainStreamingAssistant assistantToUse;
-        AiServices<AiConfig.PlainStreamingAssistant> builder;
+        AiConfig.RawStreamingAssistant assistantToUse;
+        AiServices<AiConfig.RawStreamingAssistant> builder;
 
         if (model != null && baseUrl != null) {
             // 如果提供了显式参数，则构建临时模型（例如预览功能）
@@ -269,17 +268,15 @@ public class ChatServiceImpl implements ChatService {
                         .listeners(listeners)
                         .build();
             }
-            builder = AiServices.builder(AiConfig.PlainStreamingAssistant.class)
+            builder = AiServices.builder(AiConfig.RawStreamingAssistant.class)
                     .streamingChatModel(tempModel)
                     .chatMemoryProvider(chatMemoryProvider)
-                    .systemMessageProvider(memoryId -> systemPrompt)
                     .tools(localTools);
         } else {
             // 使用注入的单例 bean，它现在已具备动态切换能力
-            builder = AiServices.builder(AiConfig.PlainStreamingAssistant.class)
+            builder = AiServices.builder(AiConfig.RawStreamingAssistant.class)
                     .streamingChatModel(streamingChatLanguageModel)
                     .chatMemoryProvider(chatMemoryProvider)
-                    .systemMessageProvider(memoryId -> systemPrompt)
                     .tools(localTools);
         }
         
@@ -291,7 +288,7 @@ public class ChatServiceImpl implements ChatService {
 
         systemLogService.debug("准备发送流式对话请求，SystemPrompt 长度: " + systemPrompt.length(), "CHAT");
         
-        assistantToUse.chat(session.getId(), message)
+        assistantToUse.chat(session.getId(), message, systemPrompt)
                 .onPartialThinking(thinking -> {
                     systemLogService.thinking(thinking.text(), "LLM");
                 })

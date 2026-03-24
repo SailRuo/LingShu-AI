@@ -1,5 +1,60 @@
 <script setup lang="ts">
-import { Cpu, Database, Activity, Zap, BrainCircuit } from 'lucide-vue-next'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { Cpu, Database, Activity, Zap, BrainCircuit, Brain } from 'lucide-vue-next'
+
+const status = ref({
+  aiSource: 'ollama',
+  chatStatus: 'offline',
+  embedStatus: 'offline',
+  neo4j: 'offline',
+  vram: '---',
+  latency: '---'
+})
+
+const fetchStatus = async () => {
+  try {
+    const response = await fetch('http://localhost:8080/api/system/status')
+    if (response.ok) {
+      status.value = await response.json()
+    } else {
+      status.value.chatStatus = 'offline'
+      status.value.embedStatus = 'offline'
+      status.value.neo4j = 'offline'
+    }
+  } catch (error) {
+    status.value.chatStatus = 'offline'
+    status.value.embedStatus = 'offline'
+    status.value.neo4j = 'offline'
+  }
+}
+
+const aiSourceLabel = computed(() => {
+  return status.value.aiSource?.toLowerCase() === 'ollama' ? 'Ollama' : 'LLM'
+})
+
+const isSystemReady = computed(() => {
+  return status.value.chatStatus === 'online' && 
+         status.value.embedStatus === 'online' && 
+         status.value.neo4j === 'online'
+})
+
+const systemSummary = computed(() => {
+  if (isSystemReady.value) return '系统就绪'
+  if (status.value.embedStatus === 'model_missing') return '向量模型缺失'
+  if (status.value.chatStatus === 'model_missing') return '聊天模型缺失'
+  return '检查连接'
+})
+
+let timer: any = null
+
+onMounted(() => {
+  fetchStatus()
+  timer = setInterval(fetchStatus, 15000)
+})
+
+onUnmounted(() => {
+  if (timer) clearInterval(timer)
+})
 </script>
 
 <template>
@@ -8,30 +63,35 @@ import { Cpu, Database, Activity, Zap, BrainCircuit } from 'lucide-vue-next'
       <!-- Left: System Status -->
       <div class="status-left">
         <div class="status-indicator">
-          <div class="pulse-dot"></div>
-          <span class="status-text">系统运行中</span>
+          <div :class="['pulse-dot', isSystemReady ? 'online' : 'error']"></div>
+          <span class="status-text">{{ systemSummary }}</span>
         </div>
         
         <div class="metric-group">
-          <div class="metric-item">
+          <div class="metric-item" :title="`Chat: ${status.chatStatus}`">
             <BrainCircuit :size="14" class="metric-icon" />
-            <span class="metric-label">Ollama</span>
-            <span class="metric-value online">在线</span>
+            <span class="metric-label">{{ aiSourceLabel }}</span>
+            <div :class="['status-light', status.chatStatus === 'online' ? 'online' : 'error']"></div>
           </div>
-          <div class="metric-item">
+          <div class="metric-item" :title="`Embed: ${status.embedStatus}`">
+            <Brain :size="14" class="metric-icon" />
+            <span class="metric-label">Embed</span>
+            <div :class="['status-light', status.embedStatus === 'online' ? 'online' : 'error']"></div>
+          </div>
+          <div class="metric-item" :title="`Neo4j: ${status.neo4j}`">
             <Database :size="14" class="metric-icon" />
             <span class="metric-label">Neo4j</span>
-            <span class="metric-value online">在线</span>
+            <div :class="['status-light', status.neo4j === 'online' ? 'online' : 'error']"></div>
           </div>
           <div class="metric-item">
             <Cpu :size="14" class="metric-icon" />
             <span class="metric-label">VRAM</span>
-            <span class="metric-value">8.4 / 16 GB</span>
+            <span class="metric-value">{{ status.vram }}</span>
           </div>
           <div class="metric-item">
             <Activity :size="14" class="metric-icon" />
             <span class="metric-label">延迟</span>
-            <span class="metric-value">1.2ms</span>
+            <span class="metric-value">{{ status.latency }}</span>
           </div>
         </div>
       </div>
@@ -82,20 +142,56 @@ import { Cpu, Database, Activity, Zap, BrainCircuit } from 'lucide-vue-next'
 .pulse-dot {
   width: 8px;
   height: 8px;
-  background: var(--color-success);
   border-radius: 50%;
-  animation: pulse-dot 2s ease-in-out infinite;
 }
 
-@keyframes pulse-dot {
+.pulse-dot.online {
+  background: #3b82f6; /* Blue as requested */
+  animation: pulse-blue 2s ease-in-out infinite;
+}
+
+.pulse-dot.error {
+  background: #ef4444; /* Red */
+  animation: pulse-red 2s ease-in-out infinite;
+}
+
+@keyframes pulse-blue {
   0%, 100% { 
     opacity: 1;
-    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
   }
   50% { 
     opacity: 0.8;
-    box-shadow: 0 0 0 6px rgba(34, 197, 94, 0);
+    box-shadow: 0 0 0 6px rgba(59, 130, 246, 0);
   }
+}
+
+@keyframes pulse-red {
+  0%, 100% { 
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+  50% { 
+    opacity: 0.8;
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+  }
+}
+
+.status-light {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-left: 4px;
+}
+
+.status-light.online {
+  background: #3b82f6;
+  box-shadow: 0 0 4px #3b82f6;
+}
+
+.status-light.error {
+  background: #ef4444;
+  box-shadow: 0 0 4px #ef4444;
 }
 
 .status-text {
@@ -133,10 +229,6 @@ import { Cpu, Database, Activity, Zap, BrainCircuit } from 'lucide-vue-next'
   font-weight: 600;
   color: var(--color-text);
   font-family: 'Fira Code', monospace;
-}
-
-.metric-value.online {
-  color: var(--color-success);
 }
 
 .status-right {
