@@ -27,6 +27,7 @@ public class AppConfigService {
     private static final String KEY_THEME_MODE = "theme_mode";
     private static final String KEY_ASR_ENABLED = "asr_enabled";
     private static final String KEY_TTS_ENABLED = "tts_enabled";
+    private static final String KEY_VAD_THRESHOLD = "vad_threshold";
 
     private AppConfigService() {
         initSchema();
@@ -45,13 +46,17 @@ public class AppConfigService {
         boolean ttsEnabled = Boolean.parseBoolean(
                 configMap.getOrDefault(KEY_TTS_ENABLED, String.valueOf(AppConfig.DEFAULT_TTS_ENABLED))
         );
+        int vadThreshold = Integer.parseInt(
+                configMap.getOrDefault(KEY_VAD_THRESHOLD, String.valueOf(AppConfig.DEFAULT_VAD_THRESHOLD))
+        );
         return new AppConfig(
                 configMap.getOrDefault(KEY_TTS_WS_URL, AppConfig.DEFAULT_TTS_WS_URL),
                 configMap.getOrDefault(KEY_ASR_WS_URL, AppConfig.DEFAULT_ASR_WS_URL),
                 configMap.getOrDefault(KEY_THEME_COLOR, AppConfig.DEFAULT_THEME_COLOR),
                 configMap.getOrDefault(KEY_THEME_MODE, AppConfig.DEFAULT_THEME_MODE),
                 asrEnabled,
-                ttsEnabled
+                ttsEnabled,
+                vadThreshold
         );
     }
 
@@ -62,6 +67,7 @@ public class AppConfigService {
         upsert(KEY_THEME_MODE, config.themeMode());
         upsert(KEY_ASR_ENABLED, String.valueOf(config.asrEnabled()));
         upsert(KEY_TTS_ENABLED, String.valueOf(config.ttsEnabled()));
+        upsert(KEY_VAD_THRESHOLD, String.valueOf(config.vadThreshold()));
         logger.info("配置已保存到 SQLite: {}", DB_PATH);
     }
 

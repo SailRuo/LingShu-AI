@@ -129,19 +129,19 @@ public class MainMascotStage extends Stage {
         aiView.addEventHandler(MouseEvent.MOUSE_ENTERED, e -> logger.debug("鼠标进入 AI 区域"));
         aiView.addEventHandler(MouseEvent.MOUSE_EXITED, e -> logger.debug("鼠标离开 AI 区域"));
 
-        aiView.addEventHandler(MouseEvent.MOUSE_CLICKED, event -> {
-            logger.info("Mascot 被点击: {}, Count: {}", event.getButton(), event.getClickCount());
-            if (event.getButton() == MouseButton.PRIMARY && event.getClickCount() == 1) {
-                String welcomeText = "你好！我是灵枢 AI 助手，很高兴为你服务。你可以通过拖拽来调整我的位置，右键打开菜单。";
-                logger.info("正在显示气泡并调用语音服务...");
-                speechBubble.streamText(welcomeText);
-                
-                AppConfig config = appConfigService.load();
-                if (config.ttsEnabled()) {
-                    audioService.speak(welcomeText, "taozi");
-                }
-            }
-        });
+//        aiView.addEventHandler(MouseEvent.MOUSE_CLICKED, event -> {
+//            logger.info("Mascot 被点击: {}, Count: {}", event.getButton(), event.getClickCount());
+//            if (event.getButton() == MouseButton.PRIMARY && event.getClickCount() == 1) {
+//                String welcomeText = "你好！我是灵枢 AI 助手，很高兴为你服务。你可以通过拖拽来调整我的位置，右键打开菜单。";
+//                logger.info("正在显示气泡并调用语音服务...");
+//                speechBubble.streamText(welcomeText);
+//
+//                AppConfig config = appConfigService.load();
+//                if (config.ttsEnabled()) {
+//                    audioService.speak(welcomeText, "taozi");
+//                }
+//            }
+//        });
     }
 
     public ImageView getAiView() {

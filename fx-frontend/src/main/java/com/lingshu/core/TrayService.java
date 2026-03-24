@@ -109,7 +109,8 @@ public class TrayService {
                 config.themeColor(),
                 config.themeMode(),
                 enabled,
-                config.ttsEnabled()
+                config.ttsEnabled(),
+                config.vadThreshold()
         );
         appConfigService.save(newConfig);
         logger.info("ASR 状态已更新: {}", enabled);
@@ -132,7 +133,8 @@ public class TrayService {
                 config.themeColor(),
                 config.themeMode(),
                 config.asrEnabled(),
-                enabled
+                enabled,
+                config.vadThreshold()
         );
         appConfigService.save(newConfig);
         logger.info("TTS 状态已更新: {}", enabled);

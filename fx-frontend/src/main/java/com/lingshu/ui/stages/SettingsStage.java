@@ -156,6 +156,18 @@ public class SettingsStage extends Stage {
         ttsEnabledCheckBox.getStyleClass().add("modern-checkbox");
         
         ttsSection.getChildren().addAll(ttsToggleLabel, ttsEnabledCheckBox);
+        
+        VBox vadSection = new VBox(8);
+        Label vadLabel = new Label("ASR 灵敏度 (VAD 阈值)");
+        vadLabel.getStyleClass().add("accent-label");
+        Label vadHint = new Label("数值越小越灵敏。如果 ASR 没反应，请尝试调低该值（如 50-100）。");
+        vadHint.getStyleClass().add("subtitle-text");
+        vadHint.setStyle("-fx-font-size: 11px;");
+        
+        TextField vadThresholdField = new TextField(String.valueOf(config.vadThreshold()));
+        vadThresholdField.getStyleClass().add("modern-text-field");
+        
+        vadSection.getChildren().addAll(vadLabel, vadHint, vadThresholdField);
 
         // Service URLs
         VBox urlSection = new VBox(12);
@@ -172,7 +184,7 @@ public class SettingsStage extends Stage {
         Label saveStatus = createHintLabel("");
         saveStatus.setWrapText(true);
 
-        settingsArea.getChildren().addAll(modeSection, colorSection, asrSection, ttsSection, urlSection, saveStatus);
+        settingsArea.getChildren().addAll(modeSection, colorSection, asrSection, ttsSection, vadSection, urlSection, saveStatus);
 
                HBox actionBar = new HBox(12);
         actionBar.setAlignment(Pos.CENTER_LEFT);
@@ -187,7 +199,8 @@ public class SettingsStage extends Stage {
                 ThemeManager.getInstance().getThemeColor(),
                 ThemeManager.getInstance().getThemeMode().name(),
                 asrEnabledCheckBox.isSelected(),
-                ttsEnabledCheckBox.isSelected()
+                ttsEnabledCheckBox.isSelected(),
+                Integer.parseInt(vadThresholdField.getText().trim())
             );
             appConfigService.save(updatedConfig);
             saveStatus.setTextFill(Color.web(ThemeManager.getInstance().getThemeColor()));

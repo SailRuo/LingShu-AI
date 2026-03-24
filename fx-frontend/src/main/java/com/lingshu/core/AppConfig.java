@@ -1,6 +1,6 @@
 package com.lingshu.core;
 
-public record AppConfig(String ttsWsUrl, String asrWsUrl, String themeColor, String themeMode, boolean asrEnabled, boolean ttsEnabled) {
+public record AppConfig(String ttsWsUrl, String asrWsUrl, String themeColor, String themeMode, boolean asrEnabled, boolean ttsEnabled, int vadThreshold) {
 
     public static final String DEFAULT_TTS_WS_URL = "ws://127.0.0.1:8000/ws";
     public static final String DEFAULT_ASR_WS_URL = "http://127.0.0.1:50001/asr";
@@ -8,6 +8,7 @@ public record AppConfig(String ttsWsUrl, String asrWsUrl, String themeColor, Str
     public static final String DEFAULT_THEME_MODE = "DARK";
     public static final boolean DEFAULT_ASR_ENABLED = true;
     public static final boolean DEFAULT_TTS_ENABLED = true;
+    public static final int DEFAULT_VAD_THRESHOLD = 500;
 
     public AppConfig {
         ttsWsUrl = normalize(ttsWsUrl, DEFAULT_TTS_WS_URL);
