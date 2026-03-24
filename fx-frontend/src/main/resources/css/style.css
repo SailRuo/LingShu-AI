@@ -1,0 +1,218 @@
+/* 
+ * LingShu AI Desktop Mascot Stylesheet
+ * 采用了“CSS 变量 + 语义化类”的现代架构，解耦样式与逻辑。
+ */
+
+/* 全局基准变量 */
+.root {
+    -theme-color: #0078D7;
+}
+
+/* 毛玻璃面板样式 (用于设置窗口) */
+.glass-pane {
+    -fx-background-color: rgba(25, 25, 25, 0.75);
+    
+    -fx-background-radius: 20;
+    background-radius: 20;
+    
+    -fx-border-radius: 20;
+    border-radius: 20;
+    
+    -fx-border-width: 1.2;
+    
+    /* 动态主题边框 */
+    -fx-border-color: linear-gradient(to bottom right, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.05), -theme-color);
+    
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.6), 30, 0, 0, 0);
+}
+
+/* 导航容器 */
+.nav-container {
+    -fx-background-color: rgba(255, 255, 255, 0.03);
+    -fx-border-color: transparent rgba(255, 255, 255, 0.1) transparent transparent;
+    -fx-border-width: 0 1 0 0;
+}
+
+.nav-title {
+    -fx-text-fill: rgba(255, 255, 255, 0.5);
+    -fx-font-size: 12px;
+    -fx-font-weight: bold;
+    -fx-padding: 0 0 10 0;
+}
+
+.nav-item {
+    -fx-background-color: transparent;
+    -fx-text-fill: rgba(255, 255, 255, 0.7);
+    -fx-padding: 10 20;
+    -fx-font-size: 14px;
+    -fx-pref-width: 120;
+    -fx-alignment: center-left;
+    -fx-cursor: hand;
+    -fx-transition: all 0.3s;
+}
+
+.nav-item:hover {
+    -fx-background-color: rgba(255, 255, 255, 0.08);
+    -fx-text-fill: white;
+}
+
+.nav-item.active {
+    -fx-background-color: rgba(255, 255, 255, 0.1);
+    -fx-text-fill: -theme-color;
+    -fx-font-weight: bold;
+    -fx-border-color: transparent transparent transparent -theme-color;
+    -fx-border-width: 0 0 0 3;
+}
+
+/* 关闭按钮 */
+.close-button {
+    -fx-background-color: rgba(255, 255, 255, 0.05);
+    -fx-text-fill: white;
+    -fx-font-size: 18px;
+    -fx-font-family: "Arial";
+    -fx-background-radius: 50;
+    -fx-pref-width: 32;
+    -fx-pref-height: 32;
+    -fx-padding: 0;
+    -fx-cursor: hand;
+}
+
+.close-button:hover {
+    -fx-text-fill: white;
+}
+
+/* 气泡容器样式 */
+.bubble-container {
+    background-color: rgba(20, 20, 20, 0.85);
+    -fx-background-color: linear-gradient(to bottom right, rgba(20, 20, 20, 0.85), rgba(40, 40, 40, 0.7));
+    
+    -fx-background-radius: 20;
+    background-radius: 20;
+    
+    -fx-border-color: linear-gradient(to bottom right, -theme-color, rgba(255, 255, 255, 0.2));
+    border-color: rgba(255, 255, 255, 0.2);
+    
+    -fx-border-width: 1.5;
+    
+    -fx-border-radius: 20;
+    border-radius: 20;
+    
+    -fx-effect: dropshadow(gaussian, -theme-color, 20, 0.3, 0, 0);
+}
+
+/* 文本样式 */
+.title-text {
+    font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+    -fx-font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+    
+    font-size: 24px;
+    -fx-font-size: 24px;
+    
+    font-weight: bold;
+    -fx-font-weight: bold;
+    
+    -fx-text-fill: white;
+}
+
+.subtitle-text {
+    font-size: 11px;
+    -fx-font-size: 11px;
+    
+    -fx-text-fill: #888888;
+}
+
+.accent-label {
+    -fx-text-fill: -theme-color;
+    
+    font-weight: bold;
+    -fx-font-weight: bold;
+    
+    font-size: 13px;
+    -fx-font-size: 13px;
+}
+
+/* ContextMenu (右键菜单) 深度美化 */
+.context-menu {
+    -fx-background-color: rgba(30, 30, 30, 0.95);
+    
+    -fx-background-radius: 12;
+    background-radius: 12;
+    
+    -fx-border-radius: 12;
+    border-radius: 12;
+    
+    -fx-border-color: rgba(255, 255, 255, 0.15);
+    
+    -fx-border-width: 1;
+    border-width: 1;
+    
+    -fx-padding: 8 0 8 0;
+    padding: 8px 0;
+    
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.5), 15, 0, 5, 5);
+}
+
+.menu-item {
+    -fx-padding: 10 25 10 25;
+}
+
+.menu-item .label {
+    -fx-text-fill: #E0E0E0;
+    
+    font-size: 14px;
+    -fx-font-size: 14px;
+    
+    font-family: "Microsoft YaHei";
+    -fx-font-family: "Microsoft YaHei";
+}
+
+/* 下拉框 (ComboBox) 美化 */
+.modern-combo-box {
+    -fx-background-color: rgba(255, 255, 255, 0.05);
+    
+    -fx-border-color: rgba(255, 255, 255, 0.2);
+    
+    -fx-border-radius: 8;
+    border-radius: 8;
+    
+    -fx-background-radius: 8;
+    background-radius: 8;
+}
+
+.modern-combo-box .list-view {
+    -fx-background-color: #1E1E1E;
+    
+    -fx-background-radius: 8;
+    background-radius: 8;
+    
+    -fx-border-color: -theme-color;
+    
+    -fx-border-width: 1;
+}
+
+.modern-combo-box .list-cell {
+    background-color: transparent;
+    -fx-background-color: transparent;
+    
+    -fx-text-fill: #CCCCCC;
+    
+    -fx-padding: 8 12;
+}
+
+/* 按钮样式 */
+.action-button {
+    -fx-background-color: -theme-color;
+    
+    -fx-text-fill: white;
+    
+    font-weight: bold;
+    -fx-font-weight: bold;
+    
+    -fx-background-radius: 12;
+    background-radius: 12;
+    
+    -fx-padding: 12 20 12 20;
+    
+    cursor: hand;
+    -fx-cursor: hand;
+}
