@@ -63,6 +63,7 @@ public class MemoryServiceImpl implements MemoryService {
     }
 
 
+    @Async("taskExecutor")
     @Override
     public void extractFacts(String userId, String message) {
         this.factExtractor = AiServices.builder(FactExtractor.class)
@@ -232,6 +233,11 @@ public class MemoryServiceImpl implements MemoryService {
         systemLogService.dbEnd("neo4j_query", "MEMORY");
 
         if (!needsSemanticRetrieval(message)) {
+            // 针对“我是谁”、“我的名字”等意图，即使没有提取到复杂实体，也尝试返回基本事实
+            if (message.contains("我是谁") || message.contains("我的名字") || message.contains("叫什么")) {
+                log.debug("Memory pulse: Detected identity query, returning basic facts anyway.");
+                return contextBuilder.toString();
+            }
             return contextBuilder.toString();
         }
 
@@ -305,7 +311,8 @@ public class MemoryServiceImpl implements MemoryService {
         String[] words = message.replaceAll("[\\p{Punct}\\s+]", " ").split("\\s+");
         
         for (String word : words) {
-            if (word.length() >= 2 && !STOP_WORDS.contains(word.toLowerCase())) {
+            // 放宽实体长度限制，支持单字识别（如 “我”、“书” 等核心意向）
+            if (word.length() >= 1 && !STOP_WORDS.contains(word.toLowerCase())) {
                 entities.add(word);
             }
         }

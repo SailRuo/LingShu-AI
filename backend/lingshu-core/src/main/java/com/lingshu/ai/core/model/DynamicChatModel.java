@@ -28,12 +28,14 @@ public class DynamicChatModel implements ChatModel, StreamingChatModel {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(DynamicChatModel.class);
 
     private final SettingService settingService;
+    private final List<ChatModelListener> listeners;
     private volatile String lastConfigId;
     private ChatModel chatDelegate;
     private StreamingChatModel streamingDelegate;
 
-    public DynamicChatModel(SettingService settingService) {
+    public DynamicChatModel(SettingService settingService, List<ChatModelListener> listeners) {
         this.settingService = settingService;
+        this.listeners = listeners;
     }
 
     private void ensureDelegate() {
@@ -58,11 +60,13 @@ public class DynamicChatModel implements ChatModel, StreamingChatModel {
                                 .baseUrl(baseUrl)
                                 .modelName(modelName)
                                 .timeout(Duration.ofMinutes(2))
+                                .listeners(listeners)
                                 .build();
                         streamingDelegate = OllamaStreamingChatModel.builder()
                                 .baseUrl(baseUrl)
                                 .modelName(modelName)
                                 .timeout(Duration.ofMinutes(2))
+                                .listeners(listeners)
                                 .build();
                     } else {
                         String effectiveUrl = baseUrl;
@@ -75,6 +79,7 @@ public class DynamicChatModel implements ChatModel, StreamingChatModel {
                                 .apiKey(apiKey != null && !apiKey.isBlank() ? apiKey : "no-key")
                                 .modelName(modelName)
                                 .timeout(Duration.ofMinutes(2))
+                                .listeners(listeners)
                                 .build();
                         
                         streamingDelegate = OpenAiStreamingChatModel.builder()
@@ -82,6 +87,7 @@ public class DynamicChatModel implements ChatModel, StreamingChatModel {
                                 .apiKey(apiKey != null && !apiKey.isBlank() ? apiKey : "no-key")
                                 .modelName(modelName)
                                 .timeout(Duration.ofMinutes(2))
+                                .listeners(listeners)
                                 .build();
                     }
                     
@@ -117,8 +123,7 @@ public class DynamicChatModel implements ChatModel, StreamingChatModel {
 
     @Override
     public List<ChatModelListener> listeners() {
-        ensureDelegate();
-        return chatDelegate.listeners();
+        return listeners;
     }
 
     @Override

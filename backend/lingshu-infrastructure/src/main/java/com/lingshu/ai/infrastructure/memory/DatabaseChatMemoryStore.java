@@ -57,6 +57,12 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
     public void updateMessages(Object memoryId, List<ChatMessage> messages) {
         if (messages == null || messages.isEmpty()) return;
         
+        // 过滤掉 SystemMessage，因为 system prompt 由 ChatServiceImpl 每次动态注入，不应持久化
+        java.util.List<ChatMessage> persistableMessages = messages.stream()
+                .filter(m -> !(m instanceof SystemMessage))
+                .collect(java.util.stream.Collectors.toList());
+        if (persistableMessages.isEmpty()) return;
+        
         log.debug("Memory update: Syncing {} messages for session ID: {}", messages.size(), memoryId);
         Long sessionId = parseId(memoryId);
         ChatSession session = sessionRepository.findById(sessionId)
@@ -69,8 +75,8 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
                 messageRepository.findBySessionIdOrderByCreatedAtDesc(sessionId, pageable).getContent();
         
         if (lastInDbList.isEmpty()) {
-            // 数据库为空，保存所有
-            for (ChatMessage msg : messages) {
+            // 数据库为空，保存所有（已过滤 SystemMessage）
+            for (ChatMessage msg : persistableMessages) {
                 saveMessage(session, msg);
             }
             return;
@@ -78,12 +84,12 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
 
         com.lingshu.ai.infrastructure.entity.ChatMessage lastDbMsg = lastInDbList.get(0);
         
-        // 找到内存列表中哪些是新消息
+        // 找到内存列表中哪些是新消息（使用已过滤 SystemMessage 的列表）
         // 我们通过内容和角色进行简单的比对。
         // 注意：由于 LangChain4j 列表是窗口化的，我们从后往前找
         int newMessagesStartIndex = -1;
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            ChatMessage currentMemMsg = messages.get(i);
+        for (int i = persistableMessages.size() - 1; i >= 0; i--) {
+            ChatMessage currentMemMsg = persistableMessages.get(i);
             String currentRole = getRole(currentMemMsg);
             String currentText = getText(currentMemMsg);
             
@@ -96,13 +102,13 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
         
         if (newMessagesStartIndex == -1) {
             // 如果没找到匹配（可能是窗口滑动导致旧消息不在内存了），则检查最后一条是否匹配
-            ChatMessage lastMemMsg = messages.get(messages.size() - 1);
+            ChatMessage lastMemMsg = persistableMessages.get(persistableMessages.size() - 1);
             if (!java.util.Objects.equals(getText(lastMemMsg), lastDbMsg.getContent())) {
                 saveMessage(session, lastMemMsg);
             }
         } else {
-            for (int i = newMessagesStartIndex; i < messages.size(); i++) {
-                saveMessage(session, messages.get(i));
+            for (int i = newMessagesStartIndex; i < persistableMessages.size(); i++) {
+                saveMessage(session, persistableMessages.get(i));
             }
         }
     }
@@ -144,11 +150,10 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
     }
 
     private String getRole(ChatMessage msg) {
+        if (msg instanceof SystemMessage) return "system";
         if (msg instanceof UserMessage) return "user";
         if (msg instanceof AiMessage) return "assistant";
         if (msg instanceof dev.langchain4j.data.message.ToolExecutionResultMessage) return "tool";
-        // 也要捕获 AiMessage 中的 toolCalls，但 AiMessage 已经匹配了上面的 AiMessage 分支
-        // 如果是 AiMessage 且包含 toolCalls，角色仍然是 assistant
         return null;
     }
 
@@ -161,8 +166,9 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
         } else if ("assistant".equalsIgnoreCase(role)) {
             return AiMessage.from(content);
         } else if ("tool".equalsIgnoreCase(role)) {
-            // 工具返回结果在历史中作为系统提示的一种补充
-            return SystemMessage.from("[记忆回响] " + content);
+            // 工具返回结果不再作为 SystemMessage 加载，避免与动态注入的系统提示冲突。
+            // 未来如果需要完整的工具链，应支持 ToolExecutionResultMessage。
+            return null;
         }
         
         // 不再加载数据库中的 System 消息，确保每一轮对话都由 ChatService 动态注入最新的混合事实提示词

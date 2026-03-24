@@ -6,7 +6,6 @@ import { useWebSocket, type WebSocketMessage } from '@/composables/useWebSocket'
 import { useSettings } from '@/stores/settingsStore'
 import ChatMessageComponent from '@/components/chat/ChatMessage.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
-import type { ChatMessage } from '@/types'
 import { Sparkles, Loader2, Wifi, WifiOff } from 'lucide-vue-next'
 
 const {
@@ -60,12 +59,6 @@ function handleSend() {
   isTyping.value = true
   scrollToBottom()
 
-  const assistantMessage: ChatMessage = {
-    role: 'assistant',
-    content: '',
-    timestamp: Date.now()
-  }
-  messages.value.push(assistantMessage)
   currentAssistantMessage.value = ''
 
   sendChat(text, undefined, settings.value.model, settings.value.apiKey, settings.value.baseUrl)
@@ -103,9 +96,19 @@ function handleWebSocketMessage(message: WebSocketMessage) {
       break
       
     case 'chatChunk':
-      currentAssistantMessage.value += message.content || ''
-      const lastMsg = messages.value[messages.value.length - 1]
-      if (lastMsg && lastMsg.role === 'assistant') {
+      const chunkContent = message.content || ''
+      currentAssistantMessage.value += chunkContent
+      
+      let lastMsg = messages.value[messages.value.length - 1]
+      if (!lastMsg || lastMsg.role !== 'assistant') {
+        // 收到首个 chunk 时创建气泡并关闭加载动画
+        messages.value.push({
+          role: 'assistant',
+          content: currentAssistantMessage.value,
+          timestamp: Date.now()
+        })
+        isTyping.value = false
+      } else {
         lastMsg.content = currentAssistantMessage.value
       }
       scrollToBottom()
@@ -155,9 +158,10 @@ onMounted(async () => {
 
   stopHeartbeat = startHeartbeat(30000)
 
-  nextTick(() => {
-    scrollToBottom('auto') // 初始加载使用立即跳转
-  })
+  // 延迟执行滚动，确保在 fade-slide 切换动画完成后进行
+  setTimeout(() => {
+    scrollToBottom('auto')
+  }, 100)
 })
 
 onUnmounted(() => {

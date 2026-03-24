@@ -2,8 +2,6 @@ package com.lingshu.ai.core.config;
 
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
-import dev.langchain4j.model.ollama.OllamaChatModel;
-import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,12 +10,13 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.concurrent.Executor;
-
-import java.time.Duration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @EnableAsync
 @Configuration
 public class AiConfig {
+    private static final Logger log = LoggerFactory.getLogger(AiConfig.class);
 
     @Bean
     public RestTemplate restTemplate() {
@@ -54,8 +53,34 @@ public class AiConfig {
     private String password;
 
     @Bean
-    public com.lingshu.ai.core.model.DynamicChatModel dynamicChatModel(com.lingshu.ai.core.service.SettingService settingService) {
-        return new com.lingshu.ai.core.model.DynamicChatModel(settingService);
+    public dev.langchain4j.model.chat.listener.ChatModelListener chatModelListener() {
+        return new dev.langchain4j.model.chat.listener.ChatModelListener() {
+            @Override
+            public void onRequest(dev.langchain4j.model.chat.listener.ChatModelRequestContext requestContext) {
+                dev.langchain4j.model.chat.request.ChatRequest request = requestContext.chatRequest();
+                log.info("LLM Request Messages (Count: {}):", request.messages().size());
+                request.messages().forEach(m -> {
+                    log.info("  Role: {}, Content: {}", m.type(), m.toString());
+                });
+            }
+
+            @Override
+            public void onResponse(dev.langchain4j.model.chat.listener.ChatModelResponseContext responseContext) {
+                log.info("LLM Response: {}", responseContext.chatResponse().aiMessage().text());
+            }
+
+            @Override
+            public void onError(dev.langchain4j.model.chat.listener.ChatModelErrorContext errorContext) {
+                log.error("LLM Error: {}", errorContext.error().getMessage());
+            }
+        };
+    }
+
+    @Bean
+    public com.lingshu.ai.core.model.DynamicChatModel dynamicChatModel(
+            com.lingshu.ai.core.service.SettingService settingService,
+            java.util.List<dev.langchain4j.model.chat.listener.ChatModelListener> listeners) {
+        return new com.lingshu.ai.core.model.DynamicChatModel(settingService, listeners);
     }
 
     @Bean
@@ -130,17 +155,42 @@ public class AiConfig {
     }
 
     public interface Assistant {
-        @dev.langchain4j.service.SystemMessage("{{system}}")
-        String chat(@dev.langchain4j.service.MemoryId Long sessionId, @dev.langchain4j.service.V("system") String system, @dev.langchain4j.service.UserMessage String message);
+        @dev.langchain4j.service.SystemMessage("{{systemPrompt}}")
+        String chat(@dev.langchain4j.service.MemoryId Long sessionId,
+                @dev.langchain4j.service.UserMessage String message,
+                @dev.langchain4j.service.V("systemPrompt") String systemPrompt);
     }
 
     public interface StreamingAssistant {
-        @dev.langchain4j.service.SystemMessage("{{system}}")
-        dev.langchain4j.service.TokenStream chat(@dev.langchain4j.service.MemoryId Long sessionId, @dev.langchain4j.service.V("system") String system, @dev.langchain4j.service.UserMessage String message);
+        @dev.langchain4j.service.SystemMessage("{{systemPrompt}}")
+        dev.langchain4j.service.TokenStream chat(@dev.langchain4j.service.MemoryId Long sessionId,
+                @dev.langchain4j.service.UserMessage String message,
+                @dev.langchain4j.service.V("systemPrompt") String systemPrompt);
     }
 
     public interface RawStreamingAssistant {
-        @dev.langchain4j.service.SystemMessage("{{system}}")
-        dev.langchain4j.service.TokenStream chat(@dev.langchain4j.service.MemoryId Long sessionId, @dev.langchain4j.service.V("system") String system, @dev.langchain4j.service.UserMessage String message);
+        @dev.langchain4j.service.SystemMessage("{{systemPrompt}}")
+        dev.langchain4j.service.TokenStream chat(@dev.langchain4j.service.MemoryId Long sessionId,
+                @dev.langchain4j.service.UserMessage String message,
+                @dev.langchain4j.service.V("systemPrompt") String systemPrompt);
+    }
+
+    /**
+     * 不带 @SystemMessage 注解的 Assistant 接口。
+     * System Prompt 由 ChatServiceImpl 手动注入到 ChatMemory 中，
+     * 避免 @SystemMessage 模板变量与 chatMemoryProvider 交互导致 system prompt 丢失。
+     */
+    public interface PlainAssistant {
+        String chat(@dev.langchain4j.service.MemoryId Long sessionId,
+                @dev.langchain4j.service.UserMessage String message);
+    }
+
+    /**
+     * 不带 @SystemMessage 注解的流式 Assistant 接口。
+     * System Prompt 由 ChatServiceImpl 手动注入到 ChatMemory 中。
+     */
+    public interface PlainStreamingAssistant {
+        dev.langchain4j.service.TokenStream chat(@dev.langchain4j.service.MemoryId Long sessionId,
+                @dev.langchain4j.service.UserMessage String message);
     }
 }

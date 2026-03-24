@@ -17,9 +17,9 @@ public class SettingServiceImpl implements SettingService {
     private static final String DEFAULT_ID = "DEFAULT";
     private static final String REDIS_KEY = "lingshu:settings";
 
-    public SettingServiceImpl(SystemSettingRepository settingRepository, 
-                              org.springframework.data.redis.core.StringRedisTemplate redisTemplate,
-                              com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
+    public SettingServiceImpl(SystemSettingRepository settingRepository,
+            org.springframework.data.redis.core.StringRedisTemplate redisTemplate,
+            com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
         this.settingRepository = settingRepository;
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
@@ -38,7 +38,7 @@ public class SettingServiceImpl implements SettingService {
         try {
             String cached = redisTemplate.opsForValue().get(REDIS_KEY);
             if (cached != null && !cached.isBlank()) {
-                log.debug("从 Redis 获取系统设置成功");
+                // log.debug("从 Redis 获取系统设置成功");
                 return objectMapper.readValue(cached, SystemSetting.class);
             }
         } catch (Exception e) {
@@ -64,7 +64,7 @@ public class SettingServiceImpl implements SettingService {
 
         // 3. Update Redis
         updateCache(setting);
-        
+
         return setting;
     }
 

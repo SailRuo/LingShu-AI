@@ -154,7 +154,7 @@ public class ProactiveServiceImpl implements ProactiveService {
 
         String timeOfDay = getTimeOfDay();
         String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
-
+        // 使用合并后的 System Prompt (包含规则和上下文)
         String systemPrompt = promptBuilderService.buildMergedSystemPrompt(agent, relationshipPrompt, memoryContext);
         String userPrompt = promptBuilderService.buildGreetingUserPrompt(relationshipPrompt, memoryContext, timeOfDay, agentName);
 
@@ -328,7 +328,7 @@ public class ProactiveServiceImpl implements ProactiveService {
                     .build();
 
             // Note: chat method with 3 parameters is defined in RawStreamingAssistant
-            assistant.chat(1L, systemPrompt, userPrompt)
+            assistant.chat(1L, userPrompt, systemPrompt)
                     .onPartialThinking(thinking -> systemLogService.thinking(thinking.text(), "PROACTIVE"))
                     .onPartialResponse(sink::tryEmitNext)
                     .onCompleteResponse(response -> sink.tryEmitComplete())
