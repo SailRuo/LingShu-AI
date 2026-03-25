@@ -2,9 +2,12 @@ import type { Component } from "vue";
 
 export interface ChatToolStep {
   id?: string;
+  toolCallId?: string;
   toolName: string;
+  arguments?: string;
   command?: string;
   input?: string;
+  result?: string;
   output?: string;
   isError?: boolean;
   timestamp?: number;

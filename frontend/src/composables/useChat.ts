@@ -1,11 +1,17 @@
 import { ref } from "vue";
-import type { ChatMessage } from "@/types";
+import type { ChatMessage, ChatToolStep } from "@/types";
 
 interface HistoryToolStep {
-  toolName: string;
+  id?: string;
+  name?: string;
+  toolName?: string;
   toolCallId?: string;
+  arguments?: string;
   command?: string;
-  result: string;
+  input?: string;
+  result?: string;
+  output?: string;
+  isError?: boolean;
 }
 
 interface HistoryMessage {
@@ -14,6 +20,220 @@ interface HistoryMessage {
   content: string;
   timestamp: string;
   toolSteps?: HistoryToolStep[];
+  toolCalls?: string;
+  toolCallId?: string;
+  toolName?: string;
+}
+
+function toTimestamp(value?: string): number {
+  if (!value) {
+    return Date.now();
+  }
+
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? Date.now() : timestamp;
+}
+
+function normalizeToolStep(step: HistoryToolStep): ChatToolStep {
+  return {
+    id: step.id ?? step.toolCallId,
+    toolCallId: step.toolCallId ?? step.id,
+    toolName: step.toolName ?? step.name ?? "",
+    arguments: step.arguments ?? step.command ?? step.input,
+    command: step.command,
+    input: step.input,
+    result: step.result ?? step.output,
+    output: step.output ?? step.result,
+    isError: step.isError ?? false,
+  };
+}
+
+function parseToolCalls(toolCalls?: string): ChatToolStep[] {
+  if (!toolCalls?.trim()) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(toolCalls);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.map((call) =>
+      normalizeToolStep({
+        id: typeof call?.id === "string" ? call.id : undefined,
+        name: typeof call?.name === "string" ? call.name : undefined,
+        arguments:
+          typeof call?.arguments === "string" ? call.arguments : undefined,
+      })
+    );
+  } catch {
+    return [];
+  }
+}
+
+function attachToolResult(toolSteps: ChatToolStep[], message: HistoryMessage) {
+  const toolCallId = message.toolCallId ?? "";
+  const fallbackStep: ChatToolStep = {
+    id: toolCallId || undefined,
+    toolCallId: toolCallId || undefined,
+    toolName: message.toolName ?? "",
+    result: message.content ?? "",
+    output: message.content ?? "",
+  };
+
+  if (!toolSteps.length) {
+    toolSteps.push(fallbackStep);
+    return;
+  }
+
+  if (toolCallId) {
+    for (let i = toolSteps.length - 1; i >= 0; i--) {
+      const step = toolSteps[i];
+      if (step.id === toolCallId || step.toolCallId === toolCallId) {
+        toolSteps[i] = {
+          ...step,
+          result: message.content ?? "",
+          output: message.content ?? "",
+          toolName: step.toolName || message.toolName || "",
+        };
+        return;
+      }
+    }
+  }
+
+  const lastIndex = toolSteps.length - 1;
+  toolSteps[lastIndex] = {
+    ...toolSteps[lastIndex],
+    result: message.content ?? "",
+    output: message.content ?? "",
+    toolName: toolSteps[lastIndex].toolName || message.toolName || "",
+  };
+}
+
+function aggregateHistoryMessages(historyMessages: HistoryMessage[]): ChatMessage[] {
+  const chronological = [...historyMessages].reverse();
+  const aggregated: ChatMessage[] = [];
+
+  let index = 0;
+  while (index < chronological.length) {
+    const current = chronological[index];
+
+    if (current.role === "user") {
+      aggregated.push({
+        role: "user",
+        content: current.content ?? "",
+        timestamp: toTimestamp(current.timestamp),
+      });
+      index++;
+      continue;
+    }
+
+    if (current.role === "assistant") {
+      const contentParts: string[] = [];
+      const toolSteps: ChatToolStep[] = current.toolSteps?.map(normalizeToolStep) ?? [];
+
+      while (index < chronological.length) {
+        const message = chronological[index];
+
+        if (message.role !== "assistant" && message.role !== "tool") {
+          break;
+        }
+
+        if (message.role === "assistant") {
+          const content = message.content?.trim();
+          if (content) {
+            contentParts.push(content);
+          }
+
+          if (message.toolSteps?.length) {
+            toolSteps.push(...message.toolSteps.map(normalizeToolStep));
+          } else if (message.toolCalls) {
+            toolSteps.push(...parseToolCalls(message.toolCalls));
+          }
+
+          index++;
+          continue;
+        }
+
+        attachToolResult(toolSteps, message);
+        index++;
+      }
+
+      aggregated.push({
+        role: "assistant",
+        content: contentParts.join("\n\n"),
+        timestamp: toTimestamp(current.timestamp),
+        toolSteps: toolSteps.length ? toolSteps : undefined,
+        isToolStepsExpanded: false,
+      });
+      continue;
+    }
+
+    if (current.role === "tool") {
+      const toolSteps: ChatToolStep[] = [];
+
+      while (index < chronological.length && chronological[index].role === "tool") {
+        attachToolResult(toolSteps, chronological[index]);
+        index++;
+      }
+
+      aggregated.push({
+        role: "assistant",
+        content: "",
+        timestamp: toTimestamp(current.timestamp),
+        toolSteps: toolSteps.length ? toolSteps : undefined,
+        isToolStepsExpanded: false,
+      });
+      continue;
+    }
+
+    index++;
+  }
+
+  return aggregated;
+}
+
+function mergeToolSteps(
+  previousSteps?: ChatToolStep[],
+  nextSteps?: ChatToolStep[]
+): ChatToolStep[] | undefined {
+  const merged = [...(previousSteps ?? []), ...(nextSteps ?? [])];
+  return merged.length ? merged : undefined;
+}
+
+function mergeMessageBatches(
+  olderMessages: ChatMessage[],
+  currentMessages: ChatMessage[]
+): ChatMessage[] {
+  if (!olderMessages.length) {
+    return currentMessages;
+  }
+
+  if (!currentMessages.length) {
+    return olderMessages;
+  }
+
+  const lastOlder = olderMessages[olderMessages.length - 1];
+  const firstCurrent = currentMessages[0];
+
+  if (lastOlder.role !== "assistant" || firstCurrent.role !== "assistant") {
+    return [...olderMessages, ...currentMessages];
+  }
+
+  return [
+    ...olderMessages.slice(0, -1),
+    {
+      role: "assistant",
+      content: [lastOlder.content, firstCurrent.content]
+        .filter((part) => part?.trim())
+        .join("\n\n"),
+      timestamp: lastOlder.timestamp,
+      toolSteps: mergeToolSteps(lastOlder.toolSteps, firstCurrent.toolSteps),
+      isToolStepsExpanded: false,
+    },
+    ...currentMessages.slice(1),
+  ];
 }
 
 export function useChat() {
@@ -48,21 +268,9 @@ export function useChat() {
         return false;
       }
 
-      const formattedMessages: ChatMessage[] = historyMessages
-        .filter((m) => m.role === "user" || m.role === "assistant")
-        .map((m) => ({
-          role: m.role as "user" | "assistant",
-          content: m.content,
-          timestamp: new Date(m.timestamp).getTime(),
-          toolSteps: m.toolSteps?.map((step) => ({
-            toolName: step.toolName,
-            toolCallId: step.toolCallId,
-            command: step.command,
-            result: step.result,
-          })),
-        }));
+      const formattedMessages = aggregateHistoryMessages(historyMessages);
 
-      if (formattedMessages.length < size) {
+      if (historyMessages.length < size) {
         hasMoreHistory.value = false;
       }
 
@@ -71,7 +279,7 @@ export function useChat() {
         oldestMessageId.value = oldestMsg.id;
       }
 
-      messages.value = [...formattedMessages.reverse(), ...messages.value];
+      messages.value = mergeMessageBatches(formattedMessages, messages.value);
 
       return true;
     } catch (err) {
