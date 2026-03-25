@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { NModal, NCard } from 'naive-ui'
+import { NModal } from 'naive-ui'
 import { useThemeStore } from '@/stores/themeStore'
 import { Sun, Sparkles, Cpu, Check } from 'lucide-vue-next'
 import { computed } from 'vue'
+import type { ThemeKey } from '@/types'
 
 const props = defineProps<{
   open: boolean
@@ -19,7 +20,20 @@ const show = computed({
 
 const themeStore = useThemeStore()
 
-const themes = computed(() => [
+type ThemeOption = {
+  key: ThemeKey
+  label: string
+  icon: typeof Sun
+  isDark: boolean
+  previewColors: {
+    bg: string
+    surface: string
+    primary: string
+    text: string
+  }
+}
+
+const themes = computed<ThemeOption[]>(() => [
   {
     key: 'polarLight',
     label: '极地白',
@@ -58,7 +72,7 @@ const themes = computed(() => [
   }
 ])
 
-function selectTheme(key: string) {
+function selectTheme(key: ThemeKey) {
   themeStore.setTheme(key)
   emit('update:open', false)
 }

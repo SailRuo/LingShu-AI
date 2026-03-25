@@ -41,4 +41,21 @@ public class MemoryController {
         log.info("API 触发：正在清理事实节点 #{}", id);
         memoryService.deleteFact(id);
     }
+
+    /**
+     * 手动执行一次记忆生命周期维护。
+     */
+    @PostMapping("/maintenance/run")
+    public Object runMaintenance() {
+        log.info("API 触发：执行记忆生命周期维护");
+        return memoryService.runMemoryMaintenance();
+    }
+
+    /**
+     * 获取最近一次记忆生命周期维护摘要。
+     */
+    @GetMapping("/maintenance/summary")
+    public Object getMaintenanceSummary() {
+        return memoryService.getMemoryMaintenanceSummary();
+    }
 }

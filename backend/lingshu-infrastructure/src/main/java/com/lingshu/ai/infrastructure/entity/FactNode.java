@@ -25,7 +25,31 @@ public class FactNode {
 
     private String category; // e.g. "Work", "Preference", "Emotion"
 
+    private String normalizedContent;
+
+    private String subType;
+
+    private String clusterKey;
+
     private LocalDateTime observedAt;
 
+    private LocalDateTime lastActivatedAt;
+
     private double importance; // 0.0 - 1.0
+
+    private double confidence; // 0.0 - 1.0
+
+    private double activityScore; // 0.0 - 1.0
+
+    private String status; // active / stable / cool / superseded / conflicted
+
+    private Double decayRate;
+
+    private Integer ttlDays;
+
+    private Integer version;
+
+    private Long supersedesFactId;
+
+    private Long contradictsFactId;
 }

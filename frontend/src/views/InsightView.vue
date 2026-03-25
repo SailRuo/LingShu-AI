@@ -1,60 +1,50 @@
 <script setup lang="ts">
-import { onMounted, ref, onBeforeUnmount, shallowRef, h, computed, watch } from 'vue'
-import { NButton, NIcon, NDropdown, useMessage, NScrollbar, NTag, NProgress } from 'naive-ui'
-import { 
-  RefreshCcw, Trash2, Eye, Clock, 
-  Search, Target, ZoomIn, ZoomOut
-} from 'lucide-vue-next'
-// @ts-ignore
-import Neovis from 'neovis.js'
+import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
+import { NButton, NDropdown, NIcon, NInput, NProgress, NScrollbar, NSlider, NTag, useMessage } from 'naive-ui'
+import { Clock3, Eye, Play, RefreshCcw, Search, Sparkles, Target, Trash2, ZoomIn, ZoomOut } from 'lucide-vue-next'
 import { useThemeStore } from '@/stores/themeStore'
 
-const viz = shallowRef<any>(null)
-const isLoaded = ref(false)
-const selectedNode = ref<any>(null)
+type NodeType = 'User' | 'Topic' | 'Fact'
+type ActivityFilter = 'all' | 'active' | 'stable' | 'cool'
+type TimeFilter = 'all' | '24h' | '7d' | '30d'
+type TypeFilter = 'all' | NodeType
+type NodeStatus = 'core' | 'active' | 'stable' | 'cool'
+
+interface GraphNode { id: string; label: string; shortLabel?: string; type: NodeType; subType?: string; importance?: number; confidence?: number; activityScore?: number; cluster?: string; orbitLevel?: number; createdAt?: string | null; lastActivatedAt?: string | null; status?: NodeStatus | string; factCount?: number; version?: number; supersedesFactId?: number | null; contradictsFactId?: number | null }
+interface GraphLink { source: string; target: string; type: string; weight?: number }
+interface GraphPayload { nodes: GraphNode[]; links: GraphLink[]; stats: { density: number; nodes: number; edges: number; topics: number; activeFacts: number; latency: number } }
+interface PositionedNode extends GraphNode { x: number; y: number; size: number; color: string; showLabel: boolean; faded: boolean; hiddenByReplay: boolean; isRecent: boolean; isHit: boolean; isFocus: boolean; isBorn: boolean }
+interface RenderedLink { source: PositionedNode; target: PositionedNode; type: string; width: number; faded: boolean; energized: boolean }
+
 const message = useMessage()
 const themeStore = useThemeStore()
-
-const stats = ref({
-  density: '42.5',
-  nodes: '14,892',
-  edges: '56,310',
-  latency: '38'
-})
-
-function formatTime(ts: number | string): string {
-  const timestamp = typeof ts === 'number' ? ts : new Date(ts).getTime()
-  if (!timestamp || isNaN(timestamp)) return '未知时间'
-  const diff = Math.floor((Date.now() - timestamp) / 1000)
-  if (diff < 60) return '刚刚'
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
-  return new Date(timestamp).toLocaleDateString('zh-CN')
-}
-
-function toISODateString(val: unknown): string {
-  if (!val) return new Date().toISOString()
-  if (typeof val === 'string') return val
-  if (typeof val === 'number') return new Date(val).toISOString()
-  return new Date().toISOString()
-}
-
+const graph = ref<GraphPayload>({ nodes: [], links: [], stats: { density: 0, nodes: 0, edges: 0, topics: 0, activeFacts: 0, latency: 0 } })
+const selectedNode = ref<GraphNode | null>(null)
+const rightClickedNode = ref<GraphNode | null>(null)
+const isLoading = ref(false)
+const isLoaded = ref(false)
+const searchQuery = ref('')
+const activeCluster = ref<string | null>(null)
+const activityFilter = ref<ActivityFilter>('all')
+const timeFilter = ref<TimeFilter>('all')
+const typeFilter = ref<TypeFilter>('all')
+const replayEnabled = ref(false)
+const replayProgress = ref(100)
+const replayPlaying = ref(false)
+const scale = ref(1)
+const viewport = ref({ width: 1200, height: 760 })
+const stageRef = ref<HTMLElement | null>(null)
+const resizeObserver = ref<ResizeObserver | null>(null)
+const replayTimer = ref<number | null>(null)
+const birthFlashIds = ref<Set<string>>(new Set())
+const birthFlashTimer = ref<number | null>(null)
 const showDropdown = ref(false)
 const dropdownX = ref(0)
 const dropdownY = ref(0)
-const rightClickedNode = ref<any>(null)
 
 const dropdownOptions = [
-  {
-    label: '查看关联详情',
-    key: 'inspect',
-    icon: () => h(NIcon, null, { default: () => h(Eye) })
-  },
-  {
-    label: '移除此节点',
-    key: 'delete',
-    icon: () => h(NIcon, { color: 'var(--color-error)' }, { default: () => h(Trash2) })
-  }
+  { label: '查看关联详情', key: 'inspect', icon: () => h(NIcon, null, { default: () => h(Eye) }) },
+  { label: '移除此节点', key: 'delete', icon: () => h(NIcon, { color: 'var(--color-error)' }, { default: () => h(Trash2) }) },
 ]
 
 const themeColors = computed(() => ({
@@ -64,276 +54,146 @@ const themeColors = computed(() => ({
   nodeFact: themeStore.current.cssVars['--color-node-fact'],
   edge: themeStore.current.cssVars['--color-edge'],
   glow: themeStore.current.cssVars['--color-glow'],
-  surface: themeStore.current.cssVars['--color-surface'],
   outline: themeStore.current.cssVars['--color-outline'],
-  background: themeStore.current.cssVars['--color-background'],
-  isDark: themeStore.current.isDark,
 }))
 
-const sceneStyle = computed(() => ({
-  '--graph-glow-primary': themeColors.value.glow,
-  '--graph-glow-accent': themeColors.value.accent,
-  '--graph-star-core': themeColors.value.primary,
-  '--graph-star-secondary': themeColors.value.nodeFact,
-  '--graph-nebula-a': themeColors.value.primary,
-  '--graph-nebula-b': themeColors.value.accent,
-  '--graph-nebula-c': themeColors.value.nodeUser,
-}))
-
-const config = computed(() => {
-  const nodeFactColor = themeColors.value.nodeFact
-  const nodeUserColor = themeColors.value.nodeUser
-  
-  return {
-    containerId: 'viz',
-    nonFlat: true,
-    neo4j: {
-      serverUrl: 'bolt://localhost:7687',
-      serverUser: 'neo4j',
-      serverPassword: 'lingshu123'
-    },
-    labels: {
-      'User': {
-        caption: 'name',
-        size: 48,
-        color: {
-          background: 'transparent',
-          border: nodeUserColor,
-          highlight: { 
-            background: 'rgba(52, 211, 153, 0.15)', 
-            border: nodeUserColor 
-          }
-        },
-        font: { 
-          size: 12, 
-          color: nodeUserColor, 
-          face: 'Inter, system-ui',
-          strokeWidth: 3,
-          strokeColor: 'rgba(0, 0, 0, 0.8)'
-        },
-        shape: 'hexagon',
-        borderWidth: 3,
-        shadow: {
-          enabled: true,
-          color: nodeUserColor,
-          size: 22,
-          x: 0,
-          y: 0
-        },
-        opacity: 0.95
-      },
-      'Fact': {
-        caption: 'content',
-        size: 'importance',
-        color: {
-          background: 'transparent',
-          border: nodeFactColor,
-          highlight: { 
-            background: 'rgba(251, 191, 36, 0.12)', 
-            border: themeColors.value.primary 
-          }
-        },
-        font: { 
-          size: 10, 
-          color: nodeFactColor, 
-          face: 'Inter, system-ui',
-          strokeWidth: 2,
-          strokeColor: 'rgba(0, 0, 0, 0.7)'
-        },
-        shape: 'diamond',
-        borderWidth: 2,
-        shadow: {
-          enabled: true,
-          color: nodeFactColor,
-          size: 18,
-          x: 0,
-          y: 0
-        },
-        opacity: 0.9
-      }
-    },
-    relationships: {
-      'HAS_FACT': {
-        thickness: 0.08,
-        color: themeColors.value.edge,
-        arrows: { 
-          to: { 
-            enabled: true, 
-            scaleFactor: 0.4,
-            type: 'arrow'
-          } 
-        },
-        smooth: { 
-          type: 'dynamic',
-          roundness: 0.22
-        },
-        dashes: [8, 12],
-        shadow: {
-          enabled: true,
-          color: 'rgba(52, 211, 153, 0.3)',
-          size: 5,
-          x: 0,
-          y: 0
-        },
-        opacity: 0.7
-      }
-    },
-    initialCypher: "MATCH (u:User)-[r:HAS_FACT]->(f:Fact) RETURN u,r,f",
-    visConfig: {
-      physics: {
-        stabilization: { 
-          iterations: 200,
-          updateInterval: 25
-        },
-        barnesHut: { 
-          gravitationalConstant: -5200, 
-          springLength: 220,
-          springConstant: 0.022,
-          damping: 0.2,
-          avoidOverlap: 0.4
-        },
-        maxVelocity: 50,
-        minVelocity: 0.1
-      },
-      interaction: { 
-        hover: true, 
-        tooltipDelay: 200,
-        navigationButtons: false,
-        zoomView: true,
-        dragView: true
-      },
-      nodes: {
-        scaling: {
-            min: 10,
-            max: 42,
-          label: {
-            enabled: true,
-            min: 8,
-            max: 14
-          }
-        }
-      },
-      edges: {
-        scaling: {
-          min: 1,
-          max: 3
-        },
-        smooth: {
-          forceDirection: 'none'
-        }
-      }
-    }
-  }
+const sceneStyle = computed(() => ({ '--graph-primary': themeColors.value.primary, '--graph-accent': themeColors.value.accent, '--graph-core': themeColors.value.nodeUser, '--graph-fact': themeColors.value.nodeFact, '--graph-edge': themeColors.value.edge, '--graph-glow': themeColors.value.glow, '--graph-outline': themeColors.value.outline }))
+const topicClusters = computed(() => graph.value.nodes.filter((n) => n.type === 'Topic').map((n) => ({ key: n.cluster || n.id, label: n.label, count: n.factCount || 0 })))
+const timelineNodes = computed(() => graph.value.nodes.filter((n) => n.type !== 'User' && n.lastActivatedAt).sort((a, b) => new Date(a.lastActivatedAt || 0).getTime() - new Date(b.lastActivatedAt || 0).getTime()))
+const timelineBounds = computed(() => {
+  const first = timelineNodes.value[0]?.lastActivatedAt ? new Date(timelineNodes.value[0].lastActivatedAt!).getTime() : Date.now()
+  const lastNode = timelineNodes.value[timelineNodes.value.length - 1]
+  const last = lastNode?.lastActivatedAt ? new Date(lastNode.lastActivatedAt).getTime() : first
+  return { first, last: Math.max(first, last) }
+})
+const replayCutoff = computed(() => {
+  if (!replayEnabled.value) return timelineBounds.value.last
+  const span = Math.max(1, timelineBounds.value.last - timelineBounds.value.first)
+  return timelineBounds.value.first + (span * replayProgress.value) / 100
 })
 
-function injectCustomStyles() {
-  const styleId = 'neovis-custom-styles'
-  const previous = document.getElementById(styleId)
-  if (previous) previous.remove()
-
-  const style = document.createElement('style')
-  style.id = styleId
-  style.textContent = `
-    .vis-network {
-      background: transparent !important;
-    }
-    
-    .vis-node {
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    
-    .vis-node:hover {
-      filter: brightness(1.3);
-    }
-    
-    @keyframes nodePulse {
-      0%, 100% { 
-        filter: drop-shadow(0 0 8px var(--glow-color));
-      }
-      50% { 
-        filter: drop-shadow(0 0 20px var(--glow-color));
-      }
-    }
-    
-    @keyframes edgeFlow {
-      0% { stroke-dashoffset: 24; }
-      100% { stroke-dashoffset: 0; }
-    }
-    
-    .vis-edge {
-      animation: edgeFlow 2s linear infinite;
-    }
-
-    .vis-label {
-      letter-spacing: 0.04em;
-    }
-  `
-  document.head.appendChild(style)
+function withinTime(node: GraphNode) {
+  if (timeFilter.value === 'all') return true
+  const ts = node.lastActivatedAt ? new Date(node.lastActivatedAt).getTime() : 0
+  if (!ts) return false
+  const age = Date.now() - ts
+  if (timeFilter.value === '24h') return age <= 86400000
+  if (timeFilter.value === '7d') return age <= 604800000
+  return age <= 2592000000
 }
 
-function initViz() {
-  if (viz.value) viz.value.clearNetwork()
+const filteredNodes = computed(() => {
+  const keyword = searchQuery.value.trim().toLowerCase()
+  return graph.value.nodes.filter((node) => {
+    const clusterOk = !activeCluster.value || node.cluster === activeCluster.value || node.type === 'User'
+    const keywordOk = !keyword || node.label.toLowerCase().includes(keyword) || (node.shortLabel || '').toLowerCase().includes(keyword) || (node.cluster || '').toLowerCase().includes(keyword)
+    const typeOk = typeFilter.value === 'all' || node.type === typeFilter.value
+    const score = node.activityScore || 0
+    const activityOk = activityFilter.value === 'all' || (activityFilter.value === 'active' && score >= 0.75) || (activityFilter.value === 'stable' && score >= 0.38 && score < 0.75) || (activityFilter.value === 'cool' && score < 0.38)
+    return clusterOk && keywordOk && typeOk && activityOk && withinTime(node)
+  })
+})
+
+const visibleNodeIds = computed(() => new Set(filteredNodes.value.map((n) => n.id)))
+const filteredLinks = computed(() => graph.value.links.filter((l) => visibleNodeIds.value.has(l.source) && visibleNodeIds.value.has(l.target)))
+const displayStats = computed(() => ({ nodes: positionedNodes.value.length, topics: positionedNodes.value.filter((n) => n.type === 'Topic').length, active: positionedNodes.value.filter((n) => n.type === 'Fact' && (n.activityScore || 0) >= 0.75).length, recent: positionedNodes.value.filter((n) => n.isRecent).length, born: positionedNodes.value.filter((n) => n.isBorn).length }))
+const replaySummary = computed(() => new Date(replayEnabled.value ? replayCutoff.value : timelineBounds.value.last).toLocaleString('zh-CN'))
+const searchKeyword = computed(() => searchQuery.value.trim().toLowerCase())
+
+const positionedNodes = computed<PositionedNode[]>(() => {
+  const width = Math.max(760, viewport.value.width)
+  const height = Math.max(560, viewport.value.height)
+  const cx = width / 2
+  const cy = height / 2 + 42
+  const topics = filteredNodes.value.filter((n) => n.type === 'Topic')
+  const facts = filteredNodes.value.filter((n) => n.type === 'Fact')
+  const users = filteredNodes.value.filter((n) => n.type === 'User')
+  const pos = new Map<string, PositionedNode>()
+  users.forEach((n) => pos.set(n.id, { ...n, x: cx, y: cy, size: 88, color: themeColors.value.nodeUser, showLabel: true, faded: false, hiddenByReplay: false, isRecent: false, isHit: false, isFocus: selectedNode.value?.id === n.id, isBorn: false }))
+  topics.forEach((n, i) => {
+    const angle = -Math.PI / 2 + (i / Math.max(1, topics.length)) * Math.PI * 2
+    const faded = !!activeCluster.value && n.cluster !== activeCluster.value
+    const activatedAt = n.lastActivatedAt ? new Date(n.lastActivatedAt).getTime() : 0
+    const hiddenByReplay = replayEnabled.value && activatedAt > replayCutoff.value
+    const isRecent = activatedAt >= Date.now() - 86400000
+    const isHit = !!searchKeyword.value && (n.label.toLowerCase().includes(searchKeyword.value) || (n.shortLabel || '').toLowerCase().includes(searchKeyword.value))
+    const isFocus = selectedNode.value?.id === n.id || (!!selectedNode.value?.cluster && selectedNode.value.cluster === n.cluster)
+    pos.set(n.id, { ...n, x: cx + Math.cos(angle) * Math.min(width, height) * 0.22, y: cy + Math.sin(angle) * Math.min(width, height) * 0.15, size: 30 + (n.importance || 0.5) * 26, color: themeColors.value.primary, showLabel: true, faded, hiddenByReplay, isRecent, isHit, isFocus, isBorn: birthFlashIds.value.has(n.id) })
+  })
+  const groups = new Map<string, GraphNode[]>()
+  facts.forEach((f) => { const k = f.cluster || 'memory'; if (!groups.has(k)) groups.set(k, []); groups.get(k)!.push(f) })
+  Array.from(groups.entries()).forEach(([cluster, items], gi) => {
+    const topic = topics.find((n) => n.cluster === cluster)
+    const anchor = topic ? pos.get(topic.id) : undefined
+    const base = anchor ? Math.atan2(anchor.y - cy, anchor.x - cx) : -Math.PI / 2 + gi
+    items.sort((a, b) => (b.importance || 0) - (a.importance || 0)).forEach((n, i) => {
+      const level = n.orbitLevel || 2
+      const radius = (level === 1 ? 108 : level === 2 ? 174 : 242) + (i % 5) * 14
+      const spread = items.length > 1 ? (i / (items.length - 1) - 0.5) * 1.36 : 0
+      const faded = !!activeCluster.value && cluster !== activeCluster.value
+      const activatedAt = n.lastActivatedAt ? new Date(n.lastActivatedAt).getTime() : 0
+      const hiddenByReplay = replayEnabled.value && activatedAt > replayCutoff.value
+      const isRecent = activatedAt >= Date.now() - 86400000
+      const isHit = !!searchKeyword.value && (n.label.toLowerCase().includes(searchKeyword.value) || (n.shortLabel || '').toLowerCase().includes(searchKeyword.value))
+      const isFocus = selectedNode.value?.id === n.id || (!!selectedNode.value?.cluster && selectedNode.value.cluster === n.cluster)
+      pos.set(n.id, { ...n, x: (anchor?.x || cx) + Math.cos(base + spread) * radius, y: (anchor?.y || cy) + Math.sin(base + spread) * radius * 0.66, size: 12 + (n.importance || 0.5) * 17, color: n.status === 'active' ? themeColors.value.nodeFact : themeColors.value.accent, showLabel: scale.value >= 0.94 || (n.importance || 0) >= 0.76 || !faded || isRecent, faded, hiddenByReplay, isRecent, isHit, isFocus, isBorn: birthFlashIds.value.has(n.id) })
+    })
+  })
+  return filteredNodes.value.map((n) => pos.get(n.id)!).filter((n): n is PositionedNode => Boolean(n) && !n.hiddenByReplay)
+})
+
+const nodeMap = computed(() => new Map(positionedNodes.value.map((n) => [n.id, n])))
+const renderedLinks = computed<RenderedLink[]>(() => filteredLinks.value.map((l) => {
+  const source = nodeMap.value.get(l.source)
+  const target = nodeMap.value.get(l.target)
+  if (!source || !target) return null
+  const energized = source.isHit || target.isHit || source.isFocus || target.isFocus
+  return { source, target, type: l.type, width: 1 + (l.weight || 0.35) * 2, faded: source.faded || target.faded, energized }
+}).filter((l): l is RenderedLink => Boolean(l)))
+
+async function fetchGraph() {
+  isLoading.value = true
+  showDropdown.value = false
   try {
-    injectCustomStyles()
-    viz.value = new Neovis(config.value as any)
-    viz.value.registerOnEvent('completed', () => {
-      isLoaded.value = true
-      const network = viz.value.network || viz.value._network
-      if (network) {
-        network.on('oncontext', (event: any) => {
-          event.event.preventDefault()
-          const nodeId = network.getNodeAt(event.pointer.DOM)
-          if (nodeId) {
-            const node = viz.value.nodes.get(nodeId)
-            rightClickedNode.value = node
-            dropdownX.value = event.event.clientX
-            dropdownY.value = event.event.clientY
-            showDropdown.value = true
-          }
-        })
-        
-        network.on('hoverNode', (_params: any) => {
-          const canvas = document.getElementById('viz')?.querySelector('canvas')
-          if (canvas) {
-            canvas.style.cursor = 'pointer'
-          }
-        })
-        
-        network.on('blurNode', () => {
-          const canvas = document.getElementById('viz')?.querySelector('canvas')
-          if (canvas) {
-            canvas.style.cursor = 'default'
-          }
-        })
+    const previousIds = new Set(graph.value.nodes.map((n) => n.id))
+    const response = await fetch('/api/memory/graph')
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const payload = await response.json() as GraphPayload
+    graph.value = payload
+    const appearedIds = payload.nodes
+      .filter((node) => node.type === 'Fact' && !previousIds.has(node.id))
+      .map((node) => node.id)
+    if (appearedIds.length) {
+      birthFlashIds.value = new Set(appearedIds)
+      if (birthFlashTimer.value !== null) {
+        window.clearTimeout(birthFlashTimer.value)
       }
-    })
-    viz.value.registerOnEvent('clickNode', (event: any) => {
-      const node = event.node
-      selectedNode.value = {
-        id: node.id,
-        label: node.raw.properties.name || node.raw.properties.content,
-        type: node.raw.labels[0] === 'User' ? '核心用户' : '记忆碎片',
-        importance: node.raw.properties.importance || 0.5,
-        observedAt: toISODateString(node.raw.properties.observedAt)
-      }
-    })
-    viz.value.render()
-  } catch (err) {
-    console.error('可视化引擎启动失败:', err)
+      birthFlashTimer.value = window.setTimeout(() => {
+        birthFlashIds.value = new Set()
+        birthFlashTimer.value = null
+      }, 4200)
+    }
+    isLoaded.value = true
+    if (selectedNode.value) selectedNode.value = payload.nodes.find((n) => n.id === selectedNode.value?.id) || null
+  } catch (error) {
+    console.error(error)
+    message.error('记忆图谱同步失败')
+  } finally {
+    isLoading.value = false
   }
 }
 
 async function handleDeleteFact() {
-  if (!rightClickedNode.value) return
+  if (!rightClickedNode.value || rightClickedNode.value.type !== 'Fact') return
   try {
-    const rawId = rightClickedNode.value.id
-    const factId = typeof rawId === 'string' ? rawId.replace('fact_', '') : rawId
-    
-    await fetch(`/api/memory/fact/${factId}`, { method: 'DELETE' })
-    message.success('节点已成功移除')
-    refreshGraph()
-  } catch (err) {
-    message.error('同步错误：操作失败')
+    const response = await fetch(`/api/memory/fact/${rightClickedNode.value.id.replace('fact_', '')}`, { method: 'DELETE' })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    message.success('记忆节点已移除')
+    if (selectedNode.value?.id === rightClickedNode.value.id) selectedNode.value = null
+    await fetchGraph()
+  } catch (error) {
+    console.error(error)
+    message.error('节点移除失败')
   } finally {
     showDropdown.value = false
     rightClickedNode.value = null
@@ -341,216 +201,203 @@ async function handleDeleteFact() {
 }
 
 function handleSelectDropdown(key: string) {
+  if (key === 'inspect' && rightClickedNode.value) { selectedNode.value = rightClickedNode.value; showDropdown.value = false; return }
   if (key === 'delete') handleDeleteFact()
-  else if (key === 'inspect') {
-    selectedNode.value = {
-      id: rightClickedNode.value.id,
-      label: rightClickedNode.value.raw.properties.name || rightClickedNode.value.raw.properties.content,
-      type: rightClickedNode.value.raw.labels[0] === 'User' ? '核心用户' : '记忆碎片',
-      importance: rightClickedNode.value.raw.properties.importance || 0.5,
-      observedAt: toISODateString(rightClickedNode.value.raw.properties.observedAt)
+}
+
+function openNodeDetail(node: GraphNode) {
+  selectedNode.value = node
+  if (node.type === 'Topic') activeCluster.value = activeCluster.value === node.cluster ? null : node.cluster || null
+}
+
+function stopReplayPlayback() {
+  if (replayTimer.value !== null) {
+    window.clearInterval(replayTimer.value)
+    replayTimer.value = null
+  }
+  replayPlaying.value = false
+}
+
+function toggleReplay() {
+  replayEnabled.value = !replayEnabled.value
+  if (!replayEnabled.value) {
+    replayProgress.value = 100
+    stopReplayPlayback()
+  }
+}
+
+function toggleReplayPlayback() {
+  if (!replayEnabled.value) replayEnabled.value = true
+  if (replayPlaying.value) {
+    stopReplayPlayback()
+    return
+  }
+  if (replayProgress.value >= 100) replayProgress.value = 0
+  replayPlaying.value = true
+  replayTimer.value = window.setInterval(() => {
+    if (replayProgress.value >= 100) {
+      replayProgress.value = 100
+      stopReplayPlayback()
+      return
     }
-    showDropdown.value = false
+    replayProgress.value = Math.min(100, replayProgress.value + 2)
+  }, 180)
+}
+
+function clearFilters() { activeCluster.value = null; activityFilter.value = 'all'; timeFilter.value = 'all'; typeFilter.value = 'all'; replayEnabled.value = false; replayProgress.value = 100; stopReplayPlayback(); searchQuery.value = ''; scale.value = 1 }
+function formatDensity(value: number) { return `${(value * 100).toFixed(1)}%` }
+function formatTime(value?: string | null) { if (!value) return '未知时间'; const t = new Date(value).getTime(); if (Number.isNaN(t)) return '未知时间'; const d = Math.floor((Date.now() - t) / 1000); if (d < 60) return '刚刚'; if (d < 3600) return `${Math.floor(d / 60)} 分钟前`; if (d < 86400) return `${Math.floor(d / 3600)} 小时前`; if (d < 86400 * 7) return `${Math.floor(d / 86400)} 天前`; return new Date(t).toLocaleDateString('zh-CN') }
+function formatDateTime(value?: string | null) { if (!value) return '未知'; const d = new Date(value); return Number.isNaN(d.getTime()) ? '未知' : d.toLocaleString('zh-CN') }
+function zoomGraph(direction: 'in' | 'out') { const next = direction === 'in' ? scale.value * 1.12 : scale.value * 0.88; scale.value = Math.max(0.72, Math.min(1.8, Number(next.toFixed(2)))) }
+function focusGraph() { scale.value = 1; activeCluster.value = null }
+function registerResize() { if (!stageRef.value) return; resizeObserver.value = new ResizeObserver((entries) => { const rect = entries[0]?.contentRect; if (rect) viewport.value = { width: rect.width, height: rect.height } }); resizeObserver.value.observe(stageRef.value) }
+
+onMounted(async () => { registerResize(); await fetchGraph() })
+onBeforeUnmount(() => {
+  resizeObserver.value?.disconnect()
+  stopReplayPlayback()
+  if (birthFlashTimer.value !== null) {
+    window.clearTimeout(birthFlashTimer.value)
+    birthFlashTimer.value = null
   }
-}
-
-function refreshGraph() {
-  isLoaded.value = false
-  if (viz.value) viz.value.reload()
-  else initViz()
-}
-
-function withNetwork(callback: (network: any) => void) {
-  const network = viz.value?.network || viz.value?._network
-  if (network) callback(network)
-}
-
-function focusGraph() {
-  withNetwork((network) => {
-    network.fit({
-      animation: {
-        duration: 700,
-        easingFunction: 'easeInOutQuad'
-      }
-    })
-  })
-}
-
-function zoomGraph(direction: 'in' | 'out') {
-  withNetwork((network) => {
-    const scale = network.getScale?.() ?? 1
-    const factor = direction === 'in' ? 1.18 : 0.84
-    network.moveTo({
-      scale: Math.max(0.2, Math.min(3, scale * factor)),
-      animation: {
-        duration: 260,
-        easingFunction: 'easeInOutQuad'
-      }
-    })
-  })
-}
-
-watch(themeColors, () => {
-  injectCustomStyles()
-  if (viz.value?.network || viz.value?._network) {
-    refreshGraph()
-  }
-}, { deep: true })
-
-onMounted(() => setTimeout(initViz, 500))
-onBeforeUnmount(() => { 
-  if (viz.value) viz.value.clearNetwork()
-  const customStyle = document.getElementById('neovis-custom-styles')
-  if (customStyle) customStyle.remove()
 })
 </script>
 
 <template>
   <div class="insight-view" :style="sceneStyle">
     <div class="insight-content">
-      <div class="graph-area">
-        <div class="starfield-layer starfield-back"></div>
-        <div class="starfield-layer starfield-mid"></div>
-        <div class="starfield-layer nebula-layer"></div>
-        <div class="starfield-grid"></div>
-        <div class="graph-halo graph-halo-a"></div>
-        <div class="graph-halo graph-halo-b"></div>
-        <div id="viz" class="viz-container" :class="{ 'is-loading': !isLoaded }"></div>
-        
-        <div v-if="!isLoaded" class="loading-overlay">
-          <div class="loading-content">
-            <div class="loading-orb">
-              <div class="orb-core"></div>
-              <div class="orb-ring"></div>
-            </div>
-            <span class="loading-text">拓扑映射中</span>
-            <div class="loading-progress">
-              <div class="progress-bar"></div>
-            </div>
+      <div ref="stageRef" class="graph-area">
+        <div class="stars stars-a"></div>
+        <div class="stars stars-b"></div>
+        <div class="nebula"></div>
+
+        <div class="toolbar glass">
+          <div class="toolbar-stats">
+            <span>密度 {{ formatDensity(graph.stats.density) }}</span>
+            <span>节点 {{ graph.stats.nodes }}</span>
+            <span>活跃 {{ graph.stats.activeFacts }}</span>
+            <span>延迟 {{ graph.stats.latency }}ms</span>
+          </div>
+          <div class="toolbar-actions">
+            <n-input v-model:value="searchQuery" clearable size="small" placeholder="搜索记忆或主题" class="search-input">
+              <template #prefix><Search :size="14" /></template>
+            </n-input>
+            <button class="tool-btn" @click="focusGraph"><Target :size="16" /></button>
+            <button class="tool-btn" @click="zoomGraph('in')"><ZoomIn :size="16" /></button>
+            <button class="tool-btn" @click="zoomGraph('out')"><ZoomOut :size="16" /></button>
+            <button class="tool-btn" :class="{ active: replayEnabled }" @click="toggleReplay"><Play :size="16" /></button>
+            <button class="tool-btn primary" @click="fetchGraph"><RefreshCcw :size="16" :class="{ spinning: isLoading }" /></button>
           </div>
         </div>
 
-        <div class="toolbar">
-          <div class="toolbar-stats">
-            <div class="stat-item">
-              <span class="stat-label">密度</span>
-              <span class="stat-value">{{ stats.density }}σ</span>
-            </div>
-            <div class="stat-divider"></div>
-            <div class="stat-item">
-              <span class="stat-label">节点</span>
-              <span class="stat-value">{{ stats.nodes }}</span>
-            </div>
-            <div class="stat-divider"></div>
-            <div class="stat-item">
-              <span class="stat-label">延迟</span>
-              <span class="stat-value">{{ stats.latency }}ms</span>
-            </div>
-          </div>
-          
-          <div class="toolbar-actions">
-            <button class="tool-btn" title="搜索">
-              <Search :size="16" />
-            </button>
-            <button class="tool-btn" title="定位" @click="focusGraph">
-              <Target :size="16" />
-            </button>
-            <button class="tool-btn" title="放大" @click="zoomGraph('in')">
-              <ZoomIn :size="16" />
-            </button>
-            <button class="tool-btn" title="缩小" @click="zoomGraph('out')">
-              <ZoomOut :size="16" />
-            </button>
-            <div class="tool-divider"></div>
-            <button class="tool-btn primary" @click="refreshGraph" title="同步图谱">
-              <RefreshCcw :size="16" />
+        <div class="filter-box glass">
+          <div class="filter-row">
+            <span class="filter-label">星域</span>
+            <button class="pill" :class="{ active: activeCluster === null }" @click="activeCluster = null">全部</button>
+            <button v-for="topic in topicClusters" :key="topic.key" class="pill" :class="{ active: activeCluster === topic.key }" @click="activeCluster = activeCluster === topic.key ? null : topic.key">
+              {{ topic.label }} · {{ topic.count }}
             </button>
           </div>
+          <div class="filter-row">
+            <span class="filter-label">活跃</span>
+            <button class="pill" :class="{ active: activityFilter === 'all' }" @click="activityFilter = 'all'">全部</button>
+            <button class="pill" :class="{ active: activityFilter === 'active' }" @click="activityFilter = 'active'">高活跃</button>
+            <button class="pill" :class="{ active: activityFilter === 'stable' }" @click="activityFilter = 'stable'">稳定</button>
+            <button class="pill" :class="{ active: activityFilter === 'cool' }" @click="activityFilter = 'cool'">冷区</button>
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">时间</span>
+            <button class="pill" :class="{ active: timeFilter === 'all' }" @click="timeFilter = 'all'">全部</button>
+            <button class="pill" :class="{ active: timeFilter === '24h' }" @click="timeFilter = '24h'">24小时</button>
+            <button class="pill" :class="{ active: timeFilter === '7d' }" @click="timeFilter = '7d'">7天</button>
+            <button class="pill" :class="{ active: timeFilter === '30d' }" @click="timeFilter = '30d'">30天</button>
+            <button class="pill clear" @click="clearFilters">清空</button>
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">类型</span>
+            <button class="pill" :class="{ active: typeFilter === 'all' }" @click="typeFilter = 'all'">全部</button>
+            <button class="pill" :class="{ active: typeFilter === 'User' }" @click="typeFilter = 'User'">用户</button>
+            <button class="pill" :class="{ active: typeFilter === 'Topic' }" @click="typeFilter = 'Topic'">主题</button>
+            <button class="pill" :class="{ active: typeFilter === 'Fact' }" @click="typeFilter = 'Fact'">事实</button>
+          </div>
+        </div>
+
+        <div class="summary-bar glass">
+          <span>当前视野 {{ displayStats.nodes }}</span>
+          <span>主题 {{ displayStats.topics }}</span>
+          <span>高活跃 {{ displayStats.active }}</span>
+          <span>新记忆 {{ displayStats.recent }}</span>
+          <span>新写入 {{ displayStats.born }}</span>
+        </div>
+
+        <div class="legend-bar glass">
+          <span><i class="legend-dot related"></i>关联链</span>
+          <span><i class="legend-dot supersedes"></i>版本替代</span>
+          <span><i class="legend-dot contradicts"></i>冲突关系</span>
+        </div>
+
+        <div class="replay-box glass">
+          <div class="replay-header">
+            <div class="replay-title"><Sparkles :size="14" /> 时间回放</div>
+            <div class="replay-actions">
+              <span>{{ replaySummary }}</span>
+              <button class="pill" :class="{ active: replayPlaying }" @click="toggleReplayPlayback">{{ replayPlaying ? '暂停' : '播放' }}</button>
+            </div>
+          </div>
+          <n-slider v-model:value="replayProgress" :disabled="!replayEnabled" :step="1" />
+        </div>
+
+        <div class="galaxy-stage" :style="{ transform: `scale(${scale})` }">
+          <div class="orbit orbit-a"></div>
+          <div class="orbit orbit-b"></div>
+          <div class="orbit orbit-c"></div>
+          <svg class="graph-links" :viewBox="`0 0 ${viewport.width} ${viewport.height}`">
+            <line v-for="link in renderedLinks" :key="`${link.source.id}-${link.target.id}-${link.type}`" :x1="link.source.x" :y1="link.source.y" :x2="link.target.x" :y2="link.target.y" class="graph-link" :class="[link.type.toLowerCase(), { faded: link.faded, energized: link.energized }]" :style="{ strokeWidth: `${link.width}px` }" />
+          </svg>
+          <div v-for="node in positionedNodes" :key="node.id" class="node" :class="[node.type.toLowerCase(), node.status || 'stable', { selected: selectedNode?.id === node.id, faded: node.faded, recent: node.isRecent, hit: node.isHit, focus: node.isFocus, born: node.isBorn }]" :style="{ left: `${node.x}px`, top: `${node.y}px`, '--node-size': `${node.size}px`, '--node-color': node.color }" @click="openNodeDetail(node)" @contextmenu.prevent="node.type === 'Fact' && (rightClickedNode = node, dropdownX = $event.clientX, dropdownY = $event.clientY, showDropdown = true)">
+            <span class="core"></span>
+            <span v-if="node.isBorn" class="birth-ring"></span>
+            <span v-if="node.showLabel" class="label">{{ node.shortLabel || node.label }}</span>
+          </div>
+        </div>
+
+        <div v-if="!isLoaded || isLoading" class="loading-overlay">
+          <div class="loading-text">正在重构记忆星系</div>
         </div>
       </div>
 
       <transition name="panel">
         <aside v-if="selectedNode" class="detail-panel">
           <div class="panel-header">
-            <div class="panel-title">
-              <span class="panel-label">节点解析</span>
-              <h3 class="panel-heading">记忆图谱</h3>
-            </div>
-            <button class="close-btn" @click="selectedNode = null">
-              <n-icon :size="18"><RefreshCcw :size="16" style="transform: rotate(90deg)" /></n-icon>
-            </button>
+            <div><span class="panel-label">节点解析</span><h3 class="panel-title">记忆图谱</h3></div>
+            <button class="close-btn" @click="selectedNode = null"><RefreshCcw :size="15" style="transform: rotate(90deg)" /></button>
           </div>
-
           <n-scrollbar class="panel-body">
             <div class="panel-content">
-              <section class="info-section">
-                <div class="tag-row">
-                  <n-tag 
-                    :bordered="false" 
-                    size="small" 
-                    :type="selectedNode.type === '核心用户' ? 'success' : 'warning'"
-                  >
-                    {{ selectedNode.type }}
-                  </n-tag>
-                  <span class="node-id">ID: {{ String(selectedNode.id).slice(0, 10) }}</span>
-                </div>
-                <div class="content-card">
-                  <p class="node-label">{{ selectedNode.label }}</p>
-                </div>
-              </section>
-
-              <section class="metric-section">
-                <div class="metric-header">
-                  <span class="metric-title">关联置信度</span>
-                  <span class="metric-value">{{ (selectedNode.importance * 100).toFixed(1) }}%</span>
-                </div>
-                <n-progress
-                  type="line"
-                  :percentage="selectedNode.importance * 100"
-                  :show-indicator="false"
-                  :height="4"
-                />
-                <div class="metric-grid">
-                  <div class="metric-card">
-                    <span class="metric-card-label">活跃度</span>
-                    <span class="metric-card-value">极高频</span>
-                  </div>
-                  <div class="metric-card">
-                    <span class="metric-card-label">状态</span>
-                    <span class="metric-card-value highlight">核心常驻</span>
-                  </div>
-                </div>
-              </section>
-
-              <section class="time-section">
-                <span class="section-title">时间戳记</span>
-                <div class="time-card">
-                  <div class="time-icon">
-                    <Clock :size="18" />
-                  </div>
-                  <div class="time-info">
-                    <span class="time-relative">{{ formatTime(selectedNode.observedAt) }}</span>
-                    <span class="time-absolute">{{ new Date(selectedNode.observedAt).toLocaleString() }}</span>
-                  </div>
-                </div>
-              </section>
-
+              <div class="tag-row">
+                <n-tag :bordered="false" size="small" :type="selectedNode.type === 'User' ? 'success' : selectedNode.type === 'Topic' ? 'info' : 'warning'">{{ selectedNode.type === 'User' ? '核心用户' : selectedNode.type === 'Topic' ? '主题轨道' : '记忆碎片' }}</n-tag>
+                <n-tag v-if="selectedNode.status" :bordered="false" size="small">{{ selectedNode.status }}</n-tag>
+              </div>
+              <div class="content-card">
+                <p class="node-title">{{ selectedNode.label }}</p>
+                <p class="node-meta">{{ selectedNode.subType || '未分类记忆' }}<span v-if="selectedNode.cluster"> · {{ selectedNode.cluster }}</span></p>
+              </div>
+              <div class="metric-row"><span>活跃度</span><span>{{ ((selectedNode.activityScore || 0) * 100).toFixed(0) }}%</span></div>
+              <n-progress type="line" :percentage="(selectedNode.activityScore || 0) * 100" :show-indicator="false" :height="5" />
+              <div class="metric-row"><span>置信度</span><span>{{ ((selectedNode.confidence || 0) * 100).toFixed(0) }}%</span></div>
+              <n-progress type="line" :percentage="(selectedNode.confidence || 0) * 100" :show-indicator="false" :height="5" />
+              <div class="mini-grid">
+                <div class="mini-card"><span>重要性</span><strong>{{ ((selectedNode.importance || 0) * 100).toFixed(0) }}%</strong></div>
+                <div class="mini-card"><span>轨道层级</span><strong>{{ selectedNode.orbitLevel ?? 0 }}</strong></div>
+              </div>
+              <div v-if="selectedNode.type === 'Fact'" class="mini-grid">
+                <div class="mini-card"><span>版本号</span><strong>{{ selectedNode.version ?? 1 }}</strong></div>
+                <div class="mini-card"><span>关系状态</span><strong>{{ selectedNode.supersedesFactId ? '替代旧记忆' : selectedNode.contradictsFactId ? '存在冲突' : '稳定事实' }}</strong></div>
+              </div>
+              <div class="time-card"><Clock3 :size="18" /><div><div class="time-main">{{ formatTime(selectedNode.lastActivatedAt || selectedNode.createdAt) }}</div><div class="time-sub">{{ formatDateTime(selectedNode.lastActivatedAt || selectedNode.createdAt) }}</div></div></div>
               <div class="panel-actions">
-                <n-button size="medium" block secondary class="action-btn">
-                  追溯知识链路
-                </n-button>
-                <n-button 
-                  secondary 
-                  type="error" 
-                  size="medium" 
-                  circle 
-                  class="delete-btn"
-                  @click="rightClickedNode = selectedNode; handleDeleteFact()"
-                >
-                  <template #icon>
-                    <n-icon :size="18"><Trash2 /></n-icon>
-                  </template>
-                </n-button>
+                <n-button block secondary @click="selectedNode.cluster && (activeCluster = selectedNode.cluster)">聚焦当前星域</n-button>
+                <n-button v-if="selectedNode.type === 'Fact'" type="error" secondary circle @click="rightClickedNode = selectedNode; handleDeleteFact()"><template #icon><Trash2 :size="16" /></template></n-button>
               </div>
             </div>
           </n-scrollbar>
@@ -558,605 +405,11 @@ onBeforeUnmount(() => {
       </transition>
     </div>
 
-    <n-dropdown
-      placement="bottom-start" 
-      trigger="manual"
-      :x="dropdownX" 
-      :y="dropdownY" 
-      :options="dropdownOptions"
-      :show="showDropdown" 
-      :on-clickoutside="() => (showDropdown = false)"
-      @select="handleSelectDropdown"
-    />
+    <n-dropdown placement="bottom-start" trigger="manual" :x="dropdownX" :y="dropdownY" :options="dropdownOptions" :show="showDropdown" :on-clickoutside="() => (showDropdown = false)" @select="handleSelectDropdown" />
   </div>
 </template>
 
 <style scoped>
-.insight-view {
-  height: 100%;
-  position: relative;
-  background: transparent;
-}
-
-.insight-content {
-  height: 100%;
-  display: flex;
-  position: relative;
-}
-
-.graph-area {
-  flex: 1;
-  position: relative;
-  min-width: 0;
-  overflow: hidden;
-  border-radius: 28px;
-  isolation: isolate;
-  background:
-    radial-gradient(circle at 20% 20%, color-mix(in srgb, var(--graph-nebula-a) 12%, transparent), transparent 28%),
-    radial-gradient(circle at 82% 18%, color-mix(in srgb, var(--graph-nebula-b) 14%, transparent), transparent 30%),
-    radial-gradient(circle at 50% 78%, color-mix(in srgb, var(--graph-nebula-c) 12%, transparent), transparent 34%);
-  border: 1px solid color-mix(in srgb, var(--color-outline) 70%, transparent);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--color-text-inverse) 3%, transparent),
-    0 24px 80px color-mix(in srgb, var(--graph-glow-primary) 18%, transparent);
-}
-
-.starfield-layer,
-.starfield-grid,
-.graph-halo {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.starfield-back {
-  opacity: 0.45;
-  background-image:
-    radial-gradient(circle at 12% 18%, color-mix(in srgb, var(--graph-star-core) 90%, white) 0 1px, transparent 1.5px),
-    radial-gradient(circle at 72% 24%, color-mix(in srgb, var(--graph-star-secondary) 75%, white) 0 1px, transparent 1.5px),
-    radial-gradient(circle at 36% 72%, color-mix(in srgb, var(--graph-star-core) 70%, white) 0 1.4px, transparent 1.8px),
-    radial-gradient(circle at 82% 64%, color-mix(in srgb, var(--graph-star-secondary) 85%, white) 0 1.1px, transparent 1.8px),
-    radial-gradient(circle at 24% 52%, rgba(255,255,255,0.9) 0 0.9px, transparent 1.6px);
-  animation: driftSlow 28s linear infinite;
-}
-
-.starfield-mid {
-  opacity: 0.3;
-  background-image:
-    radial-gradient(circle at 18% 84%, color-mix(in srgb, var(--graph-star-secondary) 80%, white) 0 1.2px, transparent 1.9px),
-    radial-gradient(circle at 58% 44%, color-mix(in srgb, var(--graph-star-core) 70%, white) 0 1.3px, transparent 2px),
-    radial-gradient(circle at 88% 34%, rgba(255,255,255,0.85) 0 1px, transparent 1.7px),
-    radial-gradient(circle at 66% 82%, color-mix(in srgb, var(--graph-star-core) 55%, white) 0 0.9px, transparent 1.6px);
-  transform: scale(1.08);
-  animation: driftReverse 36s linear infinite;
-}
-
-.nebula-layer {
-  opacity: 0.34;
-  background:
-    radial-gradient(circle at 14% 24%, color-mix(in srgb, var(--graph-nebula-a) 24%, transparent), transparent 26%),
-    radial-gradient(circle at 78% 22%, color-mix(in srgb, var(--graph-nebula-b) 20%, transparent), transparent 28%),
-    radial-gradient(circle at 62% 72%, color-mix(in srgb, var(--graph-nebula-c) 18%, transparent), transparent 32%);
-  filter: blur(26px);
-  animation: pulseNebula 12s ease-in-out infinite;
-}
-
-.starfield-grid {
-  opacity: 0.2;
-  background-image:
-    linear-gradient(color-mix(in srgb, var(--color-outline) 60%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--color-outline) 60%, transparent) 1px, transparent 1px);
-  background-size: 56px 56px;
-  mask-image: radial-gradient(circle at center, black 35%, transparent 92%);
-}
-
-.graph-halo {
-  filter: blur(48px);
-  opacity: 0.28;
-}
-
-.graph-halo-a {
-  background: radial-gradient(circle at 30% 30%, var(--graph-glow-primary), transparent 42%);
-}
-
-.graph-halo-b {
-  background: radial-gradient(circle at 72% 58%, var(--graph-glow-accent), transparent 38%);
-}
-
-@keyframes driftSlow {
-  from { transform: translate3d(0, 0, 0) scale(1); }
-  50% { transform: translate3d(-1.5%, 1.5%, 0) scale(1.02); }
-  to { transform: translate3d(0, 0, 0) scale(1); }
-}
-
-@keyframes driftReverse {
-  from { transform: translate3d(0, 0, 0) scale(1.08); }
-  50% { transform: translate3d(1.8%, -1.4%, 0) scale(1.11); }
-  to { transform: translate3d(0, 0, 0) scale(1.08); }
-}
-
-@keyframes pulseNebula {
-  0%, 100% { opacity: 0.24; transform: scale(1); }
-  50% { opacity: 0.38; transform: scale(1.04); }
-}
-
-.viz-container {
-  width: 100%;
-  height: 100%;
-  transition: all 0.5s ease;
-  position: relative;
-  z-index: 2;
-}
-
-.viz-container.is-loading {
-  filter: blur(8px);
-  opacity: 0.3;
-}
-
-.loading-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 20;
-  background: rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(4px);
-}
-
-.loading-content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 20px;
-}
-
-.loading-orb {
-  position: relative;
-  width: 60px;
-  height: 60px;
-}
-
-.orb-core {
-  position: absolute;
-  inset: 18px;
-  background: radial-gradient(circle at 30% 30%, var(--color-primary), transparent 70%);
-  background-color: var(--color-primary);
-  border-radius: 50%;
-  box-shadow: 
-    0 0 20px var(--color-primary),
-    0 0 40px rgba(52, 211, 153, 0.4),
-    inset 0 0 15px rgba(255, 255, 255, 0.3);
-  animation: orbPulse 2s ease-in-out infinite;
-}
-
-.orb-ring {
-  position: absolute;
-  inset: 8px;
-  border: 2px solid var(--color-primary);
-  border-radius: 50%;
-  opacity: 0.5;
-  animation: orbRing 2s ease-in-out infinite;
-  box-shadow: 0 0 10px var(--color-primary);
-}
-
-@keyframes orbPulse {
-  0%, 100% { 
-    transform: scale(1); 
-    opacity: 1;
-    box-shadow: 
-      0 0 20px var(--color-primary),
-      0 0 40px rgba(52, 211, 153, 0.4);
-  }
-  50% { 
-    transform: scale(1.15); 
-    opacity: 0.8;
-    box-shadow: 
-      0 0 30px var(--color-primary),
-      0 0 60px rgba(52, 211, 153, 0.6);
-  }
-}
-
-@keyframes orbRing {
-  0%, 100% { 
-    transform: scale(1); 
-    opacity: 0.5;
-  }
-  50% { 
-    transform: scale(1.2); 
-    opacity: 0.2;
-  }
-}
-
-.loading-text {
-  font-size: 12px;
-  letter-spacing: 0.25em;
-  color: var(--color-text-dim);
-  text-transform: uppercase;
-  font-weight: 500;
-}
-
-.loading-progress {
-  width: 120px;
-  height: 2px;
-  background: var(--color-surface);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.progress-bar {
-  height: 100%;
-  background: linear-gradient(90deg, transparent, var(--color-primary), transparent);
-  animation: progressFlow 1.5s ease-in-out infinite;
-}
-
-@keyframes progressFlow {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
-}
-
-.toolbar {
-  position: absolute;
-  bottom: 24px;
-  left: 24px;
-  right: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 16px;
-  background: var(--color-glass-bg);
-  backdrop-filter: blur(20px);
-  border: 1px solid var(--color-glass-border);
-  border-radius: 16px;
-  z-index: 10;
-  box-shadow:
-    0 16px 40px rgba(0, 0, 0, 0.18),
-    inset 0 1px 0 color-mix(in srgb, var(--color-text-inverse) 8%, transparent);
-}
-
-.toolbar-stats {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.stat-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.stat-label {
-  font-size: 11px;
-  color: var(--color-text-dim);
-}
-
-.stat-value {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text);
-  font-family: 'Fira Code', monospace;
-}
-
-.stat-divider {
-  width: 1px;
-  height: 16px;
-  background: var(--color-outline);
-}
-
-.toolbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.tool-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: transparent;
-  border: none;
-  color: var(--color-text-dim);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.tool-btn:hover {
-  background: var(--color-surface);
-  color: var(--color-primary);
-}
-
-.tool-btn.primary {
-  background: var(--color-primary-dim);
-  color: var(--color-primary);
-}
-
-.tool-btn.primary:hover {
-  background: var(--color-primary);
-  color: var(--color-text-inverse);
-}
-
-.tool-divider {
-  width: 1px;
-  height: 20px;
-  background: var(--color-outline);
-  margin: 0 8px;
-}
-
-.detail-panel {
-  width: 360px;
-  border-left: 1px solid var(--color-glass-border);
-  background: var(--color-glass-bg);
-  backdrop-filter: blur(24px);
-  display: flex;
-  flex-direction: column;
-  z-index: 30;
-  box-shadow: -20px 0 60px color-mix(in srgb, var(--graph-glow-primary) 16%, transparent);
-}
-
-.panel-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 24px 24px 16px;
-  border-bottom: 1px solid var(--color-outline);
-}
-
-.panel-title {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.panel-label {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--color-primary);
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
-}
-
-.panel-heading {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--color-text);
-  margin: 0;
-}
-
-.close-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: transparent;
-  border: none;
-  color: var(--color-text-dim);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.close-btn:hover {
-  background: var(--color-surface);
-  color: var(--color-text);
-}
-
-.panel-body {
-  flex: 1;
-  min-height: 0;
-}
-
-.panel-content {
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-}
-
-.info-section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.tag-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.node-id {
-  font-size: 10px;
-  color: var(--color-text-dim);
-  font-family: 'Fira Code', monospace;
-}
-
-.content-card {
-  padding: 16px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 92%, transparent), color-mix(in srgb, var(--color-surface-elevated) 88%, transparent));
-  border: 1px solid var(--color-outline);
-  border-radius: 12px;
-  position: relative;
-  overflow: hidden;
-  box-shadow: 0 16px 40px color-mix(in srgb, var(--graph-glow-primary) 10%, transparent);
-}
-
-.content-card::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: var(--color-primary);
-  opacity: 0.5;
-}
-
-.node-label {
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--color-text);
-  margin: 0;
-}
-
-.metric-section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.metric-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.metric-title {
-  font-size: 11px;
-  color: var(--color-text-dim);
-  letter-spacing: 0.05em;
-}
-
-.metric-value {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-primary);
-  font-family: 'Fira Code', monospace;
-}
-
-.metric-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-top: 8px;
-}
-
-.metric-card {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px;
-  background: color-mix(in srgb, var(--color-surface) 90%, transparent);
-  border: 1px solid var(--color-outline);
-  border-radius: 10px;
-}
-
-.metric-card-label {
-  font-size: 10px;
-  color: var(--color-text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
-
-.metric-card-value {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.metric-card-value.highlight {
-  color: var(--color-primary);
-}
-
-.time-section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.section-title {
-  font-size: 11px;
-  color: var(--color-text-dim);
-  letter-spacing: 0.05em;
-}
-
-.time-card {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 16px;
-  background: color-mix(in srgb, var(--color-surface) 90%, transparent);
-  border: 1px solid var(--color-outline);
-  border-radius: 12px;
-}
-
-.time-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  background: var(--color-primary-dim);
-  border-radius: 10px;
-  color: var(--color-primary);
-}
-
-.time-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.time-relative {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.time-absolute {
-  font-size: 10px;
-  color: var(--color-text-dim);
-  font-family: 'Fira Code', monospace;
-}
-
-.panel-actions {
-  display: flex;
-  gap: 12px;
-  padding-top: 16px;
-  border-top: 1px solid var(--color-outline);
-}
-
-.action-btn {
-  flex: 1;
-  height: 44px;
-  border-radius: 10px;
-  font-weight: 600;
-}
-
-.delete-btn {
-  width: 44px;
-  height: 44px;
-  flex-shrink: 0;
-}
-
-.panel-enter-active,
-.panel-leave-active {
-  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.panel-enter-from,
-.panel-leave-to {
-  transform: translateX(100%);
-  opacity: 0;
-}
-
-:deep(.vis-network) {
-  outline: none;
-  background: transparent !important;
-  border-radius: 28px;
-}
-
-:deep(.n-scrollbar-rail) {
-  background: transparent !important;
-}
-
-:deep(.n-progress) {
-  --n-fill-color: var(--color-primary);
-  --n-rail-color: var(--color-surface);
-}
+.insight-view,.insight-content{height:100%}.insight-content{display:flex;gap:20px}.graph-area{position:relative;flex:1;min-width:0;overflow:hidden;border-radius:28px;border:1px solid color-mix(in srgb,var(--graph-outline) 70%,transparent);background:linear-gradient(180deg,rgba(7,10,18,.98),rgba(6,8,14,.96));box-shadow:0 28px 80px color-mix(in srgb,var(--graph-glow) 12%,transparent)}.stars,.nebula,.galaxy-stage,.loading-overlay{position:absolute;inset:0}.stars-a{opacity:.38;background-image:radial-gradient(circle at 14% 18%,rgba(255,255,255,.9) 0 1px,transparent 1.6px),radial-gradient(circle at 72% 24%,color-mix(in srgb,var(--graph-primary) 70%,white) 0 1.2px,transparent 1.8px),radial-gradient(circle at 36% 78%,color-mix(in srgb,var(--graph-core) 70%,white) 0 1px,transparent 1.8px)}.stars-b{opacity:.24;background-image:radial-gradient(circle at 22% 84%,rgba(255,255,255,.72) 0 1px,transparent 1.6px),radial-gradient(circle at 84% 64%,color-mix(in srgb,var(--graph-fact) 72%,white) 0 1px,transparent 1.8px)}.nebula{opacity:.34;filter:blur(26px);background:radial-gradient(circle at 18% 22%,color-mix(in srgb,var(--graph-primary) 22%,transparent),transparent 30%),radial-gradient(circle at 78% 28%,color-mix(in srgb,var(--graph-fact) 18%,transparent),transparent 30%),radial-gradient(circle at 52% 70%,color-mix(in srgb,var(--graph-core) 16%,transparent),transparent 34%)}.glass{border:1px solid rgba(255,255,255,.08);background:rgba(8,12,20,.58);backdrop-filter:blur(16px)}.toolbar,.filter-box,.summary-bar,.legend-bar{position:absolute;left:18px;right:18px;z-index:4;border-radius:18px}.toolbar{top:18px;display:flex;gap:12px;align-items:center;justify-content:space-between;padding:10px 14px}.toolbar-stats,.toolbar-actions{display:flex;gap:14px;align-items:center;color:rgba(255,255,255,.82)}.search-input{width:220px}.tool-btn,.pill,.close-btn{border:0}.tool-btn{width:38px;height:38px;border-radius:12px;color:rgba(255,255,255,.82);background:rgba(255,255,255,.05)}.tool-btn.primary{background:color-mix(in srgb,var(--graph-primary) 24%,rgba(255,255,255,.06))}.filter-box{top:84px;padding:12px;display:flex;flex-direction:column;gap:10px}.filter-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.filter-label{min-width:44px;font-size:12px;color:rgba(255,255,255,.52)}.pill{padding:7px 12px;border-radius:999px;color:rgba(255,255,255,.76);background:rgba(255,255,255,.05)}.pill.active{color:#fff;background:color-mix(in srgb,var(--graph-primary) 24%,rgba(255,255,255,.08))}.pill.clear{margin-left:auto}.summary-bar{top:246px;display:flex;gap:24px;padding:10px 14px;color:rgba(255,255,255,.82)}.legend-bar{top:338px;display:flex;gap:22px;padding:10px 14px;color:rgba(255,255,255,.78)}.legend-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px}.legend-dot.related{background:color-mix(in srgb,var(--graph-edge) 80%,white)}.legend-dot.supersedes{background:#fbbf24}.legend-dot.contradicts{background:#fb7185}.galaxy-stage{transform-origin:center center;transition:transform .24s ease}.orbit{position:absolute;left:50%;top:58%;border-radius:50%;border:1px solid rgba(255,255,255,.08);transform:translate(-50%,-50%)}.orbit-a{width:26%;height:18%}.orbit-b{width:48%;height:32%}.orbit-c{width:70%;height:48%}.graph-links{width:100%;height:100%}.graph-link{stroke:color-mix(in srgb,var(--graph-edge) 70%,white);stroke-linecap:round;stroke-dasharray:10 12;opacity:.48}.graph-link.related_to{stroke:color-mix(in srgb,var(--graph-edge) 78%,white)}.graph-link.supersedes{stroke:#fbbf24;stroke-dasharray:4 8;opacity:.9}.graph-link.contradicts{stroke:#fb7185;stroke-dasharray:2 10;opacity:.95}.graph-link.faded{opacity:.14}.graph-link.energized{opacity:.96;stroke:color-mix(in srgb,var(--graph-primary) 60%,white);filter:drop-shadow(0 0 8px color-mix(in srgb,var(--graph-primary) 35%,transparent));animation:linkFlow 1.6s linear infinite}.graph-link.supersedes.energized{stroke:#fde68a}.graph-link.contradicts.energized{stroke:#fda4af}.node{position:absolute;transform:translate(-50%,-50%);cursor:pointer;transition:opacity .22s ease,transform .22s ease}.node.faded{opacity:.28}.core{display:block;width:var(--node-size);height:var(--node-size);border-radius:50%;background:radial-gradient(circle at 38% 38%,rgba(255,255,255,.86),transparent 22%),radial-gradient(circle,color-mix(in srgb,var(--node-color) 78%,white),color-mix(in srgb,var(--node-color) 58%,transparent) 62%,transparent 100%);box-shadow:0 0 0 1px color-mix(in srgb,var(--node-color) 34%,white),0 0 26px color-mix(in srgb,var(--node-color) 40%,transparent)}.birth-ring{position:absolute;left:50%;top:50%;width:calc(var(--node-size) + 10px);height:calc(var(--node-size) + 10px);border-radius:50%;border:1px solid color-mix(in srgb,var(--node-color) 58%,white);transform:translate(-50%,-50%);animation:birthPulse 1.2s ease-out infinite}.node.topic .core{border-radius:18px}.node.user .core{box-shadow:0 0 0 1px color-mix(in srgb,var(--node-color) 40%,white),0 0 42px color-mix(in srgb,var(--node-color) 50%,transparent),0 0 90px color-mix(in srgb,var(--node-color) 20%,transparent)}.node.selected{transform:translate(-50%,-50%) scale(1.04)}.node.selected .core,.node.focus .core{box-shadow:0 0 0 2px rgba(255,255,255,.26),0 0 34px color-mix(in srgb,var(--node-color) 46%,transparent)}.node.hit .core{box-shadow:0 0 0 2px color-mix(in srgb,var(--graph-primary) 38%,white),0 0 30px color-mix(in srgb,var(--graph-primary) 42%,transparent)}.node.born .core{box-shadow:0 0 0 2px color-mix(in srgb,var(--node-color) 44%,white),0 0 40px color-mix(in srgb,var(--node-color) 50%,transparent),0 0 76px color-mix(in srgb,var(--node-color) 24%,transparent);animation:bornFlash 1.2s ease-in-out infinite}.label{display:block;margin-top:10px;font-size:12px;color:rgba(255,255,255,.86);text-align:center;text-shadow:0 1px 14px rgba(0,0,0,.8);white-space:nowrap}.loading-overlay{z-index:5;display:flex;align-items:center;justify-content:center;background:rgba(5,8,14,.44)}.loading-text{color:#fff;letter-spacing:.16em}.detail-panel{width:340px;border-radius:28px;overflow:hidden;border:1px solid color-mix(in srgb,var(--graph-outline) 70%,transparent);background:linear-gradient(180deg,rgba(10,14,26,.96),rgba(7,10,18,.98));box-shadow:0 28px 72px rgba(0,0,0,.28)}.panel-header{display:flex;justify-content:space-between;align-items:center;padding:18px;border-bottom:1px solid rgba(255,255,255,.06)}.panel-label{display:block;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.46)}.panel-title{margin:6px 0 0;color:#fff}.close-btn{width:34px;height:34px;border-radius:12px;color:rgba(255,255,255,.76);background:rgba(255,255,255,.05)}.panel-body{height:calc(100% - 76px)}.panel-content{padding:18px;display:flex;flex-direction:column;gap:16px}.tag-row{display:flex;gap:8px;flex-wrap:wrap}.content-card,.mini-card,.time-card{padding:14px;border-radius:18px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.03)}.node-title{margin:0;color:#fff;font-size:16px;line-height:1.55}.node-meta{margin:8px 0 0;color:rgba(255,255,255,.56);font-size:13px}.metric-row{display:flex;justify-content:space-between;color:rgba(255,255,255,.74)}.mini-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.mini-card span{display:block;color:rgba(255,255,255,.48);font-size:12px}.mini-card strong{display:block;margin-top:8px;color:#fff;font-size:16px}.time-card{display:flex;gap:12px;align-items:center;color:#fff}.time-main{font-weight:700}.time-sub{margin-top:4px;color:rgba(255,255,255,.54);font-size:13px}.panel-actions{display:flex;gap:10px;align-items:center}.panel-enter-active,.panel-leave-active{transition:transform .24s ease,opacity .24s ease}.panel-enter-from,.panel-leave-to{opacity:0;transform:translateX(12px)}.spinning{animation:spin 1.2s linear infinite}@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}@keyframes linkFlow{from{stroke-dashoffset:28}to{stroke-dashoffset:0}}@keyframes birthPulse{0%{opacity:.9;transform:translate(-50%,-50%) scale(.9)}100%{opacity:0;transform:translate(-50%,-50%) scale(1.55)}}@keyframes bornFlash{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}@media (max-width:1100px){.insight-content{flex-direction:column}.detail-panel{width:100%;min-height:320px}.summary-bar{top:286px}.legend-bar{top:378px}}
+.tool-btn.active{background:color-mix(in srgb,var(--graph-primary) 28%,rgba(255,255,255,.08));color:#fff}.replay-box{position:absolute;left:18px;right:18px;top:302px;z-index:4;border-radius:18px;padding:12px 14px}.replay-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;color:rgba(255,255,255,.8);font-size:13px}.replay-title{display:flex;align-items:center;gap:8px;color:#fff}.replay-actions{display:flex;align-items:center;gap:10px}.node.recent .core{box-shadow:0 0 0 1px color-mix(in srgb,var(--node-color) 34%,white),0 0 26px color-mix(in srgb,var(--node-color) 40%,transparent),0 0 48px color-mix(in srgb,var(--node-color) 36%,transparent)}@media (max-width:1100px){.replay-box{top:342px}}
 </style>

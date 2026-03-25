@@ -21,4 +21,14 @@ public interface MemoryService {
      * 通过 ID 删除一个事实，并清理相关的向量语义记忆。
      */
     void deleteFact(Long factId);
+
+    /**
+     * 执行一次记忆生命周期维护。
+     */
+    Object runMemoryMaintenance();
+
+    /**
+     * 获取最近一次记忆生命周期维护摘要。
+     */
+    Object getMemoryMaintenanceSummary();
 }
