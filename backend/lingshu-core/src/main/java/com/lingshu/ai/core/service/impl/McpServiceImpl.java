@@ -8,7 +8,7 @@ import com.lingshu.ai.infrastructure.repository.McpServerConfigRepository;
 import dev.langchain4j.mcp.client.DefaultMcpClient;
 import dev.langchain4j.mcp.client.McpClient;
 import dev.langchain4j.mcp.client.transport.stdio.StdioMcpTransport;
-import dev.langchain4j.mcp.client.transport.http.HttpMcpTransport;
+import dev.langchain4j.mcp.client.transport.http.StreamableHttpMcpTransport;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
@@ -79,8 +79,8 @@ public class McpServiceImpl implements McpService {
                     .build();
         } else {
             // SSE Transport
-            HttpMcpTransport transport = new HttpMcpTransport.Builder()
-                    .sseUrl(config.getUrl())
+            StreamableHttpMcpTransport transport = StreamableHttpMcpTransport.builder()
+                    .url(config.getUrl())
                     .logRequests(true)
                     .logResponses(true)
                     .build();

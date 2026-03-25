@@ -65,7 +65,7 @@ public class AiConfig {
                 long toolCount = request.messages().stream().filter(m -> m.type() == dev.langchain4j.data.message.ChatMessageType.TOOL_EXECUTION_RESULT).count();
                 log.info("LLM Request Role Summary => system: {}, user: {}, assistant: {}, tool: {}", systemCount, userCount, assistantCount, toolCount);
                 request.messages().forEach(m -> {
-                    log.info("  Role: {}, Content: {}", m.type(), m.toString());
+                    log.info("Role: {}, Content: {}", m.type(), m);
                 });
             }
 
