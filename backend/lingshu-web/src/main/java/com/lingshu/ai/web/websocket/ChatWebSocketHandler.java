@@ -13,6 +13,7 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -133,7 +134,25 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         ));
 
         try {
-            chatService.streamChat(message, agentId, userId, model, apiKey, baseUrl)
+            chatService.streamChat(message, agentId, userId, model, apiKey, baseUrl, new ChatService.ToolEventListener() {
+                        @Override
+                        public void onToolStart(String toolCallId, String toolName, String arguments) {
+                            try {
+                                sendToolEvent(session, "toolCallStart", toolCallId, toolName, arguments, null, false);
+                            } catch (IOException e) {
+                                log.error("发送工具开始事件失败: {}", e.getMessage());
+                            }
+                        }
+
+                        @Override
+                        public void onToolEnd(String toolCallId, String toolName, String arguments, String result, boolean isError) {
+                            try {
+                                sendToolEvent(session, "toolCallEnd", toolCallId, toolName, arguments, result, isError);
+                            } catch (IOException e) {
+                                log.error("发送工具完成事件失败: {}", e.getMessage());
+                            }
+                        }
+                    })
                     .doOnNext(chunk -> {
                         try {
                             sendMessage(session, Map.of(
@@ -191,6 +210,25 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             String json = objectMapper.writeValueAsString(message);
             session.sendMessage(new TextMessage(json));
         }
+    }
+
+    private void sendToolEvent(WebSocketSession session,
+                               String type,
+                               String toolCallId,
+                               String toolName,
+                               String arguments,
+                               String result,
+                               boolean isError) throws IOException {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("type", type);
+        payload.put("toolCallId", toolCallId != null ? toolCallId : "");
+        payload.put("toolName", toolName != null ? toolName : "");
+        payload.put("arguments", arguments != null ? arguments : "");
+        payload.put("isError", isError);
+        if (result != null) {
+            payload.put("result", result);
+        }
+        sendMessage(session, payload);
     }
 
     public void broadcastToUser(String userId, Map<String, Object> message) {

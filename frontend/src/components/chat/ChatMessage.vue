@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import MarkdownIt from 'markdown-it'
 import { ChevronDown, TerminalSquare, FileText } from 'lucide-vue-next'
 import type { ChatMessage } from '@/types'
@@ -10,6 +10,7 @@ type ToolStep = {
   arguments?: string
   result?: string
   isError?: boolean
+  status?: 'running' | 'success' | 'error'
 }
 
 const props = defineProps<{
@@ -20,6 +21,14 @@ const props = defineProps<{
 }>()
 
 const expanded = ref(false)
+
+watch(
+  () => props.message.isToolStepsExpanded,
+  (value) => {
+    expanded.value = !!value
+  },
+  { immediate: true }
+)
 
 const md = new MarkdownIt({
   html: true,
@@ -64,6 +73,13 @@ function formatToolResult(raw?: string): string {
   return raw?.trim() || ''
 }
 
+function getToolStepStatus(step: ToolStep): 'running' | 'success' | 'error' {
+  if (step.status) return step.status
+  if (step.isError) return 'error'
+  if (step.result?.trim()) return 'success'
+  return 'running'
+}
+
 const renderedContent = computed(() => md.render(processContent(props.message.content)))
 
 const hasToolSteps = computed(() => Array.isArray(props.message.toolSteps) && props.message.toolSteps.length > 0)
@@ -77,8 +93,6 @@ const toolStepCountLabel = computed(() => {
 <template>
   <div class="message-row" :class="message.role">
     <div class="message-bubble">
-      <div class="message-content" v-html="renderedContent"></div>
-
       <div v-if="message.role === 'assistant' && hasToolSteps" class="tool-steps-panel">
         <button class="tool-steps-toggle" type="button" @click="expanded = !expanded">
           <div class="toggle-left">
@@ -100,7 +114,8 @@ const toolStepCountLabel = computed(() => {
                 <FileText :size="14" />
                 <span>{{ index + 1 }}. {{ safeToolName(step.toolName) }}</span>
               </div>
-              <span v-if="step.isError" class="tool-step-status error">失败</span>
+              <span v-if="getToolStepStatus(step) === 'error'" class="tool-step-status error">失败</span>
+              <span v-else-if="getToolStepStatus(step) === 'running'" class="tool-step-status running">运行中</span>
               <span v-else class="tool-step-status success">完成</span>
             </div>
 
@@ -116,6 +131,8 @@ const toolStepCountLabel = computed(() => {
           </div>
         </div>
       </div>
+
+      <div v-if="message.content" class="message-content" v-html="renderedContent"></div>
     </div>
 
     <div class="message-meta">
@@ -296,9 +313,9 @@ const toolStepCountLabel = computed(() => {
 }
 
 .tool-steps-panel {
-  margin-top: 14px;
-  border-top: 1px solid var(--color-outline);
-  padding-top: 12px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--color-outline);
+  padding-bottom: 12px;
 }
 
 .tool-steps-toggle {
@@ -382,6 +399,12 @@ const toolStepCountLabel = computed(() => {
   color: var(--color-success);
   border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
   background: color-mix(in srgb, var(--color-success) 10%, transparent);
+}
+
+.tool-step-status.running {
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
 }
 
 .tool-step-status.error {

@@ -190,31 +190,37 @@ public class ChatServiceImpl implements ChatService {
 
     @Override
     public Flux<String> streamChat(String message) {
-        return streamChat(message, null, "User", null, null);
+        return streamChat(message, null, "User", null, null, null);
     }
 
     @Override
     public Flux<String> streamChat(String message, Long agentId) {
-        return streamChat(message, agentId, "User", null, null);
+        return streamChat(message, agentId, "User", null, null, null);
     }
 
     @Override
     public Flux<String> streamChat(String message, Long agentId, String userId) {
-        return streamChat(message, agentId, userId, null, null);
+        return streamChat(message, agentId, userId, null, null, null);
     }
 
     @Override
     public Flux<String> streamChat(String message, String model, String apiKey, String baseUrl) {
-        return streamChat(message, null, "User", model, apiKey, baseUrl);
+        return streamChat(message, null, "User", model, apiKey, baseUrl, null);
     }
 
     @Override
     public Flux<String> streamChat(String message, Long agentId, String model, String apiKey, String baseUrl) {
-        return streamChat(message, agentId, "User", model, apiKey, baseUrl);
+        return streamChat(message, agentId, "User", model, apiKey, baseUrl, null);
     }
 
     @Override
     public Flux<String> streamChat(String message, Long agentId, String userId, String model, String apiKey, String baseUrl) {
+        return streamChat(message, agentId, userId, model, apiKey, baseUrl, null);
+    }
+
+    @Override
+    public Flux<String> streamChat(String message, Long agentId, String userId, String model, String apiKey, String baseUrl,
+                                   ToolEventListener toolEventListener) {
         ChatSession session = getOrCreateSession();
         AgentConfig agent = getAgent(agentId);
 
@@ -279,12 +285,32 @@ public class ChatServiceImpl implements ChatService {
 
         assistantToUse.chat(session.getId(), message, systemPrompt)
                 .onPartialThinking(thinking -> systemLogService.thinking(thinking.text(), "LLM"))
+                .beforeToolExecution(beforeToolExecution -> {
+                    if (toolEventListener == null) {
+                        return;
+                    }
+                    var request = beforeToolExecution.request();
+                    toolEventListener.onToolStart(request.id(), request.name(), request.arguments());
+                })
                 .onPartialResponse(token -> {
                     if (assistantResponseStore.length() == 0) {
                         systemLogService.info("流式输出已开启，接收首个 token...", "LLM");
                     }
                     assistantResponseStore.append(token);
                     sink.tryEmitNext(token);
+                })
+                .onToolExecuted(toolExecution -> {
+                    if (toolEventListener == null) {
+                        return;
+                    }
+                    var request = toolExecution.request();
+                    toolEventListener.onToolEnd(
+                            request.id(),
+                            request.name(),
+                            request.arguments(),
+                            toolExecution.result(),
+                            toolExecution.hasFailed()
+                    );
                 })
                 .onCompleteResponse(response -> {
                     int tokenCount = assistantResponseStore.length() / 4;

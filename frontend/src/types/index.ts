@@ -10,10 +10,12 @@ export interface ChatToolStep {
   result?: string;
   output?: string;
   isError?: boolean;
+  status?: "running" | "success" | "error";
   timestamp?: number;
 }
 
 export interface ChatMessage {
+  id?: number;
   role: "user" | "assistant";
   content: string;
   timestamp: number;

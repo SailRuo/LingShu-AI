@@ -18,6 +18,10 @@ const {
   initWelcome,
   initChat,
   loadHistory,
+  startAssistantMessage,
+  appendAssistantChunk,
+  upsertToolStep,
+  syncLatestAssistantMessage,
   formatTime
 } = useChat()
 
@@ -36,7 +40,6 @@ const { settings, fetchSettings } = useSettings()
 const scrollRef = ref<InstanceType<typeof NScrollbar> | null>(null)
 const isLoadingMore = ref(false)
 const prevScrollHeight = ref(0)
-const currentAssistantMessage = ref('')
 let stopHeartbeat: (() => void) | null = null
 
 function scrollToBottom(behavior: 'auto' | 'smooth' = 'smooth') {
@@ -58,8 +61,6 @@ function handleSend() {
   inputMessage.value = ''
   isTyping.value = true
   scrollToBottom()
-
-  currentAssistantMessage.value = ''
 
   sendChat(text, undefined, settings.value.model, settings.value.apiKey, settings.value.baseUrl)
 }
@@ -88,35 +89,48 @@ async function handleScroll(e: Event) {
   }
 }
 
-function handleWebSocketMessage(message: WebSocketMessage) {
+async function handleWebSocketMessage(message: WebSocketMessage) {
   switch (message.type) {
     case 'chatStart':
       isTyping.value = true
-      currentAssistantMessage.value = ''
+      startAssistantMessage()
       break
       
     case 'chatChunk':
-      const chunkContent = message.content || ''
-      currentAssistantMessage.value += chunkContent
-      
-      let lastMsg = messages.value[messages.value.length - 1]
-      if (!lastMsg || lastMsg.role !== 'assistant') {
-        // 收到首个 chunk 时创建气泡并关闭加载动画
-        messages.value.push({
-          role: 'assistant',
-          content: currentAssistantMessage.value,
-          timestamp: Date.now()
-        })
-        isTyping.value = false
-      } else {
-        lastMsg.content = currentAssistantMessage.value
-      }
+      appendAssistantChunk(message.content || '')
+      isTyping.value = false
+      scrollToBottom()
+      break
+
+    case 'toolCallStart':
+      upsertToolStep({
+        toolCallId: message.toolCallId,
+        toolName: message.toolName,
+        arguments: message.arguments,
+        status: 'running',
+        isError: false
+      })
+      isTyping.value = false
+      scrollToBottom()
+      break
+
+    case 'toolCallEnd':
+      upsertToolStep({
+        toolCallId: message.toolCallId,
+        toolName: message.toolName,
+        arguments: message.arguments,
+        result: message.result,
+        output: message.result,
+        status: message.isError ? 'error' : 'success',
+        isError: !!message.isError
+      })
       scrollToBottom()
       break
       
     case 'chatEnd':
       isTyping.value = false
-      currentAssistantMessage.value = ''
+      await syncLatestAssistantMessage()
+      scrollToBottom()
       break
       
     case 'error':

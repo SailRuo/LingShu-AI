@@ -35,6 +35,8 @@ function toTimestamp(value?: string): number {
 }
 
 function normalizeToolStep(step: HistoryToolStep): ChatToolStep {
+  const result = step.result ?? step.output;
+  const isError = step.isError ?? false;
   return {
     id: step.id ?? step.toolCallId,
     toolCallId: step.toolCallId ?? step.id,
@@ -42,9 +44,10 @@ function normalizeToolStep(step: HistoryToolStep): ChatToolStep {
     arguments: step.arguments ?? step.command ?? step.input,
     command: step.command,
     input: step.input,
-    result: step.result ?? step.output,
+    result,
     output: step.output ?? step.result,
-    isError: step.isError ?? false,
+    isError,
+    status: isError ? "error" : result ? "success" : "running",
   };
 }
 
@@ -80,6 +83,7 @@ function attachToolResult(toolSteps: ChatToolStep[], message: HistoryMessage) {
     toolName: message.toolName ?? "",
     result: message.content ?? "",
     output: message.content ?? "",
+    status: "success",
   };
 
   if (!toolSteps.length) {
@@ -96,6 +100,7 @@ function attachToolResult(toolSteps: ChatToolStep[], message: HistoryMessage) {
           result: message.content ?? "",
           output: message.content ?? "",
           toolName: step.toolName || message.toolName || "",
+          status: message.content ? "success" : step.status ?? "running",
         };
         return;
       }
@@ -108,6 +113,7 @@ function attachToolResult(toolSteps: ChatToolStep[], message: HistoryMessage) {
     result: message.content ?? "",
     output: message.content ?? "",
     toolName: toolSteps[lastIndex].toolName || message.toolName || "",
+    status: message.content ? "success" : toolSteps[lastIndex].status ?? "running",
   };
 }
 
@@ -121,6 +127,7 @@ function aggregateHistoryMessages(historyMessages: HistoryMessage[]): ChatMessag
 
     if (current.role === "user") {
       aggregated.push({
+        id: current.id,
         role: "user",
         content: current.content ?? "",
         timestamp: toTimestamp(current.timestamp),
@@ -161,6 +168,7 @@ function aggregateHistoryMessages(historyMessages: HistoryMessage[]): ChatMessag
       }
 
       aggregated.push({
+        id: current.id,
         role: "assistant",
         content: contentParts.join("\n\n"),
         timestamp: toTimestamp(current.timestamp),
@@ -179,6 +187,7 @@ function aggregateHistoryMessages(historyMessages: HistoryMessage[]): ChatMessag
       }
 
       aggregated.push({
+        id: current.id,
         role: "assistant",
         content: "",
         timestamp: toTimestamp(current.timestamp),
@@ -224,6 +233,7 @@ function mergeMessageBatches(
   return [
     ...olderMessages.slice(0, -1),
     {
+      id: firstCurrent.id ?? lastOlder.id,
       role: "assistant",
       content: [lastOlder.content, firstCurrent.content]
         .filter((part) => part?.trim())
@@ -244,6 +254,120 @@ export function useChat() {
   const isLoadingHistory = ref(false);
   const hasMoreHistory = ref(true);
   const oldestMessageId = ref<number | null>(null);
+
+  function ensureAssistantMessage(): ChatMessage {
+    const lastMessage = messages.value[messages.value.length - 1];
+    if (lastMessage?.role === "assistant") {
+      return lastMessage;
+    }
+
+    const assistantMessage: ChatMessage = {
+      role: "assistant",
+      content: "",
+      timestamp: Date.now(),
+      toolSteps: [],
+      isToolStepsExpanded: true,
+    };
+    messages.value.push(assistantMessage);
+    return assistantMessage;
+  }
+
+  function updateLastAssistant(updater: (message: ChatMessage) => ChatMessage) {
+    const assistantMessage = ensureAssistantMessage();
+    const lastIndex = messages.value.length - 1;
+    messages.value[lastIndex] = updater({
+      ...assistantMessage,
+      toolSteps: assistantMessage.toolSteps ? [...assistantMessage.toolSteps] : [],
+    });
+  }
+
+  function startAssistantMessage() {
+    ensureAssistantMessage();
+  }
+
+  function appendAssistantChunk(chunk: string) {
+    updateLastAssistant((message) => ({
+      ...message,
+      content: message.content + chunk,
+    }));
+  }
+
+  function upsertToolStep(toolStep: Partial<ChatToolStep>) {
+    updateLastAssistant((message) => {
+      const nextSteps = [...(message.toolSteps ?? [])];
+      const targetId = toolStep.toolCallId ?? toolStep.id ?? "";
+      const targetIndex = nextSteps.findIndex(
+        (step) =>
+          (!!targetId && (step.toolCallId === targetId || step.id === targetId)) ||
+          (!!toolStep.toolName && !targetId && step.toolName === toolStep.toolName && step.status === "running")
+      );
+
+      const previous = targetIndex >= 0 ? nextSteps[targetIndex] : undefined;
+      const merged: ChatToolStep = {
+        id: (toolStep.id ?? previous?.id ?? targetId) || undefined,
+        toolCallId: (toolStep.toolCallId ?? previous?.toolCallId ?? targetId) || undefined,
+        toolName: toolStep.toolName ?? previous?.toolName ?? "",
+        arguments: toolStep.arguments ?? previous?.arguments,
+        command: toolStep.command ?? previous?.command,
+        input: toolStep.input ?? previous?.input,
+        result: toolStep.result ?? previous?.result,
+        output: toolStep.output ?? previous?.output,
+        isError: toolStep.isError ?? previous?.isError ?? false,
+        status:
+          toolStep.status ??
+          (toolStep.isError ? "error" : toolStep.result || previous?.result ? "success" : previous?.status ?? "running"),
+        timestamp: toolStep.timestamp ?? previous?.timestamp ?? Date.now(),
+      };
+
+      if (targetIndex >= 0) {
+        nextSteps[targetIndex] = merged;
+      } else {
+        nextSteps.push(merged);
+      }
+
+      return {
+        ...message,
+        toolSteps: nextSteps,
+        isToolStepsExpanded: true,
+      };
+    });
+  }
+
+  async function syncLatestAssistantMessage() {
+    try {
+      const res = await fetch("/api/chat/history?size=6");
+      if (!res.ok) {
+        throw new Error("History sync failed");
+      }
+
+      const historyMessages: HistoryMessage[] = await res.json();
+      const formattedMessages = aggregateHistoryMessages(historyMessages);
+      const latestAssistant = [...formattedMessages]
+        .reverse()
+        .find((message) => message.role === "assistant");
+
+      if (!latestAssistant) {
+        return;
+      }
+
+      const lastAssistantIndex = [...messages.value]
+        .map((message, index) => ({ message, index }))
+        .reverse()
+        .find((entry) => entry.message.role === "assistant")?.index;
+
+      if (lastAssistantIndex == null) {
+        messages.value.push(latestAssistant);
+        return;
+      }
+
+      messages.value[lastAssistantIndex] = {
+        ...messages.value[lastAssistantIndex],
+        ...latestAssistant,
+      };
+    } catch (error) {
+      console.error("Sync latest assistant message error:", error);
+    }
+  }
 
   async function loadHistory(size: number = 20): Promise<boolean> {
     if (isLoadingHistory.value || !hasMoreHistory.value) {
@@ -426,6 +550,10 @@ export function useChat() {
     initWelcome,
     initChat,
     loadHistory,
+    startAssistantMessage,
+    appendAssistantChunk,
+    upsertToolStep,
+    syncLatestAssistantMessage,
     sendMessage,
     formatTime,
   };

@@ -112,12 +112,12 @@ public class ChatController {
         int rawFetchSize = Math.max(size * 4, 80);
         List<ChatMessage> rawMessages;
         if (beforeId != null) {
-            PageRequest pageRequest = PageRequest.of(0, rawFetchSize, Sort.by("createdAt").descending());
-            rawMessages = chatMessageRepository.findBySessionIdAndIdLessThanOrderByCreatedAtDesc(
+            PageRequest pageRequest = PageRequest.of(0, rawFetchSize, Sort.by("id").descending());
+            rawMessages = chatMessageRepository.findBySessionIdAndIdLessThanOrderByIdDesc(
                     effectiveSessionId, beforeId, pageRequest);
         } else {
-            PageRequest pageRequest = PageRequest.of(0, rawFetchSize, Sort.by("createdAt").descending());
-            rawMessages = chatMessageRepository.findBySessionIdOrderByCreatedAtDesc(
+            PageRequest pageRequest = PageRequest.of(0, rawFetchSize, Sort.by("id").descending());
+            rawMessages = chatMessageRepository.findBySessionIdOrderByIdDesc(
                     effectiveSessionId, pageRequest).getContent();
         }
 
