@@ -21,4 +21,10 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
     Page<ChatMessage> findBySessionIdOrderByIdDesc(Long sessionId, Pageable pageable);
 
     List<ChatMessage> findBySessionIdAndIdLessThanOrderByIdDesc(Long sessionId, Long beforeId, Pageable pageable);
+
+    @org.springframework.transaction.annotation.Transactional
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("delete from ChatMessage m where m.session.id = :sessionId")
+    void deleteBySessionId(Long sessionId);
 }
+

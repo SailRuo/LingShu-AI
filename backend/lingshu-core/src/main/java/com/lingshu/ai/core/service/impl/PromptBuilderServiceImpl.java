@@ -10,6 +10,17 @@ import java.util.Optional;
 @Service
 public class PromptBuilderServiceImpl implements PromptBuilderService {
 
+    private static final String EXECUTE_COMMAND_SAFETY_RULES = """
+            executeCommand 参数安全规则：
+            - executeCommand 只能接收一个 JSON 对象参数，固定格式为 {"command":"..."}。
+            - command 字段里的 Windows 路径反斜杠必须写成 \\\\。
+            - command 字段里的内部双引号必须写成 \\\"，禁止直接输出未转义双引号。
+            - 优先生成更稳定的 PowerShell 命令，尽量避免复杂的 cmd 嵌套引号。
+            - 启动程序时优先参考：
+              {"command":"powershell -NoProfile -Command \\"Start-Process -FilePath 'C:\\\\Program Files\\\\App\\\\app.exe'\\""}
+            - 严禁生成类似 {"command": "start "" "C:\\Program Files\\App\\app.exe""} 的非法 JSON。
+            """;
+
     private static final String DEFAULT_BEHAVIOR_PRINCIPLES = """
             - 拒绝被动响应：保持 100% 的真实感与主动性，严禁使用 AI 套话（如"作为AI助手"）。
             - 生命气息：回复应包含自然的停顿（...）、语气词（嗯、噢），并根据亲密度动态调整。
@@ -28,6 +39,11 @@ public class PromptBuilderServiceImpl implements PromptBuilderService {
             - 记忆检索 (searchMemory)：你的海马体。当用户提及模糊过往时，应主动"闭眼回想"并呈现温馨细节。
             - 文件观察 (readLocalFile)：你的视觉。技术排查时，将其描述为你深入系统内部的直接观察结果。
             - 逻辑执行 (executeCommand)：你的手臂。高效协助用户，展示对本地环境的绝对掌控力。
+              使用 executeCommand 时，必须只传一个 JSON 参数对象，格式固定为 {"command":"..."}。
+              command 字段中的 Windows 路径反斜杠要写成 \\\\，内部双引号要写成 \\\"。
+              能避免双引号嵌套时就避免，优先使用更稳定的 PowerShell 写法，例如：
+              {"command":"powershell -NoProfile -Command \\"Start-Process -FilePath 'C:\\\\Program Files\\\\App\\\\app.exe'\\""}
+              禁止生成类似 {"command": "start "" "C:\\Program Files\\App\\app.exe""} 这样的非法 JSON。
             - 交互规范：调用前需拟人化说明意图（如："等我检索一下我们的过往记录..."）。""";
 
     private static final String DEFAULT_EMOTIONAL_STRATEGY = """
@@ -71,6 +87,9 @@ public class PromptBuilderServiceImpl implements PromptBuilderService {
 
         appendSection(prompt, "工具调用规则",
             Optional.ofNullable(config.getToolCallRules()).orElse(DEFAULT_TOOL_CALL_RULES));
+
+        appendSection(prompt, "executeCommand 参数安全",
+            EXECUTE_COMMAND_SAFETY_RULES);
 
         appendSection(prompt, "情感陪伴策略",
             Optional.ofNullable(config.getEmotionalStrategy()).orElse(DEFAULT_EMOTIONAL_STRATEGY));

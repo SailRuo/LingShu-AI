@@ -14,11 +14,24 @@ export interface ChatToolStep {
   timestamp?: number;
 }
 
+export interface ChatTextSegment {
+  type: "text";
+  content: string;
+  timestamp?: number;
+}
+
+export interface ChatToolSegment extends ChatToolStep {
+  type: "tool";
+}
+
+export type ChatMessageSegment = ChatTextSegment | ChatToolSegment;
+
 export interface ChatMessage {
   id?: number;
   role: "user" | "assistant";
   content: string;
   timestamp: number;
+  segments?: ChatMessageSegment[];
   toolSteps?: ChatToolStep[];
   isToolStepsExpanded?: boolean;
 }

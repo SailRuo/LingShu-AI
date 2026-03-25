@@ -15,6 +15,8 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.listener.ChatModelListener;
 import dev.langchain4j.service.AiServices;
+import dev.langchain4j.service.tool.ToolErrorContext;
+import dev.langchain4j.service.tool.ToolErrorHandlerResult;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -152,6 +154,7 @@ public class ChatServiceImpl implements ChatService {
                         .chatModel(chatLanguageModel)
                         .chatMemoryProvider(chatMemoryProvider)
                         .tools(localTools)
+                        .toolArgumentsErrorHandler(this::handleToolArgumentsError)
                         .maxSequentialToolsInvocations(15);
 
         List<McpClient> mcpClients = mcpService.getActiveClients();
@@ -266,12 +269,14 @@ public class ChatServiceImpl implements ChatService {
                     .streamingChatModel(tempModel)
                     .chatMemoryProvider(chatMemoryProvider)
                     .tools(localTools)
+                    .toolArgumentsErrorHandler(this::handleToolArgumentsError)
                     .maxSequentialToolsInvocations(15);
         } else {
             builder = AiServices.builder(AiConfig.RawStreamingAssistant.class)
                     .streamingChatModel(streamingChatLanguageModel)
                     .chatMemoryProvider(chatMemoryProvider)
                     .tools(localTools)
+                    .toolArgumentsErrorHandler(this::handleToolArgumentsError)
                     .maxSequentialToolsInvocations(15);
         }
 
@@ -463,5 +468,73 @@ public class ChatServiceImpl implements ChatService {
             systemLogService.error("获取模型列表失败: " + e.getMessage(), "SYSTEM");
             return "openai".equalsIgnoreCase(source) ? List.of("gpt-3.5-turbo") : List.of("qwen3.5:4b");
         }
+    }
+
+    @Override
+    public void clearHistory(Long sessionId) {
+        Long idToClear = sessionId;
+        if (idToClear == null) {
+            ChatSession session = getOrCreateSession();
+            idToClear = session.getId();
+        }
+        
+        // 1. 从数据库物理删除记录
+        messageRepository.deleteBySessionId(idToClear);
+        
+        // 2. 清除 LangChain4j 的 ChatMemory 缓存（这会触发 store.deleteMessages）
+        chatMemoryProvider.get(idToClear).clear();
+        
+        systemLogService.info("已清空会话历史记录: sessionId=" + idToClear, "CHAT");
+    }
+
+    private ToolErrorHandlerResult handleToolArgumentsError(Throwable error, ToolErrorContext errorContext) {
+
+        String toolName = errorContext != null && errorContext.toolExecutionRequest() != null
+                ? errorContext.toolExecutionRequest().name()
+                : "unknown";
+        String rawArguments = errorContext != null && errorContext.toolExecutionRequest() != null
+                ? errorContext.toolExecutionRequest().arguments()
+                : "";
+
+        String message = buildToolArgumentsRepairMessage(toolName, rawArguments, error);
+        systemLogService.warn(
+                "工具参数解析失败: tool=" + toolName
+                        + " | raw=" + previewArguments(rawArguments)
+                        + " | error=" + (error != null ? error.getMessage() : "unknown"),
+                "TOOL"
+        );
+        return ToolErrorHandlerResult.text(message);
+    }
+
+    private String buildToolArgumentsRepairMessage(String toolName, String rawArguments, Throwable error) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("Tool arguments are invalid JSON and could not be parsed.")
+                .append(" Retry the same tool call with valid JSON only. ");
+
+        if ("executeCommand".equals(toolName)) {
+            builder.append("For executeCommand, the payload must look like ")
+                    .append("{\"command\":\"...\"}. ")
+                    .append("Escape every inner double quote as \\\\\" inside the JSON string. ")
+                    .append("Prefer single quotes inside the shell command when possible. ")
+                    .append("Windows example: {\"command\":\"start \\\"\\\" \\\"C:\\\\Program Files\\\\App\\\\app.exe\\\"\"}. ");
+        }
+
+        if (rawArguments != null && !rawArguments.isBlank()) {
+            builder.append("Previous raw arguments: ").append(previewArguments(rawArguments)).append(". ");
+        }
+
+        if (error != null && error.getMessage() != null && !error.getMessage().isBlank()) {
+            builder.append("Parser error: ").append(error.getMessage());
+        }
+
+        return builder.toString().trim();
+    }
+
+    private String previewArguments(String rawArguments) {
+        if (rawArguments == null || rawArguments.isBlank()) {
+            return "";
+        }
+        String normalized = rawArguments.replaceAll("\\s+", " ").trim();
+        return normalized.length() > 240 ? normalized.substring(0, 240) + "..." : normalized;
     }
 }

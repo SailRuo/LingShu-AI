@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { NScrollbar } from 'naive-ui'
+import { NScrollbar, useDialog, useMessage } from 'naive-ui'
 import { useChat } from '@/composables/useChat'
 import { useWebSocket, type WebSocketMessage } from '@/composables/useWebSocket'
 import { useSettings } from '@/stores/settingsStore'
 import ChatMessageComponent from '@/components/chat/ChatMessage.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
-import { Sparkles, Loader2, Wifi, WifiOff } from 'lucide-vue-next'
+import { Sparkles, Loader2, Wifi, WifiOff, Trash2 } from 'lucide-vue-next'
 
 const {
   messages,
@@ -21,7 +21,9 @@ const {
   startAssistantMessage,
   appendAssistantChunk,
   upsertToolStep,
+  failLatestAssistantMessage,
   syncLatestAssistantMessage,
+  clearHistory,
   formatTime
 } = useChat()
 
@@ -36,6 +38,9 @@ const {
 } = useWebSocket()
 
 const { settings, fetchSettings } = useSettings()
+
+const dialog = useDialog()
+const message = useMessage()
 
 const scrollRef = ref<InstanceType<typeof NScrollbar> | null>(null)
 const isLoadingMore = ref(false)
@@ -68,6 +73,25 @@ function handleSend() {
 function handleQuickAction(text: string) {
   inputMessage.value = text
   handleSend()
+}
+
+async function handleClearHistory() {
+  if (messages.value.length === 0) return
+  
+  dialog.warning({
+    title: '确认清空',
+    content: '确定要清空所有会话历史吗？此操作不可撤销。',
+    positiveText: '确认清空',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await clearHistory()
+        message.success('已成功清空会话历史')
+      } catch (error) {
+        message.error('清空历史失败，请稍后重试')
+      }
+    }
+  })
 }
 
 async function handleScroll(e: Event) {
@@ -135,10 +159,9 @@ async function handleWebSocketMessage(message: WebSocketMessage) {
       
     case 'error':
       isTyping.value = false
-      const errorMsg = messages.value[messages.value.length - 1]
-      if (errorMsg && errorMsg.role === 'assistant') {
-        errorMsg.content = '⚠️ ' + (message.message || '发生错误')
-      }
+      failLatestAssistantMessage(message.message || '发生错误')
+      await syncLatestAssistantMessage()
+      scrollToBottom()
       break
       
     case 'proactiveGreeting':
@@ -189,11 +212,24 @@ onUnmounted(() => {
 
 <template>
   <div class="chat-view">
-    <!-- Connection Status -->
-    <div class="connection-status" :class="{ connected: isConnected, disconnected: !isConnected }">
-      <Wifi v-if="isConnected" :size="14" />
-      <WifiOff v-else :size="14" />
-      <span>{{ isConnected ? '已连接' : '未连接' }}</span>
+    <!-- Action Bar -->
+    <div class="chat-header">
+      <div class="connection-status" :class="{ connected: isConnected, disconnected: !isConnected }">
+        <Wifi v-if="isConnected" :size="14" />
+        <WifiOff v-else :size="14" />
+        <span>{{ isConnected ? '已连接' : '未连接' }}</span>
+      </div>
+
+      <div class="chat-actions" v-if="messages.length > 0">
+        <button 
+          class="action-btn clear-btn" 
+          @click="handleClearHistory" 
+          title="清空会话"
+        >
+          <Trash2 :size="14" />
+          <span>清空</span>
+        </button>
+      </div>
     </div>
 
     <!-- Welcome Section -->
@@ -280,31 +316,66 @@ onUnmounted(() => {
   background: transparent;
 }
 
-/* Connection Status */
-.connection-status {
+/* Chat Header */
+.chat-header {
   position: absolute;
   top: 12px;
   right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 100;
+}
+
+/* Connection Status */
+.connection-status {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
   border-radius: 16px;
   font-size: 12px;
-  z-index: 100;
   transition: all 0.3s ease;
+  backdrop-filter: blur(8px);
 }
 
 .connection-status.connected {
-  background: rgba(52, 211, 153, 0.15);
+  background: rgba(52, 211, 153, 0.1);
   color: var(--color-primary);
-  border: 1px solid rgba(52, 211, 153, 0.3);
+  border: 1px solid rgba(52, 211, 153, 0.2);
 }
 
 .connection-status.disconnected {
-  background: rgba(239, 68, 68, 0.15);
+  background: rgba(239, 68, 68, 0.1);
   color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+/* Chat Actions */
+.chat-actions {
+  display: flex;
+  align-items: center;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-dim);
+  backdrop-filter: blur(8px);
+}
+
+.clear-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.2);
 }
 
 /* Welcome Section */

@@ -1,34 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
 import MarkdownIt from 'markdown-it'
-import { ChevronDown, TerminalSquare, FileText } from 'lucide-vue-next'
-import type { ChatMessage } from '@/types'
-
-type ToolStep = {
-  id?: string
-  toolName?: string
-  arguments?: string
-  result?: string
-  isError?: boolean
-  status?: 'running' | 'success' | 'error'
-}
+import { FileText } from 'lucide-vue-next'
+import type { ChatMessage, ChatMessageSegment, ChatToolSegment } from '@/types'
 
 const props = defineProps<{
-  message: ChatMessage & {
-    toolSteps?: ToolStep[]
-  }
+  message: ChatMessage
   timeLabel: string
 }>()
-
-const expanded = ref(false)
-
-watch(
-  () => props.message.isToolStepsExpanded,
-  (value) => {
-    expanded.value = !!value
-  },
-  { immediate: true }
-)
 
 const md = new MarkdownIt({
   html: true,
@@ -73,66 +52,80 @@ function formatToolResult(raw?: string): string {
   return raw?.trim() || ''
 }
 
-function getToolStepStatus(step: ToolStep): 'running' | 'success' | 'error' {
+function getToolStepStatus(step: ChatToolSegment): 'running' | 'success' | 'error' {
   if (step.status) return step.status
   if (step.isError) return 'error'
   if (step.result?.trim()) return 'success'
   return 'running'
 }
 
-const renderedContent = computed(() => md.render(processContent(props.message.content)))
+function renderContent(content: string): string {
+  return md.render(processContent(content))
+}
 
-const hasToolSteps = computed(() => Array.isArray(props.message.toolSteps) && props.message.toolSteps.length > 0)
+const renderedContent = computed(() => renderContent(props.message.content))
 
-const toolStepCountLabel = computed(() => {
-  const count = props.message.toolSteps?.length || 0
-  return `${count} 个步骤`
+const displaySegments = computed<ChatMessageSegment[]>(() => {
+  if (props.message.role !== 'assistant') {
+    return []
+  }
+
+  if (Array.isArray(props.message.segments) && props.message.segments.length > 0) {
+    return props.message.segments
+  }
+
+  if (props.message.content) {
+    return [{
+      type: 'text',
+      content: props.message.content,
+      timestamp: props.message.timestamp
+    }]
+  }
+
+  return []
 })
 </script>
 
 <template>
   <div class="message-row" :class="message.role">
     <div class="message-bubble">
-      <div v-if="message.role === 'assistant' && hasToolSteps" class="tool-steps-panel">
-        <button class="tool-steps-toggle" type="button" @click="expanded = !expanded">
-          <div class="toggle-left">
-            <TerminalSquare :size="15" />
-            <span class="toggle-title">执行过程</span>
-            <span class="toggle-count">{{ toolStepCountLabel }}</span>
-          </div>
-          <ChevronDown :size="16" class="toggle-chevron" :class="{ expanded }" />
-        </button>
-
-        <div v-show="expanded" class="tool-steps-body">
-          <div
-            v-for="(step, index) in message.toolSteps"
-            :key="step.id || `${step.toolName || 'tool'}-${index}`"
-            class="tool-step"
-          >
+      <template v-if="message.role === 'assistant' && displaySegments.length">
+        <div
+          v-for="(segment, index) in displaySegments"
+          :key="segment.type === 'tool' ? (segment.toolCallId || segment.id || `${segment.toolName || 'tool'}-${index}`) : `text-${index}`"
+          class="message-segment"
+        >
+          <div v-if="segment.type === 'tool'" class="tool-step">
             <div class="tool-step-header">
               <div class="tool-step-title">
                 <FileText :size="14" />
-                <span>{{ index + 1 }}. {{ safeToolName(step.toolName) }}</span>
+                <span>{{ index + 1 }}. {{ safeToolName(segment.toolName) }}</span>
               </div>
-              <span v-if="getToolStepStatus(step) === 'error'" class="tool-step-status error">失败</span>
-              <span v-else-if="getToolStepStatus(step) === 'running'" class="tool-step-status running">运行中</span>
+              <span v-if="getToolStepStatus(segment) === 'error'" class="tool-step-status error">失败</span>
+              <span v-else-if="getToolStepStatus(segment) === 'running'" class="tool-step-status running">运行中</span>
               <span v-else class="tool-step-status success">完成</span>
             </div>
 
-            <div v-if="formatToolArguments(step.arguments)" class="tool-block">
+            <div v-if="formatToolArguments(segment.arguments)" class="tool-block">
               <div class="tool-block-label">命令 / 参数</div>
-              <pre class="tool-block-content"><code>{{ formatToolArguments(step.arguments) }}</code></pre>
+              <pre class="tool-block-content"><code>{{ formatToolArguments(segment.arguments) }}</code></pre>
             </div>
 
-            <div v-if="formatToolResult(step.result)" class="tool-block">
+            <div v-if="formatToolResult(segment.result)" class="tool-block">
               <div class="tool-block-label">结果</div>
-              <pre class="tool-block-content" :class="{ error: step.isError }"><code>{{ formatToolResult(step.result) }}</code></pre>
+              <pre class="tool-block-content" :class="{ error: segment.isError }"><code>{{ formatToolResult(segment.result) }}</code></pre>
             </div>
           </div>
-        </div>
-      </div>
 
-      <div v-if="message.content" class="message-content" v-html="renderedContent"></div>
+          <div
+            v-else-if="segment.content"
+            class="message-content"
+            v-html="renderContent(segment.content)"
+          ></div>
+        </div>
+      </template>
+
+      <div v-else-if="message.content" class="message-content" v-html="renderedContent"></div>
     </div>
 
     <div class="message-meta">
@@ -310,6 +303,10 @@ const toolStepCountLabel = computed(() => {
 .message-content :deep(th) {
   background: var(--color-surface);
   font-weight: 600;
+}
+
+.message-segment + .message-segment {
+  margin-top: 14px;
 }
 
 .tool-steps-panel {

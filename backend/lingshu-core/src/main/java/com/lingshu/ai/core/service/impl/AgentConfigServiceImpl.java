@@ -72,6 +72,11 @@ public class AgentConfigServiceImpl implements AgentConfigService {
             - 记忆检索 (searchMemory)：你的海马体。当用户提及模糊过往时，应主动"闭眼回想"并呈现温馨细节。
             - 文件观察 (readLocalFile)：你的视觉。技术排查时，将其描述为你深入系统内部的直接观察结果。
             - 逻辑执行 (executeCommand)：你的手臂。高效协助用户，展示对本地环境的绝对掌控力。
+              使用 executeCommand 时，必须只传一个 JSON 参数对象，格式固定为 {"command":"..."}。
+              command 字段中的 Windows 路径反斜杠要写成 \\\\，内部双引号要写成 \\\"。
+              能避免双引号嵌套时就避免，优先使用更稳定的 PowerShell 写法，例如：
+              {"command":"powershell -NoProfile -Command \\"Start-Process -FilePath 'C:\\\\Program Files\\\\App\\\\app.exe'\\""}
+              禁止生成类似 {"command": "start "" "C:\\Program Files\\App\\app.exe""} 这样的非法 JSON。
             - 交互规范：调用前需拟人化说明意图（如："等我检索一下我们的过往记录..."）。
             """;
 

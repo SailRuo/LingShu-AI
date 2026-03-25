@@ -63,16 +63,33 @@ public class TurnPostProcessingServiceImpl {
                     safeReason(decision.getReason())
             ), "POST_PROCESS");
 
+            systemLogService.success(String.format(
+                    "后处理决策事件 | analyzeEmotion=%s | extractFacts=%s | recordInteraction=%s | confidence=%.2f",
+                    decision.isAnalyzeEmotion(),
+                    decision.isExtractFacts(),
+                    decision.isRecordInteraction(),
+                    decision.getConfidence()
+            ), "POST_PROCESS");
+
             if (decision.isAnalyzeEmotion()) {
+                systemLogService.info("后处理事件: 已触发情感分析", "POST_PROCESS");
                 analyzeEmotion(userId, userMessage);
+            } else {
+                systemLogService.debug("后处理事件: 跳过情感分析", "POST_PROCESS");
             }
 
             if (decision.isExtractFacts()) {
+                systemLogService.info("后处理事件: 已触发事实提取", "POST_PROCESS");
                 extractFacts(userId, userMessage);
+            } else {
+                systemLogService.debug("后处理事件: 跳过事实提取", "POST_PROCESS");
             }
 
             if (decision.isRecordInteraction()) {
+                systemLogService.info("后处理事件: 已记录互动", "POST_PROCESS");
                 affinityService.recordInteraction(userId);
+            } else {
+                systemLogService.debug("后处理事件: 跳过互动记录", "POST_PROCESS");
             }
         } catch (Exception e) {
             log.warn("回合后处理失败: {}", e.getMessage(), e);
@@ -154,6 +171,9 @@ public class TurnPostProcessingServiceImpl {
                   且没有明显暴露用户情绪或稳定个人事实，则不要触发情感分析/事实提取。
                 - 如果用户表达了情绪、态度、困扰、满意/失望、压力、偏好、身份、计划、经历、
                   长期稳定习惯、关系信息、自我描述等，则应触发相应处理。
+                - 如果用户透露了具有长期记忆价值的稳定事实，例如持续的偏好、反复出现的困扰、
+                  性相关需求或习惯、常见的应对方式、自我认知或关系状态，通常应触发 extractFacts=true。
+                - reason 必须只基于当前提供的“用户消息”和“助手最终回复”，不得编造未出现的细节。
                 - recordInteraction 通常应为 true；除非输入无效或完全没有形成有效回合。
 
                 决策定义：

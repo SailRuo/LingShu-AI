@@ -24,6 +24,8 @@ const SECTION_OPTIONS = [
   { key: 'MEMORY', label: 'MEMORY', color: '#8b5cf6' },
   { key: 'CHAT', label: 'CHAT', color: '#3b82f6' },
   { key: 'LLM', label: 'LLM', color: '#10b981' },
+  { key: 'POST_PROCESS', label: 'POST_PROCESS', color: '#ef4444' },
+  { key: 'EMOTION', label: 'EMOTION', color: '#f97316' },
   { key: 'FACT', label: 'FACT', color: '#f59e0b' },
   { key: 'SYSTEM', label: 'SYSTEM', color: '#6b7280' }
 ]

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, onBeforeUnmount, shallowRef, h, computed } from 'vue'
+import { onMounted, ref, onBeforeUnmount, shallowRef, h, computed, watch } from 'vue'
 import { NButton, NIcon, NDropdown, useMessage, NScrollbar, NTag, NProgress } from 'naive-ui'
 import { 
   RefreshCcw, Trash2, Eye, Clock, 
@@ -64,7 +64,20 @@ const themeColors = computed(() => ({
   nodeFact: themeStore.current.cssVars['--color-node-fact'],
   edge: themeStore.current.cssVars['--color-edge'],
   glow: themeStore.current.cssVars['--color-glow'],
+  surface: themeStore.current.cssVars['--color-surface'],
+  outline: themeStore.current.cssVars['--color-outline'],
+  background: themeStore.current.cssVars['--color-background'],
   isDark: themeStore.current.isDark,
+}))
+
+const sceneStyle = computed(() => ({
+  '--graph-glow-primary': themeColors.value.glow,
+  '--graph-glow-accent': themeColors.value.accent,
+  '--graph-star-core': themeColors.value.primary,
+  '--graph-star-secondary': themeColors.value.nodeFact,
+  '--graph-nebula-a': themeColors.value.primary,
+  '--graph-nebula-b': themeColors.value.accent,
+  '--graph-nebula-c': themeColors.value.nodeUser,
 }))
 
 const config = computed(() => {
@@ -103,7 +116,7 @@ const config = computed(() => {
         shadow: {
           enabled: true,
           color: nodeUserColor,
-          size: 15,
+          size: 22,
           x: 0,
           y: 0
         },
@@ -132,7 +145,7 @@ const config = computed(() => {
         shadow: {
           enabled: true,
           color: nodeFactColor,
-          size: 12,
+          size: 18,
           x: 0,
           y: 0
         },
@@ -151,8 +164,8 @@ const config = computed(() => {
           } 
         },
         smooth: { 
-          type: 'curvedCW',
-          roundness: 0.15
+          type: 'dynamic',
+          roundness: 0.22
         },
         dashes: [8, 12],
         shadow: {
@@ -173,10 +186,11 @@ const config = computed(() => {
           updateInterval: 25
         },
         barnesHut: { 
-          gravitationalConstant: -4000, 
-          springLength: 180,
-          springConstant: 0.04,
-          damping: 0.15
+          gravitationalConstant: -5200, 
+          springLength: 220,
+          springConstant: 0.022,
+          damping: 0.2,
+          avoidOverlap: 0.4
         },
         maxVelocity: 50,
         minVelocity: 0.1
@@ -190,8 +204,8 @@ const config = computed(() => {
       },
       nodes: {
         scaling: {
-          min: 10,
-          max: 35,
+            min: 10,
+            max: 42,
           label: {
             enabled: true,
             min: 8,
@@ -214,8 +228,9 @@ const config = computed(() => {
 
 function injectCustomStyles() {
   const styleId = 'neovis-custom-styles'
-  if (document.getElementById(styleId)) return
-  
+  const previous = document.getElementById(styleId)
+  if (previous) previous.remove()
+
   const style = document.createElement('style')
   style.id = styleId
   style.textContent = `
@@ -247,6 +262,10 @@ function injectCustomStyles() {
     
     .vis-edge {
       animation: edgeFlow 2s linear infinite;
+    }
+
+    .vis-label {
+      letter-spacing: 0.04em;
     }
   `
   document.head.appendChild(style)
@@ -341,6 +360,43 @@ function refreshGraph() {
   else initViz()
 }
 
+function withNetwork(callback: (network: any) => void) {
+  const network = viz.value?.network || viz.value?._network
+  if (network) callback(network)
+}
+
+function focusGraph() {
+  withNetwork((network) => {
+    network.fit({
+      animation: {
+        duration: 700,
+        easingFunction: 'easeInOutQuad'
+      }
+    })
+  })
+}
+
+function zoomGraph(direction: 'in' | 'out') {
+  withNetwork((network) => {
+    const scale = network.getScale?.() ?? 1
+    const factor = direction === 'in' ? 1.18 : 0.84
+    network.moveTo({
+      scale: Math.max(0.2, Math.min(3, scale * factor)),
+      animation: {
+        duration: 260,
+        easingFunction: 'easeInOutQuad'
+      }
+    })
+  })
+}
+
+watch(themeColors, () => {
+  injectCustomStyles()
+  if (viz.value?.network || viz.value?._network) {
+    refreshGraph()
+  }
+}, { deep: true })
+
 onMounted(() => setTimeout(initViz, 500))
 onBeforeUnmount(() => { 
   if (viz.value) viz.value.clearNetwork()
@@ -350,9 +406,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="insight-view">
+  <div class="insight-view" :style="sceneStyle">
     <div class="insight-content">
       <div class="graph-area">
+        <div class="starfield-layer starfield-back"></div>
+        <div class="starfield-layer starfield-mid"></div>
+        <div class="starfield-layer nebula-layer"></div>
+        <div class="starfield-grid"></div>
+        <div class="graph-halo graph-halo-a"></div>
+        <div class="graph-halo graph-halo-b"></div>
         <div id="viz" class="viz-container" :class="{ 'is-loading': !isLoaded }"></div>
         
         <div v-if="!isLoaded" class="loading-overlay">
@@ -390,13 +452,13 @@ onBeforeUnmount(() => {
             <button class="tool-btn" title="搜索">
               <Search :size="16" />
             </button>
-            <button class="tool-btn" title="定位">
+            <button class="tool-btn" title="定位" @click="focusGraph">
               <Target :size="16" />
             </button>
-            <button class="tool-btn" title="放大">
+            <button class="tool-btn" title="放大" @click="zoomGraph('in')">
               <ZoomIn :size="16" />
             </button>
-            <button class="tool-btn" title="缩小">
+            <button class="tool-btn" title="缩小" @click="zoomGraph('out')">
               <ZoomOut :size="16" />
             </button>
             <div class="tool-divider"></div>
@@ -526,12 +588,104 @@ onBeforeUnmount(() => {
   flex: 1;
   position: relative;
   min-width: 0;
+  overflow: hidden;
+  border-radius: 28px;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 20% 20%, color-mix(in srgb, var(--graph-nebula-a) 12%, transparent), transparent 28%),
+    radial-gradient(circle at 82% 18%, color-mix(in srgb, var(--graph-nebula-b) 14%, transparent), transparent 30%),
+    radial-gradient(circle at 50% 78%, color-mix(in srgb, var(--graph-nebula-c) 12%, transparent), transparent 34%);
+  border: 1px solid color-mix(in srgb, var(--color-outline) 70%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--color-text-inverse) 3%, transparent),
+    0 24px 80px color-mix(in srgb, var(--graph-glow-primary) 18%, transparent);
+}
+
+.starfield-layer,
+.starfield-grid,
+.graph-halo {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.starfield-back {
+  opacity: 0.45;
+  background-image:
+    radial-gradient(circle at 12% 18%, color-mix(in srgb, var(--graph-star-core) 90%, white) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 72% 24%, color-mix(in srgb, var(--graph-star-secondary) 75%, white) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 36% 72%, color-mix(in srgb, var(--graph-star-core) 70%, white) 0 1.4px, transparent 1.8px),
+    radial-gradient(circle at 82% 64%, color-mix(in srgb, var(--graph-star-secondary) 85%, white) 0 1.1px, transparent 1.8px),
+    radial-gradient(circle at 24% 52%, rgba(255,255,255,0.9) 0 0.9px, transparent 1.6px);
+  animation: driftSlow 28s linear infinite;
+}
+
+.starfield-mid {
+  opacity: 0.3;
+  background-image:
+    radial-gradient(circle at 18% 84%, color-mix(in srgb, var(--graph-star-secondary) 80%, white) 0 1.2px, transparent 1.9px),
+    radial-gradient(circle at 58% 44%, color-mix(in srgb, var(--graph-star-core) 70%, white) 0 1.3px, transparent 2px),
+    radial-gradient(circle at 88% 34%, rgba(255,255,255,0.85) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 66% 82%, color-mix(in srgb, var(--graph-star-core) 55%, white) 0 0.9px, transparent 1.6px);
+  transform: scale(1.08);
+  animation: driftReverse 36s linear infinite;
+}
+
+.nebula-layer {
+  opacity: 0.34;
+  background:
+    radial-gradient(circle at 14% 24%, color-mix(in srgb, var(--graph-nebula-a) 24%, transparent), transparent 26%),
+    radial-gradient(circle at 78% 22%, color-mix(in srgb, var(--graph-nebula-b) 20%, transparent), transparent 28%),
+    radial-gradient(circle at 62% 72%, color-mix(in srgb, var(--graph-nebula-c) 18%, transparent), transparent 32%);
+  filter: blur(26px);
+  animation: pulseNebula 12s ease-in-out infinite;
+}
+
+.starfield-grid {
+  opacity: 0.2;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--color-outline) 60%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--color-outline) 60%, transparent) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(circle at center, black 35%, transparent 92%);
+}
+
+.graph-halo {
+  filter: blur(48px);
+  opacity: 0.28;
+}
+
+.graph-halo-a {
+  background: radial-gradient(circle at 30% 30%, var(--graph-glow-primary), transparent 42%);
+}
+
+.graph-halo-b {
+  background: radial-gradient(circle at 72% 58%, var(--graph-glow-accent), transparent 38%);
+}
+
+@keyframes driftSlow {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(-1.5%, 1.5%, 0) scale(1.02); }
+  to { transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes driftReverse {
+  from { transform: translate3d(0, 0, 0) scale(1.08); }
+  50% { transform: translate3d(1.8%, -1.4%, 0) scale(1.11); }
+  to { transform: translate3d(0, 0, 0) scale(1.08); }
+}
+
+@keyframes pulseNebula {
+  0%, 100% { opacity: 0.24; transform: scale(1); }
+  50% { opacity: 0.38; transform: scale(1.04); }
 }
 
 .viz-container {
   width: 100%;
   height: 100%;
   transition: all 0.5s ease;
+  position: relative;
+  z-index: 2;
 }
 
 .viz-container.is-loading {
@@ -655,6 +809,9 @@ onBeforeUnmount(() => {
   border: 1px solid var(--color-glass-border);
   border-radius: 16px;
   z-index: 10;
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 color-mix(in srgb, var(--color-text-inverse) 8%, transparent);
 }
 
 .toolbar-stats {
@@ -737,6 +894,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   z-index: 30;
+  box-shadow: -20px 0 60px color-mix(in srgb, var(--graph-glow-primary) 16%, transparent);
 }
 
 .panel-header {
@@ -819,11 +977,13 @@ onBeforeUnmount(() => {
 
 .content-card {
   padding: 16px;
-  background: var(--color-surface);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 92%, transparent), color-mix(in srgb, var(--color-surface-elevated) 88%, transparent));
   border: 1px solid var(--color-outline);
   border-radius: 12px;
   position: relative;
   overflow: hidden;
+  box-shadow: 0 16px 40px color-mix(in srgb, var(--graph-glow-primary) 10%, transparent);
 }
 
 .content-card::before {
@@ -881,7 +1041,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 4px;
   padding: 12px;
-  background: var(--color-surface);
+  background: color-mix(in srgb, var(--color-surface) 90%, transparent);
   border: 1px solid var(--color-outline);
   border-radius: 10px;
 }
@@ -920,7 +1080,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 16px;
   padding: 16px;
-  background: var(--color-surface);
+  background: color-mix(in srgb, var(--color-surface) 90%, transparent);
   border: 1px solid var(--color-outline);
   border-radius: 12px;
 }
@@ -988,6 +1148,7 @@ onBeforeUnmount(() => {
 :deep(.vis-network) {
   outline: none;
   background: transparent !important;
+  border-radius: 28px;
 }
 
 :deep(.n-scrollbar-rail) {

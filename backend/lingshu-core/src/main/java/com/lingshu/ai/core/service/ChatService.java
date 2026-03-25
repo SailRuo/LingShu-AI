@@ -37,5 +37,7 @@ public interface ChatService {
     
     Flux<String> streamWelcome(String userId);
     
+    void clearHistory(Long sessionId);
+
     java.util.List<String> getModels(String source, String baseUrl, String apiKey);
 }

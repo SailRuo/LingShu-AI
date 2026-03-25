@@ -138,6 +138,11 @@ public class ChatController {
         return aggregated;
     }
 
+    @DeleteMapping("/history")
+    public void clearHistory(@RequestParam(name = "sessionId", required = false) Long sessionId) {
+        chatService.clearHistory(sessionId);
+    }
+
     private List<ChatMessageResponse> aggregateMessages(List<ChatMessage> messages) {
         List<ChatMessageResponse> result = new ArrayList<>();
 
