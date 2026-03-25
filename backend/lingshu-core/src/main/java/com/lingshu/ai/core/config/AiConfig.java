@@ -58,25 +58,65 @@ public class AiConfig {
             @Override
             public void onRequest(dev.langchain4j.model.chat.listener.ChatModelRequestContext requestContext) {
                 dev.langchain4j.model.chat.request.ChatRequest request = requestContext.chatRequest();
-                log.info("LLM Request Messages (Count: {}):", request.messages().size());
-                long systemCount = request.messages().stream().filter(m -> m.type() == dev.langchain4j.data.message.ChatMessageType.SYSTEM).count();
-                long userCount = request.messages().stream().filter(m -> m.type() == dev.langchain4j.data.message.ChatMessageType.USER).count();
-                long assistantCount = request.messages().stream().filter(m -> m.type() == dev.langchain4j.data.message.ChatMessageType.AI).count();
-                long toolCount = request.messages().stream().filter(m -> m.type() == dev.langchain4j.data.message.ChatMessageType.TOOL_EXECUTION_RESULT).count();
-                log.info("LLM Request Role Summary => system: {}, user: {}, assistant: {}, tool: {}", systemCount, userCount, assistantCount, toolCount);
-                request.messages().forEach(m -> {
-                    log.info("Role: {}, Content: {}", m.type(), m);
-                });
+                long systemCount = request.messages().stream()
+                        .filter(m -> m.type() == dev.langchain4j.data.message.ChatMessageType.SYSTEM)
+                        .count();
+                long userCount = request.messages().stream()
+                        .filter(m -> m.type() == dev.langchain4j.data.message.ChatMessageType.USER)
+                        .count();
+                long assistantCount = request.messages().stream()
+                        .filter(m -> m.type() == dev.langchain4j.data.message.ChatMessageType.AI)
+                        .count();
+                long toolCount = request.messages().stream()
+                        .filter(m -> m.type() == dev.langchain4j.data.message.ChatMessageType.TOOL_EXECUTION_RESULT)
+                        .count();
+
+                String lastUserPreview = request.messages().stream()
+                        .filter(m -> m.type() == dev.langchain4j.data.message.ChatMessageType.USER)
+                        .reduce((first, second) -> second)
+                        .map(Object::toString)
+                        .map(this::compact)
+                        .orElse("<none>");
+
+                String lastToolPreview = request.messages().stream()
+                        .filter(m -> m.type() == dev.langchain4j.data.message.ChatMessageType.TOOL_EXECUTION_RESULT)
+                        .reduce((first, second) -> second)
+                        .map(Object::toString)
+                        .map(this::compact)
+                        .orElse("<none>");
+
+                log.info(
+                        "LLM Request Summary => messages: {}, system: {}, user: {}, assistant: {}, tool: {}, lastUser: {}, lastTool: {}",
+                        request.messages().size(),
+                        systemCount,
+                        userCount,
+                        assistantCount,
+                        toolCount,
+                        lastUserPreview,
+                        lastToolPreview
+                );
             }
 
             @Override
             public void onResponse(dev.langchain4j.model.chat.listener.ChatModelResponseContext responseContext) {
-                log.info("LLM Response: {}", responseContext.chatResponse().aiMessage().text());
+                String responseText = responseContext.chatResponse() != null
+                        && responseContext.chatResponse().aiMessage() != null
+                        ? responseContext.chatResponse().aiMessage().text()
+                        : null;
+                log.info("LLM Response Summary => {}", compact(responseText));
             }
 
             @Override
             public void onError(dev.langchain4j.model.chat.listener.ChatModelErrorContext errorContext) {
-                log.error("LLM Error: {}", errorContext.error().getMessage());
+                log.error("LLM Error Summary => {}", errorContext.error().getMessage());
+            }
+
+            private String compact(String text) {
+                if (text == null || text.isBlank()) {
+                    return "<empty>";
+                }
+                String normalized = text.replaceAll("\\s+", " ").trim();
+                return normalized.length() > 240 ? normalized.substring(0, 240) + "..." : normalized;
             }
         };
     }

@@ -57,28 +57,28 @@ public class PromptBuilderServiceImpl implements PromptBuilderService {
         }
 
         StringBuilder prompt = new StringBuilder();
-        
+
         String systemPrompt = Optional.ofNullable(config.getSystemPrompt()).orElse("");
         if (StringUtils.hasText(systemPrompt)) {
             prompt.append(systemPrompt);
         }
 
-        appendSection(prompt, "行为原则", 
+        appendSection(prompt, "行为原则",
             Optional.ofNullable(config.getBehaviorPrinciples()).orElse(DEFAULT_BEHAVIOR_PRINCIPLES));
-        
-        appendSection(prompt, "自主决策机制", 
+
+        appendSection(prompt, "自主决策机制",
             Optional.ofNullable(config.getDecisionMechanism()).orElse(DEFAULT_DECISION_MECHANISM));
-        
-        appendSection(prompt, "工具调用规则", 
+
+        appendSection(prompt, "工具调用规则",
             Optional.ofNullable(config.getToolCallRules()).orElse(DEFAULT_TOOL_CALL_RULES));
-        
-        appendSection(prompt, "情感陪伴策略", 
+
+        appendSection(prompt, "情感陪伴策略",
             Optional.ofNullable(config.getEmotionalStrategy()).orElse(DEFAULT_EMOTIONAL_STRATEGY));
-        
-        appendSection(prompt, "主动问候机制", 
+
+        appendSection(prompt, "主动问候机制",
             Optional.ofNullable(config.getGreetingTriggers()).orElse(DEFAULT_GREETING_TRIGGERS));
-        
-        appendSection(prompt, "隐性规则", 
+
+        appendSection(prompt, "隐性规则",
             Optional.ofNullable(config.getHiddenRules()).orElse(DEFAULT_HIDDEN_RULES));
 
         return prompt.toString();
@@ -87,45 +87,47 @@ public class PromptBuilderServiceImpl implements PromptBuilderService {
     @Override
     public String buildMergedSystemPrompt(com.lingshu.ai.infrastructure.entity.AgentConfig config, String relationshipPrompt, String longTermContext) {
         String baseSystem = buildSystemPrompt(config);
-        
+
         StringBuilder contextBuilder = new StringBuilder();
         if (StringUtils.hasText(relationshipPrompt)) {
             contextBuilder.append("\n\n# 当前关系状态\n").append(relationshipPrompt);
         }
-        
+
         if (StringUtils.hasText(longTermContext)) {
             contextBuilder.append("\n\n# 感官记忆 (长期事实)\n").append(longTermContext);
         }
 
         return String.format("""
                 %s
-                
+
                 %s
-                
+
                 指令回复准则：
                 - 当用户询问关于自己的信息（如喜好、身份、习惯等）时，优先从【感官记忆】中查找并回答。
                 - 当用户显式要求"回忆"或"记得"时，引用记忆并说明来源。
                 - 只有当记忆中确实没有相关信息时，才回答"之前的记忆有些模糊，能提醒我一下吗？"
                 - 不要虚构任何用户信息。
                 - 根据关系状态调整语气和亲密程度。
-                """, 
-                baseSystem, 
+
+
+                """,
+                baseSystem,
                 contextBuilder.toString());
     }
 
     @Override
-    public String buildFullPrompt(AgentConfig config, String relationshipPrompt, 
+    public String buildFullPrompt(AgentConfig config, String relationshipPrompt,
                                    String longTermContext, String shortTermContext, String message) {
         // Fallback or legacy, keep if still needed by other parts, but use merged system prompt internally
         return String.format("""
                 %s
-                
+
                 # 近期对话记录
                 %s
-                
+
                 # 用户原始消息
                 %s
-                """, 
+                """,
                 buildMergedSystemPrompt(config, relationshipPrompt, longTermContext),
                 shortTermContext != null ? shortTermContext : "",
                 message);
@@ -135,17 +137,17 @@ public class PromptBuilderServiceImpl implements PromptBuilderService {
     public String buildWelcomePrompt(AgentConfig config, String relationshipPrompt, String historyContext) {
         String systemPrompt = buildSystemPrompt(config);
         String agentName = config != null && config.getDisplayName() != null ? config.getDisplayName() : "灵枢";
-        
+
         return String.format("""
                 %s
-                
+
                 %s
-                
+
                 【历史对话记录】
                 %s
-                
+
                 请作为『%s』，基于以上对话和关系状态动态生成一句情感共识强烈的中文欢迎语。如果对话还没开启，请作为新伙伴询问用户的身份。
-                """, 
+                """,
                 systemPrompt,
                 relationshipPrompt != null ? relationshipPrompt : "",
                 historyContext != null ? historyContext : "",
@@ -164,7 +166,7 @@ public class PromptBuilderServiceImpl implements PromptBuilderService {
         // 增加自我介绍的要求，结合系统设定中的生命特征
         return String.format("""
                 请开始我们的对话。
-                
+
                 任务：
                 1. 请作为『%s』，结合你的系统设定（性格、背景、行为原则），向我展示一段充满生命气息的自我介绍。
                 2. 如果是新朋友，请友好地询问我的身份，开启我们的邂逅。

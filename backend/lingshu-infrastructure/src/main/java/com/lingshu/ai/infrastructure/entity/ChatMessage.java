@@ -23,7 +23,26 @@ public class ChatMessage {
     @Column(columnDefinition = "TEXT")
     private String content;
 
-    private String role; // "user" or "assistant"
+    private String role; // "user", "assistant", or "tool"
 
     private LocalDateTime createdAt;
+
+    /**
+     * 工具调用 ID，用于关联 ToolExecutionResultMessage 与对应的工具调用请求。
+     */
+    @Column(name = "tool_call_id")
+    private String toolCallId;
+
+    /**
+     * 工具名称，ToolExecutionResultMessage 中携带的工具名。
+     */
+    @Column(name = "tool_name")
+    private String toolName;
+
+    /**
+     * JSON 序列化的 toolExecutionRequests 列表。
+     * 当 AiMessage 包含工具调用请求时，将其序列化存储在此字段。
+     */
+    @Column(name = "tool_calls", columnDefinition = "TEXT")
+    private String toolCalls;
 }
