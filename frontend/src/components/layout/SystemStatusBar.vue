@@ -146,8 +146,8 @@ onUnmounted(() => {
 }
 
 .pulse-dot.online {
-  background: #3b82f6; /* Blue as requested */
-  animation: pulse-blue 2s ease-in-out infinite;
+  background: #10b981; /* Green */
+  animation: pulse-green 2s ease-in-out infinite;
 }
 
 .pulse-dot.error {
@@ -155,14 +155,14 @@ onUnmounted(() => {
   animation: pulse-red 2s ease-in-out infinite;
 }
 
-@keyframes pulse-blue {
+@keyframes pulse-green {
   0%, 100% { 
     opacity: 1;
-    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
   }
   50% { 
     opacity: 0.8;
-    box-shadow: 0 0 0 6px rgba(59, 130, 246, 0);
+    box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
   }
 }
 

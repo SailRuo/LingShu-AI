@@ -17,8 +17,14 @@ import dev.langchain4j.store.embedding.EmbeddingSearchResult;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import dev.langchain4j.data.segment.TextSegment;
 import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -58,9 +64,16 @@ public class MemoryServiceImpl implements MemoryService {
     private final dev.langchain4j.model.embedding.EmbeddingModel embeddingModel;
     private final dev.langchain4j.store.embedding.EmbeddingStore<TextSegment> embeddingStore;
     private final FactRepository factRepository;
-    private final com.lingshu.ai.core.service.SystemLogService systemLogService;
-    private final ChatModel chatLanguageModel;
+
+    @Autowired
+    private com.lingshu.ai.core.service.SystemLogService systemLogService;
+
+    @Autowired
+    @Qualifier("taskExecutor")
+    private Executor taskExecutor;
+
     private final com.lingshu.ai.core.service.SettingService settingService;
+    private final ChatModel chatLanguageModel;
     private final ObjectMapper objectMapper;
     private FactExtractor factExtractor;
     private FactSemanticClassifier factSemanticClassifier;
@@ -147,9 +160,14 @@ public class MemoryServiceImpl implements MemoryService {
                 report.getNewFacts() != null ? report.getNewFacts().size() : 0,
                 report.getDeletedFactIds() != null ? report.getDeletedFactIds().size() : 0);
 
-        systemLogService.info(String.format("事实提取分析完成: 新增 %d, 删除 %d",
+        String summary = String.format("事实提取分析完成: 新增 %d, 删除 %d",
                 report.getNewFacts() != null ? report.getNewFacts().size() : 0,
-                report.getDeletedFactIds() != null ? report.getDeletedFactIds().size() : 0), "FACT");
+                report.getDeletedFactIds() != null ? report.getDeletedFactIds().size() : 0);
+        
+        if (report.getAnalysis() != null && !report.getAnalysis().isBlank()) {
+            summary += " | 结论: " + report.getAnalysis();
+        }
+        systemLogService.info(summary, "FACT");
 
         if (report.getDeletedFactIds() != null && !report.getDeletedFactIds().isEmpty()) {
             for (Long id : report.getDeletedFactIds()) {
@@ -164,7 +182,7 @@ public class MemoryServiceImpl implements MemoryService {
                     // 必须从当前内存对象中移除，否则 save(user) 时可能重新创建关系
                     user.getFacts().removeIf(f -> f.getId() != null && f.getId().equals(id));
                 }
-                log.info("Memory corrected: Removing outdated fact [{}] (ID: {})", factContent, id);
+                log.debug("Memory corrected: Removing outdated fact [{}] (ID: {})", factContent, id);
                 systemLogService.info("记忆修正: 移除过时事实 [" + (factContent.length() > 30 ? factContent.substring(0, 30) + "..." : factContent) + "]", "MEMORY");
                 this.deleteFact(id);
             }
@@ -185,7 +203,7 @@ public class MemoryServiceImpl implements MemoryService {
                     continue;
                 }
 
-                log.info("Aha! New persistent fact candidate: {}", fact);
+                log.debug("Aha! New persistent fact candidate: {}", fact);
                 FactWriteResult writeResult = persistFactCandidate(user, fact.trim());
                 user = writeResult.user;
 
@@ -222,17 +240,19 @@ public class MemoryServiceImpl implements MemoryService {
     @Override
     public String retrieveContext(String userId, String message) {
         StringBuilder contextBuilder = new StringBuilder();
+        List<String> baseFactContents = new ArrayList<>();
         com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder = com.lingshu.ai.core.dto.MemoryRetrievalEvent.builder()
                 .query(message)
                 .timestamp(LocalDateTime.now())
                 .extractedEntities(new ArrayList<>())
                 .graphMatchedIds(new ArrayList<>())
                 .semanticMatches(new ArrayList<>())
-                .finalRankedIds(new ArrayList<>());
+                .finalRankedIds(new ArrayList<>())
+                .baseFactContents(baseFactContents);
 
         systemLogService.dbStart("neo4j_query", "User.facts", "MEMORY");
         userRepository.findByName(userId).ifPresentOrElse(user -> {
-            log.info("Graph Retrieval: Found {} facts for user {}", user.getFacts() != null ? user.getFacts().size() : 0, userId);
+            log.debug("Graph Retrieval: Found {} facts for user {}", user.getFacts() != null ? user.getFacts().size() : 0, userId);
             int factCount = user.getFacts() != null ? user.getFacts().size() : 0;
             systemLogService.info("图谱检索: 找到用户 " + userId + " 的 " + factCount + " 条既定事实", "MEMORY");
             contextBuilder.append("关于用户的已知事实：\n");
@@ -240,6 +260,7 @@ public class MemoryServiceImpl implements MemoryService {
                 user.getFacts().forEach(f -> {
                     log.debug("  Fact: {}", f.getContent());
                     contextBuilder.append("- ").append(f.getContent()).append("\n");
+                    baseFactContents.add(f.getContent());
                 });
             }
         }, () -> {
@@ -249,11 +270,11 @@ public class MemoryServiceImpl implements MemoryService {
         systemLogService.dbEnd("neo4j_query", "MEMORY");
 
         if (!needsSemanticRetrieval(message, eventBuilder)) {
-            // 针对“我是谁”、“我的名字”等意图，即使没有提取到复杂实体，也尝试返回基本事实
-            if (message.contains("我是谁") || message.contains("我的名字") || message.contains("叫什么")) {
-                log.debug("Memory pulse: Detected identity query, returning basic facts anyway.");
-                recordRetrievalEvent(eventBuilder.build());
-                return contextBuilder.toString();
+            // 语义检索被跳过，但基础事实已通过 contextBuilder 提供给 LLM
+            if (!baseFactContents.isEmpty()) {
+                log.debug("Memory pulse: Semantic retrieval skipped, using base facts as context ({} facts).", baseFactContents.size());
+                eventBuilder.fallbackActivated(true);
+                eventBuilder.finalRankedContent(new ArrayList<>(baseFactContents));
             }
             recordRetrievalEvent(eventBuilder.build());
             return contextBuilder.toString();
@@ -278,6 +299,7 @@ public class MemoryServiceImpl implements MemoryService {
 
         List<com.lingshu.ai.core.dto.MemoryRetrievalEvent.SemanticMatch> semanticMatches = new ArrayList<>();
         List<Long> finalRankedIds = new ArrayList<>();
+        List<String> finalRankedContent = new ArrayList<>();
 
         if (!matches.isEmpty()) {
             log.debug("Semantic Retrieval: Found {} relevant segments", matches.size());
@@ -297,6 +319,7 @@ public class MemoryServiceImpl implements MemoryService {
                     try {
                         factId = Long.parseLong(match.embedded().metadata().getString("fact_id"));
                         finalRankedIds.add(factId);
+                        finalRankedContent.add(matchText);
                     } catch (NumberFormatException e) {
                         // ignore
                     }
@@ -310,6 +333,7 @@ public class MemoryServiceImpl implements MemoryService {
 
         eventBuilder.semanticMatches(semanticMatches);
         eventBuilder.finalRankedIds(finalRankedIds);
+        eventBuilder.finalRankedContent(finalRankedContent);
         recordRetrievalEvent(eventBuilder.build());
 
         return contextBuilder.toString();
@@ -329,9 +353,10 @@ public class MemoryServiceImpl implements MemoryService {
 
         systemLogService.dbStart("neo4j_query", "Fact.activation", "MEMORY");
         List<FactNode> activatedFacts = factRepository.findFactsByKeywords(entities);
-        systemLogService.dbEnd("neo4j_query", "MEMORY");
-
-        eventBuilder.graphMatchedIds(activatedFacts.stream().map(FactNode::getId).collect(Collectors.toList()));
+        List<Long> graphMatchedIds = activatedFacts.stream().map(FactNode::getId).toList();
+        List<String> graphMatchedContent = activatedFacts.stream().map(FactNode::getContent).toList();
+        eventBuilder.graphMatchedIds(graphMatchedIds);
+        eventBuilder.graphMatchedContent(graphMatchedContent);
 
         if (activatedFacts.isEmpty()) {
             systemLogService.debug("GAM-RAG: 实体未激活任何记忆路径，增益=0，跳过语义检索", "MEMORY");
@@ -347,12 +372,30 @@ public class MemoryServiceImpl implements MemoryService {
 
     private List<String> extractEntities(String message) {
         List<String> entities = new java.util.ArrayList<>();
-        String[] words = message.replaceAll("[\\p{Punct}\\s+]", " ").split("\\s+");
+        // 按标点和空格拆分成若干段
+        String[] segments = message.replaceAll("[\\p{Punct}\\p{IsPunctuation}\\s]+", " ").trim().split("\\s+");
 
-        for (String word : words) {
-            // 放宽实体长度限制，支持单字识别（如 “我”、“书” 等核心意向）
-            if (word.length() >= 1 && !STOP_WORDS.contains(word.toLowerCase())) {
-                entities.add(word);
+        for (String segment : segments) {
+            if (segment.isEmpty()) continue;
+
+            // 检测是否包含中文字符
+            boolean hasChinese = segment.chars().anyMatch(c ->
+                Character.UnicodeScript.of(c) == Character.UnicodeScript.HAN);
+
+            if (hasChinese && segment.length() >= 2) {
+                // 中文分词：生成所有 bigram（2字组合）用于关键词匹配
+                for (int i = 0; i < segment.length() - 1; i++) {
+                    String bigram = segment.substring(i, i + 2);
+                    if (!STOP_WORDS.contains(bigram)) {
+                        entities.add(bigram);
+                    }
+                }
+                // 保留原始短语作为候选实体（限长度避免噪声）
+                if (segment.length() <= 6 && !STOP_WORDS.contains(segment)) {
+                    entities.add(segment);
+                }
+            } else if (segment.length() >= 1 && !STOP_WORDS.contains(segment.toLowerCase())) {
+                entities.add(segment);
             }
         }
 
@@ -751,7 +794,7 @@ public class MemoryServiceImpl implements MemoryService {
         if (exactMatch != null) {
             refreshExistingFact(exactMatch, now);
             factRepository.save(exactMatch);
-            synchronizeFactRelations(buildFactContextsForUser(user));
+            CompletableFuture.runAsync(() -> synchronizeFactRelations(buildFactContextsForUser(user)), taskExecutor);
             systemLogService.debug("事实命中精确去重，刷新活跃度: " + shortenLabel(factText, 24), "MEMORY");
             return new FactWriteResult(user, exactMatch, false);
         }
@@ -866,7 +909,7 @@ public class MemoryServiceImpl implements MemoryService {
         user.addFact(factNode);
         UserNode savedUser = userRepository.save(user);
         systemLogService.dbEnd("neo4j_save", "MEMORY");
-        synchronizeFactRelations(buildFactContextsForUser(savedUser));
+        CompletableFuture.runAsync(() -> synchronizeFactRelations(buildFactContextsForUser(savedUser)), taskExecutor);
 
         FactNode savedFact = savedUser.getFacts().stream()
                 .filter(f -> f.getContent().equals(factNode.getContent()))
@@ -1385,6 +1428,7 @@ public class MemoryServiceImpl implements MemoryService {
         }
     }
 
+    @Transactional("transactionManager")
     @Override
     public void deleteFact(Long factId) {
         String factContent = factRepository.findById(factId)
@@ -1396,9 +1440,8 @@ public class MemoryServiceImpl implements MemoryService {
 
         systemLogService.dbStart("neo4j_delete", "FactNode#" + factId, "MEMORY");
         try {
-            factRepository.deleteById(factId);
-            log.debug("Neo4j node removal successful: {}", factId);
-            synchronizeAllFactRelations();
+            factRepository.detachDeleteById(factId);
+            log.debug("Neo4j node removal successful (DETACH DELETE): {}", factId);
             systemLogService.dbEnd("neo4j_delete", "MEMORY");
         } catch (Exception e) {
             log.error("Neo4j cleanup failed for factId {}: {}", factId, e.getMessage());
@@ -1416,6 +1459,7 @@ public class MemoryServiceImpl implements MemoryService {
         }
     }
 
+    @Transactional("transactionManager")
     @Override
     public Object runMemoryMaintenance() {
         LocalDateTime now = LocalDateTime.now();
@@ -1484,7 +1528,7 @@ public class MemoryServiceImpl implements MemoryService {
 
         if (!facts.isEmpty()) {
             factRepository.saveAll(facts);
-            synchronizeAllFactRelations();
+            CompletableFuture.runAsync(this::synchronizeAllFactRelations, taskExecutor);
         }
 
         Map<String, Object> summary = new LinkedHashMap<>();
@@ -1512,6 +1556,7 @@ public class MemoryServiceImpl implements MemoryService {
         return lastMaintenanceSummary;
     }
 
+    @Transactional("transactionManager")
     @Override
     public void updateFactClassification(Long factId, String clusterKey, String subType) {
         factRepository.findById(factId).ifPresent(fact -> {
@@ -1520,6 +1565,7 @@ public class MemoryServiceImpl implements MemoryService {
             fact.setSubType(subType);
             fact.setClassificationSource("manual");
             factRepository.save(fact);
+            CompletableFuture.runAsync(this::synchronizeAllFactRelations, taskExecutor);
             systemLogService.info("手动更新事实分类: ID=" + factId + ", Topic=" + clusterKey + ", SubType=" + subType, "MEMORY");
         });
     }
@@ -1546,16 +1592,19 @@ public class MemoryServiceImpl implements MemoryService {
         }
     }
 
+    @Transactional("transactionManager")
     @Override
     public void archiveFact(Long factId) {
         factRepository.findById(factId).ifPresent(fact -> {
             fact.setStatus("archived");
             fact.setActivityScore(0.0);
             factRepository.save(fact);
+            CompletableFuture.runAsync(this::synchronizeAllFactRelations, taskExecutor);
             systemLogService.info("手动归档事实: ID=" + factId, "MEMORY");
         });
     }
 
+    @Transactional("transactionManager")
     @Override
     public void restoreFact(Long factId) {
         factRepository.findById(factId).ifPresent(fact -> {
@@ -1563,6 +1612,7 @@ public class MemoryServiceImpl implements MemoryService {
             fact.setActivityScore(0.85);
             fact.setLastActivatedAt(LocalDateTime.now());
             factRepository.save(fact);
+            CompletableFuture.runAsync(this::synchronizeAllFactRelations, taskExecutor);
             systemLogService.info("手动恢复事实: ID=" + factId, "MEMORY");
         });
     }

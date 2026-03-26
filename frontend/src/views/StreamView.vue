@@ -13,9 +13,13 @@ interface MemoryRetrievalEvent {
   query: string
   extractedEntities: string[]
   graphMatchedIds: number[]
+  graphMatchedContent?: string[]
   semanticMatches: SemanticMatch[]
   finalRankedIds: number[]
+  finalRankedContent?: string[]
+  baseFactContents?: string[]
   timestamp: string
+  fallbackActivated?: boolean
 }
 
 const events = ref<MemoryRetrievalEvent[]>([])
@@ -111,21 +115,29 @@ const getScoreColor = (score: number) => {
                   </div>
                   <div class="stage-content">
                     <div class="entity-list" v-if="event.extractedEntities && event.extractedEntities.length > 0">
-                      <NTag
-                        v-for="e in event.extractedEntities"
-                        :key="e"
-                        size="small"
-                        round
-                        :color="{ color: 'var(--color-surface)', textColor: 'var(--color-primary)', borderColor: 'var(--color-primary-dim)' }"
-                      >
-                        {{ e }}
+                      <NTag v-for="(entity, ei) in event.extractedEntities" :key="ei" size="small" round :bordered="false" class="entity-tag">
+                        {{ entity }}
                       </NTag>
                     </div>
                     <div class="empty-note" v-else>未提取到关键实体</div>
 
-                    <div class="graph-hits" v-if="event.graphMatchedIds && event.graphMatchedIds.length > 0">
-                      激活了 {{ event.graphMatchedIds.length }} 个节点链:
-                      <span class="id-list">[{{ event.graphMatchedIds.join(', ') }}]</span>
+                    <div class="graph-hits" v-if="event.graphMatchedContent && event.graphMatchedContent.length > 0">
+                      激活事实:
+                      <div class="graph-content-list">
+                        <div v-for="(content, gi) in event.graphMatchedContent" :key="gi" class="graph-content-item">
+                          <NIcon :size="10" color="var(--color-primary)"><FlashOutline /></NIcon>
+                          {{ content }}
+                        </div>
+                      </div>
+                    </div>
+                    <div class="graph-hits" v-else-if="event.baseFactContents && event.baseFactContents.length > 0">
+                      用户基础事实 ({{ event.baseFactContents.length }}):
+                      <div class="graph-content-list">
+                        <div v-for="(content, bi) in event.baseFactContents" :key="bi" class="graph-content-item base-fact">
+                          <NIcon :size="10" color="var(--color-accent)"><BrainCircuit /></NIcon>
+                          {{ content }}
+                        </div>
+                      </div>
                     </div>
                     <div class="empty-note" v-else>未触发图谱激活</div>
                   </div>
@@ -160,8 +172,26 @@ const getScoreColor = (score: number) => {
                     <span>3. 最终上下文装配</span>
                   </div>
                   <div class="stage-content">
-                    <div class="final-hits" v-if="event.finalRankedIds && event.finalRankedIds.length > 0">
-                      装配事实 ID: <span class="id-list-final">[{{ event.finalRankedIds.join(' → ') }}]</span>
+                    <div class="final-hits" v-if="event.finalRankedContent && event.finalRankedContent.length > 0">
+                      装配事实内容:
+                      <div class="final-content-list">
+                        <div v-for="(content, ci) in event.finalRankedContent" :key="ci" class="final-content-item">
+                          <NIcon :size="10" color="var(--color-success)"><Database /></NIcon>
+                          {{ content }}
+                        </div>
+                      </div>
+                    </div>
+                    <div class="fallback-section" v-else-if="event.fallbackActivated">
+                      <div class="fallback-note">
+                        <NIcon :size="12" color="var(--color-accent)"><BrainCircuit /></NIcon>
+                        已通过图谱基础事实提供上下文（Fallback 激活）
+                      </div>
+                      <div class="final-content-list" v-if="event.finalRankedContent && event.finalRankedContent.length > 0">
+                        <div v-for="(content, fi) in event.finalRankedContent" :key="fi" class="final-content-item">
+                          <NIcon :size="10" color="var(--color-success)"><Database /></NIcon>
+                          {{ content }}
+                        </div>
+                      </div>
                     </div>
                     <div class="empty-note" v-else>未提供附加上下文</div>
                   </div>
@@ -345,7 +375,8 @@ const getScoreColor = (score: number) => {
 
 .pipeline-stages {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto;
   gap: 16px;
 }
 
@@ -354,6 +385,17 @@ const getScoreColor = (score: number) => {
   border-radius: 8px;
   border: 1px solid var(--color-outline);
   overflow: hidden;
+}
+
+/* 前两个阶段并排显示 */
+.stage-block:nth-child(1),
+.stage-block:nth-child(2) {
+  grid-column: span 1;
+}
+
+/* 第三个阶段独占一整行 */
+.stage-block:nth-child(3) {
+  grid-column: 1 / -1;
 }
 
 .stage-header {
@@ -379,6 +421,26 @@ const getScoreColor = (score: number) => {
   opacity: 0.7;
 }
 
+.fallback-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-accent);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.fallback-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.graph-content-item.base-fact {
+  background: rgba(var(--color-accent-rgb, 0, 200, 200), 0.08);
+  border-left-color: var(--color-accent);
+}
+
 .entity-list {
   display: flex;
   flex-wrap: wrap;
@@ -393,7 +455,28 @@ const getScoreColor = (score: number) => {
 
 .id-list {
   font-family: var(--font-mono);
-  color: var(--color-accent);
+  color: var(--color-primary);
+  opacity: 0.9;
+}
+
+.graph-content-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.graph-content-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(var(--color-primary-rgb), 0.08);
+  border-radius: 6px;
+  border-left: 2px solid var(--color-primary);
+  color: var(--color-text);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .semantic-list {
@@ -448,5 +531,25 @@ const getScoreColor = (score: number) => {
   font-family: var(--font-mono);
   color: var(--color-success);
   font-weight: 600;
+}
+
+.final-content-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.final-content-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(var(--color-success-rgb), 0.08);
+  border-radius: 6px;
+  border-left: 2px solid var(--color-success);
+  color: var(--color-text);
+  font-size: 11px;
+  line-height: 1.4;
 }
 </style>

@@ -410,15 +410,16 @@ function renderEnvInput() {
 
 <style scoped>
 .mcp-settings-container {
-  padding: 16px 0;
+  height: 100%;
 }
 
 .section-header {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
   color: var(--color-text);
+  padding: 16px 0;
 }
 
 .section-header h2 {

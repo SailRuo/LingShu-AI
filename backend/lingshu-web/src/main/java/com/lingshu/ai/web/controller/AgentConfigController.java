@@ -55,38 +55,22 @@ public class AgentConfigController {
 
     @PostMapping
     public ResponseEntity<AgentConfig> createAgent(@RequestBody AgentConfig agent) {
-        try {
-            return ResponseEntity.ok(agentConfigService.createAgent(agent));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().build();
-        }
+        return ResponseEntity.ok(agentConfigService.createAgent(agent));
     }
 
     @PutMapping("/{id}")
     public ResponseEntity<AgentConfig> updateAgent(@PathVariable Long id, @RequestBody AgentConfig agent) {
-        try {
-            return ResponseEntity.ok(agentConfigService.updateAgent(id, agent));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
+        return ResponseEntity.ok(agentConfigService.updateAgent(id, agent));
     }
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteAgent(@PathVariable Long id) {
-        try {
-            agentConfigService.deleteAgent(id);
-            return ResponseEntity.ok().build();
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().build();
-        }
+        agentConfigService.deleteAgent(id);
+        return ResponseEntity.ok().build();
     }
 
     @PostMapping("/{id}/set-default")
     public ResponseEntity<AgentConfig> setAsDefault(@PathVariable Long id) {
-        try {
-            return ResponseEntity.ok(agentConfigService.setAsDefault(id));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.notFound().build();
-        }
+        return ResponseEntity.ok(agentConfigService.setAsDefault(id));
     }
 }

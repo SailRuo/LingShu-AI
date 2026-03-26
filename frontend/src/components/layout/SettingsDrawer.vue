@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
 import { NDrawer, NDrawerContent, NForm, NFormItem, NInput, NSelect, NButton, NSpace, NDivider, NRadioGroup, NRadioButton } from 'naive-ui'
+import { useSettings } from '@/stores/settingsStore'
 
 const props = defineProps<{
   show: boolean
@@ -8,86 +8,20 @@ const props = defineProps<{
 
 const emit = defineEmits(['update:show'])
 
-const settings = ref({
-  source: 'ollama',
-  model: 'qwen3.5:4b',
-  baseUrl: 'http://localhost:11434',
-  apiKey: '',
-})
-
-const modelOptions = ref<{label: string, value: string}[]>([])
-const loadingModels = ref(false)
-
-async function fetchModels() {
-  loadingModels.value = true
-  try {
-    const params = new URLSearchParams()
-    if (settings.value.source) params.append('source', settings.value.source)
-    if (settings.value.baseUrl) params.append('baseUrl', settings.value.baseUrl)
-    if (settings.value.apiKey) params.append('apiKey', settings.value.apiKey)
-    
-    const res = await fetch(`/api/chat/models?${params.toString()}`)
-    const models = await res.json()
-    modelOptions.value = models.map((m: string) => ({ label: m, value: m }))
-  } catch {
-    modelOptions.value = [{ label: 'Qwen 3.5 4B (默认)', value: 'qwen3.5:4b' }]
-  } finally {
-    loadingModels.value = false
-  }
-}
-
-async function fetchSettings() {
-  try {
-    const res = await fetch('/api/settings')
-    const data = await res.json()
-    settings.value = {
-      source: data.source || 'ollama',
-      model: data.chatModel,
-      baseUrl: data.baseUrl,
-      apiKey: data.apiKey
-    }
-  } catch (err) {
-    console.error('Failed to fetch settings', err)
-  }
-}
-
-onMounted(async () => {
-  await fetchSettings()
-  fetchModels()
-})
-
-watch(() => props.show, async (newVal) => {
-  if (newVal) {
-    await fetchSettings()
-    fetchModels()
-  }
-})
-
-function handleSourceChange(newSource: string) {
-  if (newSource === 'ollama') {
-    settings.value.baseUrl = 'http://localhost:11434'
-  } else {
-    settings.value.baseUrl = 'http://localhost:3000'
-  }
-  fetchModels()
-}
-
-watch(() => settings.value.baseUrl, (_newVal, oldVal) => {
-  if (oldVal !== undefined) fetchModels()
-})
+const {
+  settings,
+  chatModelOptions,
+  loadingChatModels,
+  fetchSettings,
+  saveSettings,
+  fetchChatModels,
+  debouncedFetchChatModels,
+  handleSourceChange
+} = useSettings()
 
 async function handleSave() {
   try {
-    await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        source: settings.value.source,
-        chatModel: settings.value.model,
-        baseUrl: settings.value.baseUrl,
-        apiKey: settings.value.apiKey
-      })
-    })
+    await saveSettings()
     emit('update:show', false)
   } catch (err) {
     console.error('Failed to save settings', err)
@@ -109,13 +43,13 @@ async function handleSave() {
 
         <n-form label-placement="top">
           <n-form-item label="默认模型 ID">
-            <n-select v-model:value="settings.model" :options="modelOptions" :loading="loadingModels" filterable tag />
+            <n-select v-model:value="settings.model" :options="chatModelOptions" :loading="loadingChatModels" filterable tag />
           </n-form-item>
           <n-form-item label="服务基地址 (Base URL)">
-            <n-input v-model:value="settings.baseUrl" placeholder="http://localhost:11434" />
+            <n-input v-model:value="settings.baseUrl" placeholder="http://localhost:11434" @update:value="debouncedFetchChatModels" />
           </n-form-item>
           <n-form-item v-if="settings.source === 'openai'" label="API 密钥 (Access Key)">
-            <n-input v-model:value="settings.apiKey" type="password" show-password-on="click" placeholder="sk-..." />
+            <n-input v-model:value="settings.apiKey" type="password" show-password-on="click" placeholder="sk-..." @update:value="debouncedFetchChatModels" />
           </n-form-item>
         </n-form>
 

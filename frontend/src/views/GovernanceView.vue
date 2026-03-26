@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, h, computed } from 'vue'
 import {
   NButton,
   NDataTable,
@@ -11,7 +11,13 @@ import {
   NSpace,
   NSelect
 } from 'naive-ui'
-import { DatabaseBackup, Archive, RefreshCw, Trash2 } from 'lucide-vue-next'
+import { 
+  DatabaseBackup, 
+  Archive, 
+  RefreshCw, 
+  Trash2,
+  Zap 
+} from 'lucide-vue-next'
 
 const message = useMessage()
 
@@ -42,7 +48,98 @@ const statusOptions = [
   { label: '已归档 (archived)', value: 'archived' }
 ]
 
-const columns = [
+const loadData = async () => {
+  isLoading.value = true
+  try {
+    // 增加 t 参数防止浏览器缓存
+    const res = await fetch(`/api/memory/governance/list?page=${pagination.value.page - 1}&size=${pagination.value.pageSize}&status=${filterStatus.value}&t=${Date.now()}`)
+    if (!res.ok) throw new Error('网络请求失败')
+    const data = await res.json()
+    tableData.value = data.content || []
+    pagination.value.itemCount = data.totalElements || 0
+  } catch (err) {
+    message.error('加载列表失败')
+    console.error(err)
+  } finally {
+    isLoading.value = false
+  }
+}
+
+const handlePageChange = (page: number) => {
+  pagination.value.page = page
+  loadData()
+}
+
+const handleArchive = async (id: number) => {
+  isLoading.value = true
+  try {
+    const res = await fetch(`/api/memory/fact/${id}/archive`, { method: 'PUT' })
+    if (res.ok) {
+      message.success('已归档至冷库')
+      // 乐观更新：立即从本地列表中移除
+      tableData.value = tableData.value.filter(item => item.id !== id)
+      pagination.value.itemCount = Math.max(0, pagination.value.itemCount - 1)
+      await loadData()
+    } else throw new Error()
+  } catch (e) {
+    message.error('归档失败')
+  } finally {
+    isLoading.value = false
+  }
+}
+
+const handleRestore = async (id: number) => {
+  isLoading.value = true
+  try {
+    const res = await fetch(`/api/memory/fact/${id}/restore`, { method: 'PUT' })
+    if (res.ok) {
+      message.success('记忆已恢复激活')
+      // 乐观更新
+      tableData.value = tableData.value.filter(item => item.id !== id)
+      pagination.value.itemCount = Math.max(0, pagination.value.itemCount - 1)
+      await loadData()
+    } else throw new Error()
+  } catch (e) {
+    message.error('恢复失败')
+  } finally {
+    isLoading.value = false
+  }
+}
+
+const handleDelete = async (id: number) => {
+  isLoading.value = true
+  try {
+    const res = await fetch(`/api/memory/fact/${id}`, { method: 'DELETE' })
+    if (res.ok) {
+      message.success('已永久删除')
+      // 乐观更新
+      tableData.value = tableData.value.filter(item => item.id !== id)
+      pagination.value.itemCount = Math.max(0, pagination.value.itemCount - 1)
+      await loadData()
+    } else throw new Error()
+  } catch (e) {
+    message.error('删除失败')
+  } finally {
+    isLoading.value = false
+  }
+}
+
+const handleRunMaintenance = async () => {
+  try {
+    message.info('正在执行生命周期维护...')
+    const res = await fetch(`/api/memory/maintenance/run`, { method: 'POST' })
+    if (res.ok) {
+      message.success('全局维护任务执行完成')
+      await loadData()
+    } else {
+      throw new Error()
+    }
+  } catch (e) {
+    message.error('维护任务执行失败')
+  }
+}
+
+const columns = computed(() => [
   { title: 'ID', key: 'id', width: 60, align: 'center' as const },
   { title: '记忆内容', key: 'content', ellipsis: { tooltip: true } },
   {
@@ -109,96 +206,29 @@ const columns = [
               ),
           h(
             NPopconfirm,
-            { onPositiveClick: () => handleDelete(row.id) },
+            { 
+              onPositiveClick: () => handleDelete(row.id)
+            },
             {
               default: () => '物理删除将不可恢复，确认删除？',
-              trigger: () => h(NButton, { size: 'small', secondary: true, type: 'error' }, { icon: () => h(NIcon, null, { default: () => h(Trash2) }) })
+              trigger: () => h(NButton, { 
+                size: 'small', 
+                secondary: true, 
+                type: 'error'
+              }, { icon: () => h(NIcon, null, { default: () => h(Trash2) }) })
             }
           )
         ]
       })
     }
   }
-]
-
-import { h } from 'vue'
-
-const loadData = async () => {
-  isLoading.value = true
-  try {
-    const res = await fetch(`http://localhost:8080/api/memory/governance/list?page=${pagination.value.page - 1}&size=${pagination.value.pageSize}&status=${filterStatus.value}`)
-    if (!res.ok) throw new Error('网络请求失败')
-    const data = await res.json()
-    tableData.value = data.content || []
-    pagination.value.itemCount = data.totalElements || 0
-  } catch (err) {
-    message.error('加载列表失败')
-    console.error(err)
-  } finally {
-    isLoading.value = false
-  }
-}
-
-const handlePageChange = (page: number) => {
-  pagination.value.page = page
-  loadData()
-}
-
-const handleArchive = async (id: number) => {
-  try {
-    const res = await fetch(`http://localhost:8080/api/memory/fact/${id}/archive`, { method: 'PUT' })
-    if (res.ok) {
-      message.success('已归档至冷库')
-      loadData()
-    } else throw new Error()
-  } catch (e) {
-    message.error('归档失败')
-  }
-}
-
-const handleRestore = async (id: number) => {
-  try {
-    const res = await fetch(`http://localhost:8080/api/memory/fact/${id}/restore`, { method: 'PUT' })
-    if (res.ok) {
-      message.success('记忆已恢复激活')
-      loadData()
-    } else throw new Error()
-  } catch (e) {
-    message.error('恢复失败')
-  }
-}
-
-const handleDelete = async (id: number) => {
-  try {
-    const res = await fetch(`http://localhost:8080/api/memory/fact/${id}`, { method: 'DELETE' })
-    if (res.ok) {
-      message.success('已永久删除')
-      loadData()
-    } else throw new Error()
-  } catch (e) {
-    message.error('删除失败')
-  }
-}
-
-const handleRunMaintenance = async () => {
-  try {
-    message.info('正在执行生命周期维护...')
-    const res = await fetch(`http://localhost:8080/api/memory/maintenance/run`, { method: 'POST' })
-    if (res.ok) {
-      message.success('全局维护任务执行完成')
-      loadData()
-    } else {
-      throw new Error()
-    }
-  } catch (e) {
-    message.error('维护任务执行失败')
-  }
-}
+])
 
 onMounted(() => {
   loadData()
 })
 </script>
+
 
 <template>
   <div class="governance-view">

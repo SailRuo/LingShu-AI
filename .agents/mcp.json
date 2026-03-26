@@ -18,6 +18,15 @@
                 "E:\\Project\\LingShu-AI\\lingshu.db"
             ],
             "env": {}
+        },
+        "Redis": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@modelcontextprotocol/server-redis",
+                "redis://127.0.0.1:6379/1"
+            ],
+            "env": {}
         }
     }
 }

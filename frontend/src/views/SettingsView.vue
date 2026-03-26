@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { 
   NInput, NSelect, NButton, NIcon, NRadioGroup, NRadioButton, 
   NCard, NGrid, NGridItem, useMessage, NTabs, NTabPane,
@@ -10,52 +10,96 @@ import {
   RefreshCw, Settings, Cpu, Globe, Activity, Zap, Plus, 
   Trash2, Edit, Star, Users, Bell, Send, Brain
 } from 'lucide-vue-next'
+import {
+  RobotOutlined,
+  BulbOutlined,
+  RocketOutlined,
+  StarOutlined,
+  HeartOutlined,
+  SmileOutlined,
+  FireOutlined,
+  ThunderboltOutlined,
+  CrownOutlined,
+  TrophyOutlined,
+  GiftOutlined,
+  LikeOutlined
+} from '@vicons/antd'
 import McpSettings from '@/components/McpSettings.vue'
+import { useSettings } from '@/stores/settingsStore'
+import { useAgents, type Agent } from '@/stores/agentsStore'
+
+const props = defineProps<{
+  activeMenu?: string
+}>()
+
+const emit = defineEmits<{
+  (e: 'update:activeMenu', key: string): void
+}>()
 
 const message = useMessage()
-const activeTab = ref('model')
 
-const settings = ref({
-  source: '',
-  model: '',
-  baseUrl: '',
-  apiKey: '',
-  embedSource: 'ollama',
-  embedModel: '',
-  embedBaseUrl: 'http://localhost:11434',
-  embedApiKey: '',
-  proactiveEnabled: true,
-  inactiveThresholdMinutes: 5,
-  greetingCooldownSeconds: 300,
-  inactiveCheckIntervalMs: 3600000,
-})
+const {
+  settings,
+  chatModelOptions,
+  embedModelOptions,
+  loadingChatModels,
+  loadingEmbedModels,
+  fetchSettings,
+  saveSettings,
+  fetchChatModels,
+  fetchEmbedModels,
+  debouncedFetchChatModels,
+  debouncedFetchEmbedModels,
+  handleSourceChange,
+  handleEmbedSourceChange
+} = useSettings()
 
-const chatModelOptions = ref<{label: string, value: string}[]>([])
-const embedModelOptions = ref<{label: string, value: string}[]>([])
-const loadingChatModels = ref(false)
-const loadingEmbedModels = ref(false)
+const {
+  agents,
+  fetchAgents,
+  createAgent,
+  updateAgent,
+  deleteAgent,
+  setDefaultAgent,
+  getAgentDefaults
+} = useAgents()
 
-interface Agent {
-  id: number
-  name: string
-  displayName: string
-  systemPrompt: string
-  factExtractionPrompt: string
-  behaviorPrinciples: string
-  decisionMechanism: string
-  toolCallRules: string
-  emotionalStrategy: string
-  greetingTriggers: string
-  hiddenRules: string
-  avatar: string
-  color: string
-  isDefault: boolean
-  isActive: boolean
-  createdAt: string
-  updatedAt: string
+const tabMapping: Record<string, string> = {
+  'settings-model': 'model',
+  'settings-agents': 'agents',
+  'settings-proactive': 'proactive',
+  'settings-mcp': 'mcp',
+  'settings': 'model'
 }
 
-const agents = ref<Agent[]>([])
+const reverseTabMapping: Record<string, string> = {
+  'model': 'settings-model',
+  'agents': 'settings-agents',
+  'proactive': 'settings-proactive',
+  'mcp': 'settings-mcp'
+}
+
+const activeTab = computed({
+  get: () => {
+    const menuKey = props.activeMenu || 'settings-model'
+    return tabMapping[menuKey] || 'model'
+  },
+  set: (tabKey: string) => {
+    const menuKey = reverseTabMapping[tabKey] || 'settings-model'
+    emit('update:activeMenu', menuKey)
+  }
+})
+
+const modelSubTab = ref('llm')
+
+watch(modelSubTab, (newTab) => {
+  if (newTab === 'llm') {
+    fetchChatModels(true)
+  } else if (newTab === 'embedding') {
+    fetchEmbedModels(true)
+  }
+})
+
 const showAgentModal = ref(false)
 const editingAgent = ref<Agent | null>(null)
 const agentForm = ref({
@@ -69,152 +113,20 @@ const agentForm = ref({
   emotionalStrategy: '',
   greetingTriggers: '',
   hiddenRules: '',
-  avatar: '🤖',
+  avatar: '机器人',
   color: '#3b82f6',
   isActive: true
 })
 
-
-
-
-
-
-
-
-
-async function fetchChatModels(silent = false) {
-  if (!settings.value.baseUrl || !settings.value.source) return
-  loadingChatModels.value = true
-  try {
-    const params = new URLSearchParams({
-      source: settings.value.source,
-      baseUrl: settings.value.baseUrl,
-      apiKey: settings.value.apiKey,
-    })
-    const res = await fetch(`/api/chat/models?${params.toString()}`)
-    const models = await res.json()
-    chatModelOptions.value = models.map((m: string) => ({ label: m, value: m }))
-    
-    if (chatModelOptions.value.length > 0 && !chatModelOptions.value.find(o => o.value === settings.value.model)) {
-      settings.value.model = chatModelOptions.value[0].value
-    }
-    if (!silent) message.success('对话模型列表已更新')
-  } catch (err) {
-    if (!silent) message.error('无法连接到对话服务')
-    chatModelOptions.value = []
-  } finally {
-    loadingChatModels.value = false
-  }
-}
-
-async function fetchEmbedModels(silent = false) {
-  if (!settings.value.embedBaseUrl || !settings.value.embedSource) return
-  loadingEmbedModels.value = true
-  try {
-    const params = new URLSearchParams({
-      source: settings.value.embedSource,
-      baseUrl: settings.value.embedBaseUrl,
-      apiKey: settings.value.embedApiKey,
-    })
-    const res = await fetch(`/api/chat/models?${params.toString()}`)
-    const models = await res.json()
-    embedModelOptions.value = models.map((m: string) => ({ label: m, value: m }))
-    
-    if (embedModelOptions.value.length > 0 && !embedModelOptions.value.find(o => o.value === settings.value.embedModel)) {
-      settings.value.embedModel = embedModelOptions.value[0].value
-    }
-    if (!silent) message.success('向量模型列表已更新')
-  } catch (err) {
-    if (!silent) message.error('无法连接到向量服务')
-    embedModelOptions.value = []
-  } finally {
-    loadingEmbedModels.value = false
-  }
-}
-
-function handleSourceChange(newSource: string) {
-  if (newSource === 'ollama') {
-    settings.value.baseUrl = 'http://localhost:11434'
-  } else if (newSource === 'openai') {
-    settings.value.baseUrl = 'http://localhost:3000'
-  }
-}
-
-function handleEmbedSourceChange(newSource: string) {
-  if (newSource === 'ollama') {
-    settings.value.embedBaseUrl = 'http://localhost:11434'
-  }
-}
-
-watch(
-  [() => settings.value.source, () => settings.value.baseUrl, () => settings.value.apiKey],
-  () => fetchChatModels(true)
-)
-
-watch(
-  [() => settings.value.embedSource, () => settings.value.embedBaseUrl, () => settings.value.embedApiKey],
-  () => fetchEmbedModels(true)
-)
-
-async function fetchSettings() {
-  try {
-    const res = await fetch('/api/settings')
-    const data = await res.json()
-    settings.value = {
-      source: data.source || 'ollama',
-      model: data.chatModel || '', 
-      baseUrl: data.baseUrl || '',
-      apiKey: data.apiKey || '',
-      embedSource: data.embedSource || 'ollama',
-      embedModel: data.embedModel || '',
-      embedBaseUrl: data.embedBaseUrl || 'http://localhost:11434',
-      embedApiKey: data.embedApiKey || '',
-      proactiveEnabled: data.proactiveEnabled ?? true,
-      inactiveThresholdMinutes: data.inactiveThresholdMinutes ?? 5,
-      greetingCooldownSeconds: data.greetingCooldownSeconds ?? 300,
-      inactiveCheckIntervalMs: data.inactiveCheckIntervalMs ?? 3600000,
-    }
-    fetchChatModels(true)
-    fetchEmbedModels(true)
-  } catch (err) {
-    console.error('Failed to fetch settings', err)
-  }
-}
-
-async function fetchAgents() {
-  try {
-    const res = await fetch('/api/agents')
-    agents.value = await res.json()
-  } catch (err) {
-    console.error('Failed to fetch agents', err)
-  }
-}
-
 onMounted(() => {
   fetchSettings()
   fetchAgents()
+  fetchChatModels(true)
 })
 
 const handleSave = async () => {
   try {
-    await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        source: settings.value.source,
-        chatModel: settings.value.model,
-        baseUrl: settings.value.baseUrl,
-        apiKey: settings.value.apiKey,
-        embedSource: settings.value.embedSource,
-        embedModel: settings.value.embedModel,
-        embedBaseUrl: settings.value.embedBaseUrl,
-        embedApiKey: settings.value.embedApiKey,
-        proactiveEnabled: settings.value.proactiveEnabled,
-        inactiveThresholdMinutes: settings.value.inactiveThresholdMinutes,
-        greetingCooldownSeconds: settings.value.greetingCooldownSeconds,
-        inactiveCheckIntervalMs: settings.value.inactiveCheckIntervalMs,
-      })
-    })
+    await saveSettings()
     message.success('内核配置已同步至系统中枢')
   } catch (err) {
     message.error('配置保存失败')
@@ -264,7 +176,7 @@ async function testProactiveGreeting() {
 async function openCreateAgent() {
   editingAgent.value = null
   try {
-    const res = await fetch('/api/agents/defaults')
+    const res = await getAgentDefaults()
     const defaults = await res.json()
     agentForm.value = {
       name: '',
@@ -277,7 +189,7 @@ async function openCreateAgent() {
       emotionalStrategy: defaults.emotionalStrategy,
       greetingTriggers: defaults.greetingTriggers,
       hiddenRules: defaults.hiddenRules,
-      avatar: defaults.avatar || '🤖',
+      avatar: defaults.avatar || '机器人',
       color: defaults.color || '#3b82f6',
       isActive: true
     }
@@ -300,7 +212,7 @@ function openEditAgent(agent: Agent) {
     emotionalStrategy: agent.emotionalStrategy || '',
     greetingTriggers: agent.greetingTriggers || '',
     hiddenRules: agent.hiddenRules || '',
-    avatar: agent.avatar || '🤖',
+    avatar: agent.avatar || '机器人',
     color: agent.color || '#3b82f6',
     isActive: agent.isActive
   }
@@ -309,50 +221,70 @@ function openEditAgent(agent: Agent) {
 
 async function saveAgent() {
   try {
-    const url = editingAgent.value ? `/api/agents/${editingAgent.value.id}` : '/api/agents'
-    const method = editingAgent.value ? 'PUT' : 'POST'
+    let res
+    if (editingAgent.value) {
+      res = await updateAgent(editingAgent.value.id, agentForm.value)
+    } else {
+      res = await createAgent(agentForm.value)
+    }
     
-    await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(agentForm.value)
-    })
-    
-    message.success(editingAgent.value ? '智能体已更新' : '智能体已创建')
-    showAgentModal.value = false
-    fetchAgents()
+    if (res.ok) {
+      message.success(editingAgent.value ? '智能体已更新' : '智能体已创建')
+      showAgentModal.value = false
+    } else {
+      message.error('保存失败')
+    }
   } catch (err) {
     message.error('保存失败')
   }
 }
 
-async function deleteAgent(id: number) {
+async function handleDeleteAgent(id: number) {
   try {
-    await fetch(`/api/agents/${id}`, { method: 'DELETE' })
-    message.success('智能体已删除')
-    fetchAgents()
+    const res = await deleteAgent(id)
+    if (res.ok) {
+      message.success('智能体已删除')
+    } else {
+      message.error('删除失败')
+    }
   } catch (err) {
     message.error('删除失败')
   }
 }
 
-async function setDefaultAgent(id: number) {
+async function handleSetDefaultAgent(id: number) {
   try {
-    await fetch(`/api/agents/${id}/set-default`, { method: 'POST' })
-    message.success('已设为默认智能体')
-    fetchAgents()
+    const res = await setDefaultAgent(id)
+    if (res.ok) {
+      message.success('已设为默认智能体')
+    } else {
+      message.error('操作失败')
+    }
   } catch (err) {
     message.error('操作失败')
   }
 }
 
-const avatarOptions = ['🤖', '🧠', '💬', '🎯', '⚡', '🔮', '🌟', '💡', '🚀', '🎨']
+const avatarOptions = [
+  { icon: RobotOutlined, label: '机器人' },
+  { icon: BulbOutlined, label: '智慧' },
+  { icon: RocketOutlined, label: '效率' },
+  { icon: StarOutlined, label: '明星' },
+  { icon: HeartOutlined, label: '温暖' },
+  { icon: SmileOutlined, label: '友好' },
+  { icon: FireOutlined, label: '热情' },
+  { icon: ThunderboltOutlined, label: '速度' },
+  { icon: CrownOutlined, label: '尊贵' },
+  { icon: TrophyOutlined, label: '成就' },
+  { icon: LikeOutlined, label: '点赞' },
+  { icon: GiftOutlined, label: '惊喜' }
+]
 const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#84cc16']
 </script>
 
 <template>
   <div class="settings-view">
-    <header class="settings-header">
+    <div class="settings-header">
       <div class="header-content">
         <h1 class="page-title">
           <n-icon :component="Settings" />
@@ -360,266 +292,282 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
         </h1>
         <p class="page-subtitle">管理灵枢 AI 的模型配置与智能体</p>
       </div>
-    </header>
+    </div>
 
-    <n-tabs v-model:value="activeTab" type="line" animated class="settings-tabs">
-      <n-tab-pane name="model" tab="模型配置">
-        <div class="tab-content">
-          <n-tabs type="segment" animated>
-            <n-tab-pane name="llm" tab="对话模型 (LLM)">
-              <section class="settings-section pt-4">
-                <div class="section-header">
-                  <n-icon :component="Cpu" />
-                  <h2>神经网络源</h2>
-                </div>
-                
-                <n-card class="glass-card">
-                  <div class="source-selector">
-                    <n-radio-group v-model:value="settings.source" size="large" @update:value="handleSourceChange">
-                      <n-radio-button value="ollama">
-                        <div class="radio-content">
-                          <n-icon :component="Activity" />
-                          <span>Ollama (本地)</span>
-                        </div>
-                      </n-radio-button>
-                      <n-radio-button value="openai">
-                        <div class="radio-content">
-                          <n-icon :component="Globe" />
-                          <span>Custom / OpenAI</span>
-                        </div>
-                      </n-radio-button>
-                    </n-radio-group>
-                  </div>
-
-                  <div class="setting-item">
-                    <div class="item-label">
-                      <span class="label-text">核心模型路径</span>
-                      <n-button quaternary circle size="small" @click="fetchChatModels(false)" :loading="loadingChatModels">
-                        <template #icon><n-icon :component="RefreshCw" /></template>
-                      </n-button>
-                    </div>
-                    <n-select
-                      v-model:value="settings.model"
-                      :options="chatModelOptions"
-                      placeholder="选择神经网络权重..."
-                      size="large"
-                      filterable
-                      tag
-                    />
+    <div class="settings-content-wrapper">
+      <n-tabs v-model:value="activeTab" type="line" class="settings-tabs">
+        <n-tab-pane name="model" tab="模型配置">
+          <div class="tab-content">
+            <n-tabs type="segment">
+              <n-tab-pane name="llm" tab="对话模型 (LLM)">
+                <section class="settings-section pt-4">
+                  <div class="section-header">
+                    <n-icon :component="Cpu" />
+                    <h2>神经网络源</h2>
                   </div>
                   
-                  <div class="dual-fields mt-4">
-                    <div class="setting-item flex-1">
-                      <div class="item-label">服务地址</div>
-                      <n-input v-model:value="settings.baseUrl" placeholder="https://..." size="large" />
+                  <n-card class="glass-card">
+                    <div class="source-selector">
+                      <n-radio-group v-model:value="settings.source" size="large" @update:value="handleSourceChange">
+                        <n-radio-button value="ollama">
+                          <div class="radio-content">
+                            <n-icon :component="Activity" />
+                            <span>Ollama (本地)</span>
+                          </div>
+                        </n-radio-button>
+                        <n-radio-button value="openai">
+                          <div class="radio-content">
+                            <n-icon :component="Globe" />
+                            <span>Custom / OpenAI</span>
+                          </div>
+                        </n-radio-button>
+                      </n-radio-group>
                     </div>
-                    <div v-if="settings.source === 'openai'" class="setting-item flex-1">
-                      <div class="item-label">API 密钥</div>
-                      <n-input v-model:value="settings.apiKey" type="password" show-password-on="click" placeholder="sk-..." size="large" />
+
+                    <div class="setting-item">
+                      <div class="item-label">
+                        <span class="label-text">核心模型路径</span>
+                        <n-button quaternary circle size="small" @click="fetchChatModels(false)" :loading="loadingChatModels">
+                          <template #icon><n-icon :component="RefreshCw" /></template>
+                        </n-button>
+                      </div>
+                      <n-select
+                        v-model:value="settings.model"
+                        :options="chatModelOptions"
+                        placeholder="选择神经网络权重..."
+                        size="large"
+                        filterable
+                        tag
+                      />
                     </div>
+                    
+                    <div class="dual-fields mt-4">
+                      <div class="setting-item flex-1">
+                        <div class="item-label">服务地址</div>
+                        <n-input v-model:value="settings.baseUrl" placeholder="https://..." size="large" @update:value="debouncedFetchChatModels" />
+                      </div>
+                      <div v-if="settings.source === 'openai'" class="setting-item flex-1">
+                        <div class="item-label">API 密钥</div>
+                        <n-input v-model:value="settings.apiKey" type="password" show-password-on="click" placeholder="sk-..." size="large" autocomplete="off" @update:value="debouncedFetchChatModels" />
+                      </div>
+                    </div>
+                  </n-card>
+                </section>
+              </n-tab-pane>
+
+              <n-tab-pane name="embedding" tab="向量模型 (Embedding)">
+                <section class="settings-section pt-4">
+                  <div class="section-header">
+                    <n-icon :component="Brain" />
+                    <h2>语义编码源</h2>
                   </div>
-                </n-card>
-              </section>
-            </n-tab-pane>
-
-            <n-tab-pane name="embedding" tab="向量模型 (Embedding)">
-              <section class="settings-section pt-4">
-                <div class="section-header">
-                  <n-icon :component="Brain" />
-                  <h2>语义编码源</h2>
-                </div>
-                
-                <n-card class="glass-card">
-                  <div class="source-selector">
-                    <n-radio-group v-model:value="settings.embedSource" size="large" @update:value="handleEmbedSourceChange">
-                      <n-radio-button value="ollama">
-                        <div class="radio-content">
-                          <n-icon :component="Activity" />
-                          <span>Ollama (本地)</span>
-                        </div>
-                      </n-radio-button>
-                      <n-radio-button value="openai">
-                        <div class="radio-content">
-                          <n-icon :component="Globe" />
-                          <span>Custom / OpenAI</span>
-                        </div>
-                      </n-radio-button>
-                    </n-radio-group>
-                  </div>
-
-                  <div class="setting-item">
-                    <div class="item-label">
-                      <span class="label-text">向量化模型</span>
-                      <n-button quaternary circle size="small" @click="fetchEmbedModels(false)" :loading="loadingEmbedModels">
-                        <template #icon><n-icon :component="RefreshCw" /></template>
-                      </n-button>
+                  
+                  <n-card class="glass-card">
+                    <div class="source-selector">
+                      <n-radio-group v-model:value="settings.embedSource" size="large" @update:value="handleEmbedSourceChange">
+                        <n-radio-button value="ollama">
+                          <div class="radio-content">
+                            <n-icon :component="Activity" />
+                            <span>Ollama (本地)</span>
+                          </div>
+                        </n-radio-button>
+                        <n-radio-button value="openai">
+                          <div class="radio-content">
+                            <n-icon :component="Globe" />
+                            <span>Custom / OpenAI</span>
+                          </div>
+                        </n-radio-button>
+                      </n-radio-group>
                     </div>
-                    <n-select
-                      v-model:value="settings.embedModel"
-                      :options="embedModelOptions"
-                      placeholder="选择向量化模型..."
-                      size="large"
-                      filterable
-                      tag
-                    />
-                  </div>
 
-                  <div class="dual-fields mt-4">
-                    <div class="setting-item flex-1">
-                      <div class="item-label">服务地址</div>
-                      <n-input v-model:value="settings.embedBaseUrl" placeholder="https://..." size="large" />
+                    <div class="setting-item">
+                      <div class="item-label">
+                        <span class="label-text">向量化模型</span>
+                        <n-button quaternary circle size="small" @click="fetchEmbedModels(false)" :loading="loadingEmbedModels">
+                          <template #icon><n-icon :component="RefreshCw" /></template>
+                        </n-button>
+                      </div>
+                      <n-select
+                        v-model:value="settings.embedModel"
+                        :options="embedModelOptions"
+                        placeholder="选择向量化模型..."
+                        size="large"
+                        filterable
+                        tag
+                      />
                     </div>
-                    <div v-if="settings.embedSource === 'openai'" class="setting-item flex-1">
-                      <div class="item-label">API 密钥</div>
-                      <n-input v-model:value="settings.embedApiKey" type="password" show-password-on="click" placeholder="sk-..." size="large" />
+
+                    <div class="dual-fields mt-4">
+                      <div class="setting-item flex-1">
+                        <div class="item-label">服务地址</div>
+                        <n-input v-model:value="settings.embedBaseUrl" placeholder="https://..." size="large" @update:value="debouncedFetchEmbedModels" />
+                      </div>
+                      <div v-if="settings.embedSource === 'openai'" class="setting-item flex-1">
+                        <div class="item-label">API 密钥</div>
+                        <n-input v-model:value="settings.embedApiKey" type="password" show-password-on="click" placeholder="sk-..." size="large" autocomplete="off" @update:value="debouncedFetchEmbedModels" />
+                      </div>
                     </div>
-                  </div>
-                </n-card>
-              </section>
-            </n-tab-pane>
-          </n-tabs>
-
-          <div class="save-section">
-            <n-button type="primary" size="large" @click="handleSave">
-              <template #icon><n-icon :component="Zap" /></template>
-              保存所有模型配置
-            </n-button>
-          </div>
-        </div>
-      </n-tab-pane>
-
-      <n-tab-pane name="agents" tab="智能体管理">
-        <div class="tab-content">
-          <section class="settings-section">
-            <div class="section-header">
-              <n-icon :component="Users" />
-              <h2>智能体列表</h2>
-              <n-button type="primary" size="small" @click="openCreateAgent" class="create-btn">
-                <template #icon><n-icon :component="Plus" /></template>
-                创建智能体
-              </n-button>
-            </div>
-            
-            <div class="agents-grid">
-              <n-card v-for="agent in agents" :key="agent.id" class="glass-card agent-card">
-                <div class="agent-header">
-                  <span class="agent-avatar" :style="{ background: agent.color || '#3b82f6' }">
-                    {{ agent.avatar || '🤖' }}
-                  </span>
-                  <div class="agent-info">
-                    <div class="agent-name">
-                      {{ agent.displayName }}
-                      <n-tag v-if="agent.isDefault" type="success" size="small">默认</n-tag>
-                    </div>
-                    <div class="agent-id">@{{ agent.name }}</div>
-                  </div>
-                </div>
-                <div class="agent-prompt-preview">
-                  {{ agent.systemPrompt?.substring(0, 100) }}...
-                </div>
-                <div class="agent-actions">
-                  <n-button size="small" @click="openEditAgent(agent)">
-                    <template #icon><n-icon :component="Edit" /></template>
-                    编辑
-                  </n-button>
-                  <n-button v-if="!agent.isDefault" size="small" @click="setDefaultAgent(agent.id)">
-                    <template #icon><n-icon :component="Star" /></template>
-                    设为默认
-                  </n-button>
-                  <n-popconfirm v-if="!agent.isDefault" @positive-click="deleteAgent(agent.id)">
-                    <template #trigger>
-                      <n-button size="small" type="error">
-                        <template #icon><n-icon :component="Trash2" /></template>
-                        删除
-                      </n-button>
-                    </template>
-                    确定删除此智能体吗？
-                  </n-popconfirm>
-                </div>
-              </n-card>
-            </div>
-          </section>
-        </div>
-      </n-tab-pane>
-
-      <n-tab-pane name="proactive" tab="主动问候">
-        <div class="tab-content">
-          <section class="settings-section">
-            <div class="section-header">
-              <n-icon :component="Bell" />
-              <h2>主动问候配置</h2>
-            </div>
-            
-            <n-card class="glass-card">
-              <div class="setting-item">
-                <div class="item-label">
-                  <span>启用主动问候</span>
-                </div>
-                <n-switch v-model:value="settings.proactiveEnabled" />
-              </div>
-              
-              <div class="setting-item">
-                <div class="item-label">不活跃阈值 (分钟)</div>
-                <n-input-number 
-                  v-model:value="settings.inactiveThresholdMinutes" 
-                  :min="1" 
-                  :max="1440"
-                  placeholder="用户不活跃多少分钟后触发问候"
-                  style="width: 100%"
-                />
-                <div class="item-hint">用户不活跃超过此时间后，系统将考虑发送问候</div>
-              </div>
-              
-              <div class="setting-item">
-                <div class="item-label">问候冷却时间 (秒)</div>
-                <n-input-number 
-                  v-model:value="settings.greetingCooldownSeconds" 
-                  :min="60" 
-                  :max="86400"
-                  placeholder="两次问候之间的最小间隔"
-                  style="width: 100%"
-                />
-                <div class="item-hint">同一用户两次问候之间的最小间隔时间</div>
-              </div>
-            </n-card>
-
-            <div class="section-header mt-8">
-              <n-icon :component="Send" />
-              <h2>测试问候</h2>
-            </div>
-
-            <n-card class="glass-card">
-              <div class="test-section">
-                <n-button 
-                  type="primary" 
-                  :loading="testingGreeting" 
-                  @click="testProactiveGreeting"
-                >
-                  <template #icon><n-icon :component="Send" /></template>
-                  测试生成问候
-                </n-button>
-                
-                <div v-if="testGreetingResult" class="test-result">
-                  <div class="result-label">生成的问候:</div>
-                  <div class="result-content">{{ testGreetingResult }}</div>
-                </div>
-              </div>
-            </n-card>
+                  </n-card>
+                </section>
+              </n-tab-pane>
+            </n-tabs>
 
             <div class="save-section">
               <n-button type="primary" size="large" @click="handleSave">
                 <template #icon><n-icon :component="Zap" /></template>
-                保存问候配置
+                保存所有模型配置
               </n-button>
             </div>
-          </section>
-        </div>
-      </n-tab-pane>
+          </div>
+        </n-tab-pane>
 
-      <n-tab-pane name="mcp" tab="MCP 插件">
-        <McpSettings />
-      </n-tab-pane>
-    </n-tabs>
+        <n-tab-pane name="agents" tab="智能体管理">
+          <div class="tab-content">
+            <section class="settings-section">
+              <div class="section-header">
+                <n-icon :component="Users" />
+                <h2>智能体列表</h2>
+                <n-button type="primary" size="small" @click="openCreateAgent" class="create-btn">
+                  <template #icon><n-icon :component="Plus" /></template>
+                  创建智能体
+                </n-button>
+              </div>
+              
+              <div class="agents-grid">
+                <n-card v-for="agent in agents" :key="agent.id" class="glass-card agent-card">
+                  <div class="agent-header">
+                    <span class="agent-avatar" :style="{ background: agent.color || '#3b82f6' }">
+                      <template v-if="agent.avatar === '机器人'"><n-icon :component="RobotOutlined" size="24" /></template>
+                      <template v-else-if="agent.avatar === '智慧'"><n-icon :component="BulbOutlined" size="24" /></template>
+                      <template v-else-if="agent.avatar === '效率'"><n-icon :component="RocketOutlined" size="24" /></template>
+                      <template v-else-if="agent.avatar === '明星'"><n-icon :component="StarOutlined" size="24" /></template>
+                      <template v-else-if="agent.avatar === '温暖'"><n-icon :component="HeartOutlined" size="24" /></template>
+                      <template v-else-if="agent.avatar === '友好'"><n-icon :component="SmileOutlined" size="24" /></template>
+                      <template v-else-if="agent.avatar === '热情'"><n-icon :component="FireOutlined" size="24" /></template>
+                      <template v-else-if="agent.avatar === '速度'"><n-icon :component="ThunderboltOutlined" size="24" /></template>
+                      <template v-else-if="agent.avatar === '尊贵'"><n-icon :component="CrownOutlined" size="24" /></template>
+                      <template v-else-if="agent.avatar === '成就'"><n-icon :component="TrophyOutlined" size="24" /></template>
+                      <template v-else-if="agent.avatar === '点赞'"><n-icon :component="LikeOutlined" size="24" /></template>
+                      <template v-else-if="agent.avatar === '惊喜'"><n-icon :component="GiftOutlined" size="24" /></template>
+                      <template v-else><n-icon :component="RobotOutlined" size="24" /></template>
+                    </span>
+                    <div class="agent-info">
+                      <div class="agent-name">
+                        {{ agent.displayName }}
+                        <n-tag v-if="agent.isDefault" type="success" size="small">默认</n-tag>
+                      </div>
+                      <div class="agent-id">@{{ agent.name }}</div>
+                    </div>
+                  </div>
+                  <div class="agent-prompt-preview">
+                    {{ agent.systemPrompt?.substring(0, 100) }}...
+                  </div>
+                  <div class="agent-actions">
+                    <n-button size="small" @click="openEditAgent(agent)">
+                      <template #icon><n-icon :component="Edit" /></template>
+                      编辑
+                    </n-button>
+                    <n-button v-if="!agent.isDefault" size="small" @click="handleSetDefaultAgent(agent.id)">
+                      <template #icon><n-icon :component="Star" /></template>
+                      设为默认
+                    </n-button>
+                    <n-popconfirm v-if="!agent.isDefault" @positive-click="handleDeleteAgent(agent.id)">
+                      <template #trigger>
+                        <n-button size="small" type="error">
+                          <template #icon><n-icon :component="Trash2" /></template>
+                          删除
+                        </n-button>
+                      </template>
+                      确定删除此智能体吗？
+                    </n-popconfirm>
+                  </div>
+                </n-card>
+              </div>
+            </section>
+          </div>
+        </n-tab-pane>
+
+        <n-tab-pane name="proactive" tab="主动问候">
+          <div class="tab-content">
+            <section class="settings-section">
+              <div class="section-header">
+                <n-icon :component="Bell" />
+                <h2>主动问候配置</h2>
+              </div>
+              
+              <n-card class="glass-card">
+                <div class="setting-item">
+                  <div class="item-label">
+                    <span>启用主动问候</span>
+                  </div>
+                  <n-switch v-model:value="settings.proactiveEnabled" />
+                </div>
+                
+                <div class="setting-item">
+                  <div class="item-label">不活跃阈值 (分钟)</div>
+                  <n-input-number 
+                    v-model:value="settings.inactiveThresholdMinutes" 
+                    :min="1" 
+                    :max="1440"
+                    placeholder="用户不活跃多少分钟后触发问候"
+                    style="width: 100%"
+                  />
+                  <div class="item-hint">用户不活跃超过此时间后，系统将考虑发送问候</div>
+                </div>
+                
+                <div class="setting-item">
+                  <div class="item-label">问候冷却时间 (秒)</div>
+                  <n-input-number 
+                    v-model:value="settings.greetingCooldownSeconds" 
+                    :min="60" 
+                    :max="86400"
+                    placeholder="两次问候之间的最小间隔"
+                    style="width: 100%"
+                  />
+                  <div class="item-hint">同一用户两次问候之间的最小间隔时间</div>
+                </div>
+              </n-card>
+
+              <div class="section-header mt-8">
+                <n-icon :component="Send" />
+                <h2>测试问候</h2>
+              </div>
+
+              <n-card class="glass-card">
+                <div class="test-section">
+                  <n-button 
+                    type="primary" 
+                    :loading="testingGreeting" 
+                    @click="testProactiveGreeting"
+                  >
+                    <template #icon><n-icon :component="Send" /></template>
+                    测试生成问候
+                  </n-button>
+                  
+                  <div v-if="testGreetingResult" class="test-result">
+                    <div class="result-label">生成的问候:</div>
+                    <div class="result-content">{{ testGreetingResult }}</div>
+                  </div>
+                </div>
+              </n-card>
+
+              <div class="save-section">
+                <n-button type="primary" size="large" @click="handleSave">
+                  <template #icon><n-icon :component="Zap" /></template>
+                  保存问候配置
+                </n-button>
+              </div>
+            </section>
+          </div>
+        </n-tab-pane>
+
+        <n-tab-pane name="mcp" tab="MCP 插件">
+          <div class="tab-content">
+            <McpSettings />
+          </div>
+        </n-tab-pane>
+      </n-tabs>
+    </div>
 
     <n-modal 
       v-model:show="showAgentModal" 
@@ -648,11 +596,13 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
               <div class="avatar-selector">
                 <span 
                   v-for="av in avatarOptions" 
-                  :key="av" 
+                  :key="av.label" 
                   class="avatar-option"
-                  :class="{ active: agentForm.avatar === av }"
-                  @click="agentForm.avatar = av"
-                >{{ av }}</span>
+                  :class="{ active: agentForm.avatar === av.label }"
+                  @click="agentForm.avatar = av.label"
+                >
+                  <n-icon :component="av.icon" size="24" />
+                </span>
               </div>
             </n-form-item>
           </n-grid-item>
@@ -674,7 +624,7 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
 
         <n-divider style="margin: 8px 0 16px;">提示词配置</n-divider>
 
-        <n-tabs type="line" animated class="prompt-tabs">
+        <n-tabs type="line" class="prompt-tabs">
           <n-tab-pane name="system" tab="系统提示词">
             <div class="prompt-hint">定义智能体的核心身份、使命和性格特征</div>
             <n-input v-model:value="agentForm.systemPrompt" type="textarea" :rows="8" placeholder="定义智能体的角色和行为..." />
@@ -733,10 +683,10 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
 
 <style scoped>
 .settings-view {
-  padding: 40px 60px;
-  max-width: 1200px;
-  margin: 0 auto;
-  animation: fadeIn 0.6s cubic-bezier(0.23, 1, 0.32, 1);
+  padding: 24px 32px;
+  height: 100%;
+  overflow: hidden;
+  animation: fadeIn 0.5s cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 @keyframes fadeIn {
@@ -745,18 +695,24 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
 }
 
 .settings-header {
-  margin-bottom: 32px;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
   border-bottom: 1px solid var(--color-outline);
-  padding-bottom: 24px;
+}
+
+.header-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .page-title {
-  font-size: 28px;
-  font-weight: 800;
-  margin: 0 0 8px;
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   background: linear-gradient(135deg, var(--color-text), var(--color-primary));
   -webkit-background-clip: text;
   background-clip: text;
@@ -765,17 +721,38 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
 
 .page-subtitle {
   color: var(--color-text-dim);
-  font-size: 14px;
+  font-size: 13px;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.settings-content-wrapper {
+  background: var(--color-surface);
+  border-radius: 16px;
+  padding: 20px;
+  border: 1px solid var(--color-outline);
+  height: calc(100vh - 140px);
+  overflow: hidden;
 }
 
 .settings-tabs {
-  background: var(--color-surface);
-  border-radius: 16px;
-  padding: 16px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+:deep(.n-tabs-tab-wrapper) {
+  flex-shrink: 0;
+}
+
+:deep(.n-tabs-pane-wrapper) {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 4px;
 }
 
 .tab-content {
-  padding: 16px 0;
+  height: 100%;
 }
 
 .settings-section {
@@ -788,6 +765,7 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
   gap: 10px;
   margin-bottom: 16px;
   color: var(--color-text);
+  padding: 16px 0;
 }
 
 .section-header h2 {
@@ -937,16 +915,17 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
 }
 
 .avatar-option {
-  width: 36px;
-  height: 36px;
+  width: 42px;
+  height: 42px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 10px;
   cursor: pointer;
-  font-size: 20px;
+  background: rgba(0, 0, 0, 0.03);
   border: 2px solid transparent;
   transition: all 0.2s;
+  color: var(--color-text);
 }
 
 .avatar-option:hover, .avatar-option.active {
@@ -1033,5 +1012,24 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
   background: rgba(0, 0, 0, 0.05);
   border-radius: 8px;
   border-left: 3px solid var(--color-primary);
+}
+
+@media (max-width: 1024px) {
+  .settings-layout {
+    flex-direction: column;
+  }
+  
+  .settings-sidebar {
+    width: 100%;
+  }
+  
+  .sidebar-nav {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  
+  .nav-item {
+    flex-shrink: 0;
+  }
 }
 </style>
