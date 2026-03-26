@@ -26,6 +26,13 @@
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
         </dependency>
+        
+        <!-- Hibernate Types for JSON support -->
+        <dependency>
+            <groupId>io.hypersistence</groupId>
+            <artifactId>hypersistence-utils-hibernate-63</artifactId>
+            <version>3.7.6</version>
+        </dependency>
 
         <!-- LangChain4j Integrations -->
         <dependency>

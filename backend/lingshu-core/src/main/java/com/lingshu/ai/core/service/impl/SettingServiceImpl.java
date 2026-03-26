@@ -28,8 +28,9 @@ public class SettingServiceImpl implements SettingService {
     @PostConstruct
     public void init() {
         SystemSetting setting = getSetting();
-        log.info("系统设置已同步 | 来源: {} | 模型: {} | 端点: {}",
-                setting.getSource(), setting.getChatModel(), setting.getBaseUrl());
+        var llmConfig = setting.getLlmConfig();
+        log.info("系统设置已同步 | 来源：{} | 模型：{} | 端点：{}",
+                llmConfig.get("source"), llmConfig.get("model"), llmConfig.get("baseUrl"));
     }
 
     @Override
@@ -42,29 +43,23 @@ public class SettingServiceImpl implements SettingService {
                 return objectMapper.readValue(cached, SystemSetting.class);
             }
         } catch (Exception e) {
-            log.warn("从 Redis 获取设置失败: {}", e.getMessage());
+            log.warn("从 Redis 获取设置失败：{}", e.getMessage());
         }
-
+    
         // 2. Fetch from DB
         SystemSetting setting = settingRepository.findById(DEFAULT_ID).orElseGet(() -> {
             log.warn("数据库中未找到系统设置，创建默认配置");
-            SystemSetting defaultSetting = SystemSetting.builder()
-                    .id(DEFAULT_ID)
-                    .source("ollama")
-                    .chatModel("qwen2.5:latest")
-                    .baseUrl("http://localhost:11434")
-                    .apiKey("")
-                    .proactiveEnabled(true)
-                    .inactiveThresholdMinutes(5)
-                    .greetingCooldownSeconds(300)
-                    .inactiveCheckIntervalMs(3600000L)
-                    .build();
+            SystemSetting defaultSetting = new SystemSetting();
+            defaultSetting.setId(DEFAULT_ID);
+            defaultSetting.setLlmConfig(defaultSetting.createDefaultLlmConfig());
+            defaultSetting.setEmbeddingConfig(defaultSetting.createDefaultEmbeddingConfig());
+            defaultSetting.setProactiveConfig(defaultSetting.createDefaultProactiveConfig());
             return settingRepository.save(defaultSetting);
         });
-
+    
         // 3. Update Redis
         updateCache(setting);
-
+    
         return setting;
     }
 
@@ -73,8 +68,9 @@ public class SettingServiceImpl implements SettingService {
         setting.setId(DEFAULT_ID);
         SystemSetting saved = settingRepository.save(setting);
         updateCache(saved);
-        log.info("系统设置已更新到 DB 和 Redis | 来源: {} | 模型: {}",
-                saved.getSource(), saved.getChatModel());
+        var llmConfig = saved.getLlmConfig();
+        log.info("系统设置已更新到 DB 和 Redis | 来源：{} | 模型：{}",
+                llmConfig.get("source"), llmConfig.get("model"));
     }
 
     private void updateCache(SystemSetting setting) {
