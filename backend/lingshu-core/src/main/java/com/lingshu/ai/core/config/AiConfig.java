@@ -139,11 +139,15 @@ public class AiConfig {
     }
 
     @Bean
-    public dev.langchain4j.model.embedding.EmbeddingModel embeddingModel() {
-        return dev.langchain4j.model.ollama.OllamaEmbeddingModel.builder()
-                .baseUrl(baseUrl)
-                .modelName(embeddingModelName)
-                .build();
+    public com.lingshu.ai.core.model.DynamicEmbeddingModel dynamicEmbeddingModel(
+            com.lingshu.ai.core.service.SettingService settingService) {
+        return new com.lingshu.ai.core.model.DynamicEmbeddingModel(settingService);
+    }
+
+    @Bean
+    public dev.langchain4j.model.embedding.EmbeddingModel embeddingModel(
+            com.lingshu.ai.core.model.DynamicEmbeddingModel dynamicEmbeddingModel) {
+        return dynamicEmbeddingModel;
     }
 
     @Bean
