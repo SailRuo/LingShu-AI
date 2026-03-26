@@ -38,6 +38,7 @@ public class FactNode {
     private double importance; // 0.0 - 1.0
 
     private double confidence; // 0.0 - 1.0
+    private String classificationSource;
 
     private double activityScore; // 0.0 - 1.0
 

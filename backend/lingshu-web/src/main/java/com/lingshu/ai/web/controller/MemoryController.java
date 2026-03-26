@@ -58,4 +58,50 @@ public class MemoryController {
     public Object getMaintenanceSummary() {
         return memoryService.getMemoryMaintenanceSummary();
     }
+
+    /**
+     * 手动更新事实分类。
+     */
+    @PutMapping("/fact/{id}/classification")
+    public void updateFactClassification(@PathVariable Long id, @RequestBody java.util.Map<String, String> payload) {
+        log.info("API 触发：手动更新事实分类 #{}", id);
+        memoryService.updateFactClassification(id, payload.get("clusterKey"), payload.get("subType"));
+    }
+
+    /**
+     * 获取最近的记忆检索事件流。
+     */
+    @GetMapping("/events")
+    public Object getRecentRetrievalEvents() {
+        return memoryService.getRecentRetrievalEvents();
+    }
+
+    /**
+     * P2: 获取记忆治理列表。
+     */
+    @GetMapping("/governance/list")
+    public Object getMemoryGovernanceList(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size,
+            @RequestParam(required = false, defaultValue = "all") String status) {
+        return memoryService.getMemoryGovernanceList(page, size, status);
+    }
+
+    /**
+     * P2: 手动归档事实。
+     */
+    @PutMapping("/fact/{id}/archive")
+    public void archiveFact(@PathVariable Long id) {
+        log.info("API 触发：手动归档事实 #{}", id);
+        memoryService.archiveFact(id);
+    }
+
+    /**
+     * P2: 手动恢复事实。
+     */
+    @PutMapping("/fact/{id}/restore")
+    public void restoreFact(@PathVariable Long id) {
+        log.info("API 触发：手动恢复事实 #{}", id);
+        memoryService.restoreFact(id);
+    }
 }

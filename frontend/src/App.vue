@@ -11,6 +11,8 @@ import InsightView from '@/views/InsightView.vue'
 import SettingsView from '@/views/SettingsView.vue'
 import ComingSoonView from '@/views/ComingSoonView.vue'
 import SystemLogView from '@/views/SystemLogView.vue'
+import StreamView from '@/views/StreamView.vue'
+import GovernanceView from '@/views/GovernanceView.vue'
 
 const themeStore = useThemeStore()
 
@@ -21,6 +23,8 @@ const activeMenu = useLocalStorage('lingshu-active-menu', 'resonance')
 const viewMap: Record<string, any> = {
   resonance: markRaw(ResonanceView),
   insight: markRaw(InsightView),
+  stream: markRaw(StreamView),
+  governance: markRaw(GovernanceView),
   pocket: markRaw(() => h(ComingSoonView, { title: '全维口袋' })),
   settings: markRaw(SettingsView),
   security: markRaw(() => h(ComingSoonView, { title: '安全保障' })),
@@ -54,14 +58,14 @@ const naiveTheme = computed(() => themeStore.current.isDark ? darkTheme : null)
               <div class="main-layout">
                 <!-- Sidebar - Fixed Left -->
                 <AppSider v-model:active-menu="activeMenu" />
-                
+
                 <!-- Right Area -->
                 <div class="right-area">
                   <!-- Header - Only in Right Area -->
                   <header class="app-header">
                     <LatencyBar />
                   </header>
-                  
+
                   <!-- Main Content -->
                   <main class="main-content">
                     <router-view v-if="false" /> <!-- Placeholder for future vue-router -->
@@ -70,7 +74,7 @@ const naiveTheme = computed(() => themeStore.current.isDark ? darkTheme : null)
                     </transition>
                   </main>
                 </div>
-                
+
                 <!-- Footer - Full Width Across Sidebar and Content -->
                 <footer class="app-footer">
                   <SystemStatusBar />

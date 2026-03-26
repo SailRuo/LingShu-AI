@@ -1,7 +1,7 @@
 package com.lingshu.ai.core.service;
 
 public interface MemoryService {
-    
+
     /**
      * 从用户消息中提取事实并保存到图数据库中。
      */
@@ -31,4 +31,22 @@ public interface MemoryService {
      * 获取最近一次记忆生命周期维护摘要。
      */
     Object getMemoryMaintenanceSummary();
+    void updateFactClassification(Long factId, String clusterKey, String subType);
+
+    java.util.List<com.lingshu.ai.core.dto.MemoryRetrievalEvent> getRecentRetrievalEvents();
+
+    /**
+     * P2: 记忆治理 - 获取所有事实列表（包含已归档等），支持分页或治理。
+     */
+    Object getMemoryGovernanceList(int page, int size, String status);
+
+    /**
+     * P2: 记忆治理 - 手动将记忆归档到冷库
+     */
+    void archiveFact(Long factId);
+
+    /**
+     * P2: 记忆治理 - 手动从冷库恢复记忆
+     */
+    void restoreFact(Long factId);
 }
