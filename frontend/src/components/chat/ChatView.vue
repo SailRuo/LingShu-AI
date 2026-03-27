@@ -21,6 +21,7 @@ const {
   loadHistory,
   startAssistantMessage,
   appendAssistantChunk,
+  appendReasoningChunk,
   upsertToolStep,
   failLatestAssistantMessage,
   syncLatestAssistantMessage,
@@ -62,7 +63,40 @@ const message = useMessage()
 const scrollRef = ref<InstanceType<typeof NScrollbar> | null>(null)
 const isLoadingMore = ref(false)
 const prevScrollHeight = ref(0)
+const enableThinking = ref(false)
+const isAIThinking = ref(false) // AI 正在思考/回复
+const starSpeed = ref(1) // 星星移动速度
+const meteors = ref<Array<{id: number, x: number, y: number, duration: number, delay: number}>>([])
 let stopHeartbeat: (() => void) | null = null
+let starAnimationId: number | null = null
+let meteorTimer: number | null = null
+
+// 检测用户是否已经在底部（允许 50px 的误差）
+function isUserAtBottom(): boolean {
+  const scrollContainer = scrollRef.value
+  if (!scrollContainer) return true
+  
+  // 尝试不同的方式获取滚动容器
+  let scrollElement: HTMLElement | null = null
+  
+  // 方式 1: 直接访问 $el
+  const el = (scrollContainer as any).$el
+  if (el && typeof el.querySelector === 'function') {
+    scrollElement = el.querySelector('.n-scrollbar-container') || el
+  }
+  
+  // 方式 2: 如果没有找到，尝试使用 containerRef
+  if (!scrollElement && (scrollContainer as any).containerRef) {
+    scrollElement = (scrollContainer as any).containerRef
+  }
+  
+  // 如果还是没找到，返回 true（默认认为在底部）
+  if (!scrollElement) return true
+  
+  const { scrollTop, scrollHeight, clientHeight } = scrollElement
+  const threshold = 50 // 50px 误差范围
+  return scrollHeight - scrollTop - clientHeight < threshold
+}
 
 function scrollToBottom(behavior: 'auto' | 'smooth' = 'smooth') {
   nextTick(() => {
@@ -70,10 +104,70 @@ function scrollToBottom(behavior: 'auto' | 'smooth' = 'smooth') {
   })
 }
 
-// 监听消息变化，自动滚动到最下方
+// 监听消息变化，自动滚动到最下方（只在用户在底部时才滚动）
 watch(() => messages.value.length, () => {
-  scrollToBottom()
+  if (isUserAtBottom()) {
+    scrollToBottom()
+  }
 }, { flush: 'post' }) // 确保在 DOM 更新后执行
+
+// 监听 AI 思考状态
+watch(isTyping, (newVal) => {
+  if (newVal) {
+    // AI 开始回复，启动星辰移动效果
+    startStarMovement()
+  }
+})
+
+// 启动星辰移动效果
+function startStarMovement() {
+  isAIThinking.value = true
+  starSpeed.value = 1.5 // 初始速度降低 (原来 3)
+  
+  // 逐渐减速
+  const decreaseInterval = setInterval(() => {
+    if (!isTyping.value) {
+      clearInterval(decreaseInterval)
+      return
+    }
+    
+    starSpeed.value = Math.max(0.2, starSpeed.value - 0.15) // 减速幅度减小 (原来 0.3)
+    
+    if (starSpeed.value <= 0.2) {
+      clearInterval(decreaseInterval)
+    }
+  }, 1500) // 减速间隔增长 (原来 800)
+}
+
+// 创建流星效果
+function createMeteor() {
+  const id = Date.now()
+  const x = Math.random() * 100
+  const y = Math.random() * 30 // 流星从上方向下
+  const duration = 1 + Math.random() * 1.5 // 1-2.5 秒
+  const delay = Math.random() * 3 // 0-3 秒延迟
+  
+  meteors.value.push({ id, x, y, duration, delay })
+  
+  // 移除流星
+  setTimeout(() => {
+    meteors.value = meteors.value.filter(m => m.id !== id)
+  }, (duration + delay) * 1000)
+}
+
+// 启动流星定时器
+function startMeteorTimer() {
+  if (meteorTimer !== null) return
+  
+  // 每 3-6 秒创建一个流星
+  const createMeteorLoop = () => {
+    createMeteor()
+    const nextDelay = 3000 + Math.random() * 3000
+    meteorTimer = window.setTimeout(createMeteorLoop, nextDelay)
+  }
+  
+  createMeteorLoop()
+}
 
 function handleSend() {
   const text = inputMessage.value.trim()
@@ -84,7 +178,11 @@ function handleSend() {
   isTyping.value = true
   scrollToBottom()
 
-  sendChat(text, undefined, settings.value.model, settings.value.apiKey, settings.value.baseUrl)
+  sendChat(text, undefined, settings.value.model, settings.value.apiKey, settings.value.baseUrl, enableThinking.value)
+}
+
+function handleToggleThinking() {
+  enableThinking.value = !enableThinking.value
 }
 
 function handleQuickAction(text: string) {
@@ -140,7 +238,17 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
     case 'chatChunk':
       appendAssistantChunk(msg.content || '')
       isTyping.value = false
-      scrollToBottom()
+      // 只在用户在底部时才滚动
+      if (isUserAtBottom()) {
+        scrollToBottom()
+      }
+      break
+
+    case 'reasoningChunk':
+      appendReasoningChunk(msg.content || '')
+      if (isUserAtBottom()) {
+        scrollToBottom()
+      }
       break
 
     case 'toolCallStart':
@@ -152,7 +260,9 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
         isError: false
       })
       isTyping.value = false
-      scrollToBottom()
+      if (isUserAtBottom()) {
+        scrollToBottom()
+      }
       break
 
     case 'toolCallEnd':
@@ -165,20 +275,28 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
         status: msg.isError ? 'error' : 'success',
         isError: !!msg.isError
       })
-      scrollToBottom()
+      if (isUserAtBottom()) {
+        scrollToBottom()
+      }
       break
       
     case 'chatEnd':
       isTyping.value = false
       await syncLatestAssistantMessage()
-      scrollToBottom()
+      // 消息结束时，如果用户在底部，就滚动到底部
+      if (isUserAtBottom()) {
+        scrollToBottom()
+      }
       break
       
     case 'error':
       isTyping.value = false
       failLatestAssistantMessage(msg.message || '发生错误')
       await syncLatestAssistantMessage()
-      scrollToBottom()
+      // 错误时也保持用户当前位置，除非用户在底部
+      if (isUserAtBottom()) {
+        scrollToBottom()
+      }
       break
       
     case 'proactiveGreeting':
@@ -188,7 +306,10 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
           content: msg.content, 
           timestamp: Date.now() 
         })
-        scrollToBottom()
+        // 主动问候时，如果用户在底部就滚动
+        if (isUserAtBottom()) {
+          scrollToBottom()
+        }
       }
       break
       
@@ -223,6 +344,9 @@ onMounted(async () => {
   on('*', handleWebSocketMessage)
 
   stopHeartbeat = startHeartbeat(30000)
+  
+  // 启动流星效果
+  startMeteorTimer()
 
   setSendAudioCallback((base64: string, mimeType: string) => {
     send({ type: 'audio', data: base64, mimeType })
@@ -239,6 +363,12 @@ onUnmounted(() => {
   off('*', handleWebSocketMessage)
   if (stopHeartbeat) {
     stopHeartbeat()
+  }
+  if (starAnimationId !== null) {
+    cancelAnimationFrame(starAnimationId)
+  }
+  if (meteorTimer !== null) {
+    clearTimeout(meteorTimer)
   }
 })
 
@@ -307,6 +437,28 @@ async function handleToggleAsr() {
 
     <!-- Messages Area -->
     <n-scrollbar ref="scrollRef" class="messages-area" v-if="messages.length > 0" @scroll="handleScroll">
+      <!-- 星空背景 -->
+      <div class="stars-background">
+        <!-- 动态星星 -->
+        <div class="star" v-for="i in 50" :key="i" :style="{
+          left: Math.random() * 100 + '%',
+          top: Math.random() * 100 + '%',
+          animationDelay: Math.random() * 3 + 's',
+          width: Math.random() * 2 + 1 + 'px',
+          height: Math.random() * 2 + 1 + 'px',
+          transform: `translateY(${isAIThinking ? (Math.random() * 20 * starSpeed) : 0}px)`,
+          transition: isAIThinking ? 'transform 0.1s linear' : 'transform 0.5s ease-out'
+        }"></div>
+        
+        <!-- 流星 -->
+        <div class="meteor" v-for="meteor in meteors" :key="meteor.id" :style="{
+          left: meteor.x + '%',
+          top: meteor.y + '%',
+          animationDuration: meteor.duration + 's',
+          animationDelay: meteor.delay + 's'
+        }"></div>
+      </div>
+      
       <div class="messages-content">
         <!-- Load More Indicator -->
         <div class="load-more-indicator" v-if="hasMoreHistory">
@@ -345,13 +497,14 @@ async function handleToggleAsr() {
     <ChatInput
       v-model="inputMessage"
       :loading="isTyping"
-      :disabled="!isConnected"
       :asr-enabled="asrConfig.enabled"
       :asr-listening="asrListening"
       :asr-recording="asrRecording"
       :asr-processing="asrProcessing"
+      :enable-thinking="enableThinking"
       @send="handleSend"
       @toggle-asr="handleToggleAsr"
+      @toggle-thinking="handleToggleThinking"
       @start-push-to-talk="startPushToTalk"
       @stop-push-to-talk="stopPushToTalk"
     />
@@ -365,6 +518,7 @@ async function handleToggleAsr() {
   display: flex;
   flex-direction: column;
   background: transparent;
+  z-index: 1;
 }
 
 /* Chat Header */
@@ -562,9 +716,12 @@ async function handleToggleAsr() {
 }
 
 .messages-content {
-  max-width: 800px;
+  position: relative;
+  z-index: 1;
+  width: calc(100% - 48px);
+  max-width: 1050px;
   margin: 0 auto;
-  padding: 24px 24px 200px;
+  padding: 24px 0 200px;
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -615,6 +772,81 @@ async function handleToggleAsr() {
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+/* 星空背景 */
+.stars-background {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 消息区域 - 在星空背景之上 */
+.messages-area {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.messages-area :deep(.n-scrollbar-container) {
+  pointer-events: auto;
+}
+
+.star {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 50%;
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.5);
+  animation: twinkle 2s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* 流星效果 */
+.meteor {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  background: linear-gradient(to bottom right, rgba(255, 255, 255, 1), transparent);
+  border-radius: 50%;
+  box-shadow: 
+    0 0 10px rgba(255, 255, 255, 0.8),
+    0 0 20px rgba(147, 197, 253, 0.6),
+    -30px 0 15px rgba(255, 255, 255, 0.3);
+  animation: meteor-shower 2s ease-in-out forwards;
+  opacity: 0;
+}
+
+@keyframes meteor-shower {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.5);
+  }
+  10% {
+    opacity: 1;
+  }
+  50% {
+    transform: translate(100px, 150px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(200px, 300px) scale(0.3);
+  }
+}
+
+@keyframes twinkle {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
 }
 
 /* Typing Indicator */

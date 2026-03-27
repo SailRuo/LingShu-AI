@@ -97,10 +97,10 @@ const themes = computed<ThemeOption[]>(() => [
   },
   {
     key: 'cyberPurple',
-    label: '赛博紫',
+    label: '星空',
     icon: Sparkles,
     isDark: true,
-    description: '霓虹光感 · 赛博朋克'
+    description: '深邃宇宙 · 星辰大海'
   },
   {
     key: 'deepTechFuturistic',

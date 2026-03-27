@@ -460,6 +460,37 @@ export function useChat() {
     }));
   }
 
+  function appendReasoningChunk(chunk: string) {
+    updateLastAssistant((message) => {
+      const segments = message.segments ?? [];
+      const lastSegment = segments[segments.length - 1];
+      
+      if (lastSegment?.type === "reasoning") {
+        const updatedSegments = [...segments];
+        updatedSegments[segments.length - 1] = {
+          ...lastSegment,
+          content: lastSegment.content + chunk,
+        };
+        return {
+          ...message,
+          segments: updatedSegments,
+        };
+      }
+      
+      return {
+        ...message,
+        segments: [
+          ...segments,
+          {
+            type: "reasoning" as const,
+            content: chunk,
+            timestamp: Date.now(),
+          },
+        ],
+      };
+    });
+  }
+
   function upsertToolStep(toolStep: Partial<ChatToolStep>) {
     updateLastAssistant((message) => {
       const nextSteps = [...(message.toolSteps ?? [])];

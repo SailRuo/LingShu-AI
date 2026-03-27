@@ -202,12 +202,10 @@ public class AiConfig {
     @Bean
     public Assistant assistant(
             ChatModel chatLanguageModel,
-            dev.langchain4j.memory.chat.ChatMemoryProvider chatMemoryProvider,
-            com.lingshu.ai.core.tool.LocalTools localTools) {
+            dev.langchain4j.memory.chat.ChatMemoryProvider chatMemoryProvider) {
         return dev.langchain4j.service.AiServices.builder(Assistant.class)
                 .chatModel(chatLanguageModel)
                 .chatMemoryProvider(chatMemoryProvider)
-                .tools(localTools)
                 .build();
     }
 

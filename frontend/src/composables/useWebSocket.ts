@@ -89,12 +89,13 @@ export function useWebSocket() {
     send({ type: 'register', userId: uid })
   }
 
-  function sendChat(message: string, agentId?: number, model?: string, apiKey?: string, baseUrl?: string) {
+  function sendChat(message: string, agentId?: number, model?: string, apiKey?: string, baseUrl?: string, enableThinking?: boolean) {
     const payload: WebSocketMessage = { type: 'chat', message }
     if (agentId) payload.agentId = agentId
     if (model) payload.model = model
     if (apiKey) payload.apiKey = apiKey
     if (baseUrl) payload.baseUrl = baseUrl
+    if (enableThinking) payload.enableThinking = enableThinking
     send(payload)
   }
 

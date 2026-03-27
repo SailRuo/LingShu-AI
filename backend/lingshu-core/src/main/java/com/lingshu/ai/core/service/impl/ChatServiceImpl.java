@@ -8,6 +8,7 @@ import com.lingshu.ai.infrastructure.entity.ChatMessage;
 import com.lingshu.ai.infrastructure.entity.ChatSession;
 import com.lingshu.ai.infrastructure.repository.ChatMessageRepository;
 import com.lingshu.ai.infrastructure.repository.ChatSessionRepository;
+import dev.langchain4j.http.client.jdk.JdkHttpClientBuilder;
 import dev.langchain4j.memory.chat.ChatMemoryProvider;
 import dev.langchain4j.mcp.McpToolProvider;
 import dev.langchain4j.mcp.client.McpClient;
@@ -23,8 +24,10 @@ import org.springframework.web.client.RestTemplate;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.Executors;
 
 @Service
 public class ChatServiceImpl implements ChatService {
@@ -141,9 +144,13 @@ public class ChatServiceImpl implements ChatService {
                 AiServices.builder(AiConfig.Assistant.class)
                         .chatModel(chatLanguageModel)
                         .chatMemoryProvider(chatMemoryProvider)
-                        .tools(localTools)
                         .toolArgumentsErrorHandler(this::handleToolArgumentsError)
                         .maxSequentialToolsInvocations(15);
+
+        java.util.List<Object> enabledLocalTools = localTools.getEnabledTools(settingService.getLocalToolsSetting());
+        if (!enabledLocalTools.isEmpty()) {
+            builder.tools(enabledLocalTools.toArray());
+        }
 
         List<McpClient> mcpClients = mcpService.getActiveClients();
         if (!mcpClients.isEmpty()) {
@@ -212,10 +219,16 @@ public class ChatServiceImpl implements ChatService {
     @Override
     public Flux<String> streamChat(String message, Long agentId, String userId, String model, String apiKey, String baseUrl,
                                    ToolEventListener toolEventListener) {
+        return streamChat(message, agentId, userId, model, apiKey, baseUrl, false, toolEventListener);
+    }
+
+    @Override
+    public Flux<String> streamChat(String message, Long agentId, String userId, String model, String apiKey, String baseUrl,
+                                   Boolean enableThinking, ToolEventListener toolEventListener) {
         ChatSession session = getOrCreateSession();
         AgentConfig agent = getAgent(agentId);
 
-        systemLogService.info("收到用户消息 (流式): " + (message.length() > 20 ? message.substring(0, 20) + "..." : message), "CHAT");
+        systemLogService.info("收到用户消息 (流式): " + (message.length() > 20 ? message.substring(0, 20) + "..." : message) + ", enableThinking=" + enableThinking, "CHAT");
 
         Sinks.Many<String> sink = Sinks.many().unicast().onBackpressureBuffer();
         StringBuilder assistantResponseStore = new StringBuilder();
@@ -234,38 +247,58 @@ public class ChatServiceImpl implements ChatService {
 
         if (model != null && baseUrl != null) {
             StreamingChatModel tempModel;
+            
+            JdkHttpClientBuilder httpClientBuilder =
+                    dev.langchain4j.http.client.jdk.JdkHttpClient.builder()
+                            .httpClientBuilder(java.net.http.HttpClient.newBuilder()
+                                    .version(java.net.http.HttpClient.Version.HTTP_1_1)
+                                    .connectTimeout(Duration.ofSeconds(30))
+                                    .executor(Executors.newCachedThreadPool()));
+            
             if ("ollama".equalsIgnoreCase(baseUrl) || baseUrl.contains("11434")) {
+                log.info("使用 Ollama 模式, baseUrl={}, model={}", baseUrl, model);
                 tempModel = dev.langchain4j.model.ollama.OllamaStreamingChatModel.builder()
                         .baseUrl(baseUrl)
                         .modelName(model)
-                        .timeout(java.time.Duration.ofMinutes(2))
+                        .timeout(java.time.Duration.ofMinutes(5))
                         .listeners(listeners)
                         .build();
             } else {
                 String effectiveUrl = baseUrl.endsWith("/v1") || baseUrl.endsWith("/v1/")
                         ? baseUrl
                         : baseUrl + (baseUrl.endsWith("/") ? "v1" : "/v1");
-                tempModel = dev.langchain4j.model.openai.OpenAiStreamingChatModel.builder()
+                log.info("使用 OpenAI 兼容模式, effectiveUrl={}, model={}, apiKey={}, enableThinking={}", effectiveUrl, model, apiKey != null ? "***" : "null", enableThinking);
+                var openAiBuilder = dev.langchain4j.model.openai.OpenAiStreamingChatModel.builder()
                         .baseUrl(effectiveUrl)
                         .apiKey(apiKey != null ? apiKey : "no-key")
                         .modelName(model)
-                        .timeout(java.time.Duration.ofMinutes(2))
+                        .timeout(java.time.Duration.ofMinutes(5))
                         .listeners(listeners)
-                        .build();
+                        .httpClientBuilder(httpClientBuilder);
+                
+                if (Boolean.TRUE.equals(enableThinking)) {
+                    openAiBuilder.returnThinking(true);
+                    log.info("启用 Thinking/Reasoning 模式");
+                }
+                
+                tempModel = openAiBuilder.build();
             }
             builder = AiServices.builder(AiConfig.RawStreamingAssistant.class)
                     .streamingChatModel(tempModel)
                     .chatMemoryProvider(chatMemoryProvider)
-                    .tools(localTools)
                     .toolArgumentsErrorHandler(this::handleToolArgumentsError)
                     .maxSequentialToolsInvocations(15);
         } else {
             builder = AiServices.builder(AiConfig.RawStreamingAssistant.class)
                     .streamingChatModel(streamingChatLanguageModel)
                     .chatMemoryProvider(chatMemoryProvider)
-                    .tools(localTools)
                     .toolArgumentsErrorHandler(this::handleToolArgumentsError)
                     .maxSequentialToolsInvocations(15);
+        }
+
+        java.util.List<Object> enabledLocalTools = localTools.getEnabledTools(settingService.getLocalToolsSetting());
+        if (!enabledLocalTools.isEmpty()) {
+            builder.tools(enabledLocalTools.toArray());
         }
 
         List<McpClient> mcpClients = mcpService.getActiveClients();
@@ -277,7 +310,10 @@ public class ChatServiceImpl implements ChatService {
         systemLogService.debug("准备发送流式对话请求，SystemPrompt 长度: " + systemPrompt.length(), "CHAT");
 
         assistantToUse.chat(session.getId(), message, systemPrompt)
-                .onPartialThinking(thinking -> systemLogService.thinking(thinking.text(), "LLM"))
+                .onPartialThinking(thinking -> {
+                    systemLogService.thinking(thinking.text(), "LLM");
+                    sink.tryEmitNext("\u0001REASONING\u0001" + thinking.text() + "\u0001/REASONING\u0001");
+                })
                 .beforeToolExecution(beforeToolExecution -> {
                     if (toolEventListener == null) {
                         return;

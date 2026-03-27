@@ -32,6 +32,9 @@ public interface ChatService {
 
     Flux<String> streamChat(String message, Long agentId, String userId, String model, String apiKey, String baseUrl,
                             ToolEventListener toolEventListener);
+
+    Flux<String> streamChat(String message, Long agentId, String userId, String model, String apiKey, String baseUrl,
+                            Boolean enableThinking, ToolEventListener toolEventListener);
     
     Flux<String> streamWelcome();
     

@@ -155,6 +155,17 @@ public class SystemSetting {
     }
     
     /**
+     * 获取 LLM 的 enableThinking 配置（是否启用推理/思考模式）
+     */
+    public Boolean getEnableThinking() {
+        Object value = getLlmConfig().get("enableThinking");
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        return false;
+    }
+    
+    /**
      * 获取 Embedding 的 source 配置
      */
     public String getEmbedSource() {
@@ -271,6 +282,7 @@ public class SystemSetting {
         config.put("model", "qwen2.5:latest");
         config.put("baseUrl", "http://localhost:11434");
         config.put("apiKey", "");
+        config.put("enableThinking", false);
         return config;
     }
 

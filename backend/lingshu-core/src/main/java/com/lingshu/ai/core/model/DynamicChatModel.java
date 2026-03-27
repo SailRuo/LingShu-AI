@@ -2,6 +2,7 @@ package com.lingshu.ai.core.model;
 
 import com.lingshu.ai.core.service.SettingService;
 import com.lingshu.ai.infrastructure.entity.SystemSetting;
+import dev.langchain4j.http.client.jdk.JdkHttpClientBuilder;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
@@ -15,9 +16,11 @@ import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.model.ModelProvider;
 import dev.langchain4j.model.chat.Capability;
+import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.Set;
 import java.util.List;
+import java.util.concurrent.Executors;
 
 /**
  * 动态对话模型，根据系统设置实时切换底层的 LLM 实例 (Ollama 或 OpenAI)。
@@ -41,8 +44,8 @@ public class DynamicChatModel implements ChatModel, StreamingChatModel {
     private void ensureDelegate() {
         SystemSetting setting = settingService.getSetting();
         // 简单的配置指纹，用于检测变更
-        String currentConfigId = String.format("%s|%s|%s|%s", 
-                setting.getSource(), setting.getChatModel(), setting.getBaseUrl(), setting.getApiKey());
+        String currentConfigId = String.format("%s|%s|%s|%s|%s", 
+                setting.getSource(), setting.getChatModel(), setting.getBaseUrl(), setting.getApiKey(), setting.getEnableThinking());
         
         if (chatDelegate == null || streamingDelegate == null || !currentConfigId.equals(lastConfigId)) {
             synchronized (this) {
@@ -54,18 +57,19 @@ public class DynamicChatModel implements ChatModel, StreamingChatModel {
                     String baseUrl = setting.getBaseUrl();
                     String modelName = setting.getChatModel();
                     String apiKey = setting.getApiKey();
+                    Boolean enableThinking = setting.getEnableThinking();
 
                     if ("ollama".equalsIgnoreCase(source) || (source == null && baseUrl != null && baseUrl.contains("11434"))) {
                         chatDelegate = OllamaChatModel.builder()
                                 .baseUrl(baseUrl)
                                 .modelName(modelName)
-                                .timeout(Duration.ofMinutes(2))
+                                .timeout(Duration.ofMinutes(5))
                                 .listeners(listeners)
                                 .build();
                         streamingDelegate = OllamaStreamingChatModel.builder()
                                 .baseUrl(baseUrl)
                                 .modelName(modelName)
-                                .timeout(Duration.ofMinutes(2))
+                                .timeout(Duration.ofMinutes(5))
                                 .listeners(listeners)
                                 .build();
                     } else {
@@ -74,21 +78,40 @@ public class DynamicChatModel implements ChatModel, StreamingChatModel {
                             effectiveUrl = effectiveUrl + (effectiveUrl.endsWith("/") ? "v1" : "/v1");
                         }
                         
-                        chatDelegate = OpenAiChatModel.builder()
-                                .baseUrl(effectiveUrl)
-                                .apiKey(apiKey != null && !apiKey.isBlank() ? apiKey : "no-key")
-                                .modelName(modelName)
-                                .timeout(Duration.ofMinutes(2))
-                                .listeners(listeners)
-                                .build();
+                        JdkHttpClientBuilder httpClientBuilder = dev.langchain4j.http.client.jdk.JdkHttpClient.builder()
+                                .httpClientBuilder(HttpClient.newBuilder()
+                                        .version(HttpClient.Version.HTTP_1_1)
+                                        .connectTimeout(Duration.ofSeconds(30))
+                                        .executor(Executors.newCachedThreadPool()));
                         
-                        streamingDelegate = OpenAiStreamingChatModel.builder()
+                        var chatBuilder = OpenAiChatModel.builder()
                                 .baseUrl(effectiveUrl)
                                 .apiKey(apiKey != null && !apiKey.isBlank() ? apiKey : "no-key")
                                 .modelName(modelName)
-                                .timeout(Duration.ofMinutes(2))
+                                .timeout(Duration.ofMinutes(5))
                                 .listeners(listeners)
-                                .build();
+                                .httpClientBuilder(httpClientBuilder);
+                        
+                        if (Boolean.TRUE.equals(enableThinking)) {
+                            chatBuilder.returnThinking(true);
+                            log.info("启用 Thinking/Reasoning 模式");
+                        }
+                        
+                        chatDelegate = chatBuilder.build();
+                        
+                        var streamingBuilder = OpenAiStreamingChatModel.builder()
+                                .baseUrl(effectiveUrl)
+                                .apiKey(apiKey != null && !apiKey.isBlank() ? apiKey : "no-key")
+                                .modelName(modelName)
+                                .timeout(Duration.ofMinutes(5))
+                                .listeners(listeners)
+                                .httpClientBuilder(httpClientBuilder);
+                        
+                        if (Boolean.TRUE.equals(enableThinking)) {
+                            streamingBuilder.returnThinking(true);
+                        }
+                        
+                        streamingDelegate = streamingBuilder.build();
                     }
                     
                     lastConfigId = currentConfigId;

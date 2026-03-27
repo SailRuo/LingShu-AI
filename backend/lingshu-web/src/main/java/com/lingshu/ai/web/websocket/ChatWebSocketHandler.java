@@ -125,6 +125,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         String model = (String) data.get("model");
         String apiKey = (String) data.get("apiKey");
         String baseUrl = (String) data.get("baseUrl");
+        Boolean enableThinking = (Boolean) data.get("enableThinking");
 
         if (message == null || message.isBlank()) {
             sendMessage(session, Map.of(
@@ -134,9 +135,10 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
-        log.info("处理聊天消息: userId={}, message={}, model={}, baseUrl={}", userId,
+
+        log.info("处理聊天消息: userId={}, message={}, model={}, baseUrl={}, enableThinking={}", userId,
                 message.length() > 50 ? message.substring(0, 50) + "..." : message,
-                model, baseUrl);
+                model, baseUrl, enableThinking);
 
         sendMessage(session, Map.of(
             "type", "chatStart",
@@ -144,7 +146,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         ));
 
         try {
-            chatService.streamChat(message, agentId, userId, model, apiKey, baseUrl, new ChatService.ToolEventListener() {
+            chatService.streamChat(message, agentId, userId, model, apiKey, baseUrl, enableThinking, new ChatService.ToolEventListener() {
                         @Override
                         public void onToolStart(String toolCallId, String toolName, String arguments) {
                             try {
@@ -165,10 +167,18 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                     })
                     .doOnNext(chunk -> {
                         try {
-                            sendMessage(session, Map.of(
-                                "type", "chatChunk",
-                                "content", chunk
-                            ));
+                            if (chunk.startsWith("\u0001REASONING\u0001") && chunk.endsWith("\u0001/REASONING\u0001")) {
+                                String reasoningContent = chunk.substring("\u0001REASONING\u0001".length(), chunk.length() - "\u0001/REASONING\u0001".length());
+                                sendMessage(session, Map.of(
+                                    "type", "reasoningChunk",
+                                    "content", reasoningContent
+                                ));
+                            } else {
+                                sendMessage(session, Map.of(
+                                    "type", "chatChunk",
+                                    "content", chunk
+                                ));
+                            }
                         } catch (IOException e) {
                             log.error("发送消息块失败: {}", e.getMessage());
                         }

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import MarkdownIt from 'markdown-it'
-import { FileText } from 'lucide-vue-next'
-import type { ChatMessage, ChatMessageSegment, ChatToolSegment } from '@/types'
+import { FileText, Brain } from 'lucide-vue-next'
+import type { ChatMessage, ChatMessageSegment, ChatToolSegment, ChatReasoningSegment } from '@/types'
 
 const props = defineProps<{
   message: ChatMessage
@@ -92,10 +92,18 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
       <template v-if="message.role === 'assistant' && displaySegments.length">
         <div
           v-for="(segment, index) in displaySegments"
-          :key="segment.type === 'tool' ? (segment.toolCallId || segment.id || `${segment.toolName || 'tool'}-${index}`) : `text-${index}`"
+          :key="segment.type === 'tool' ? (segment.toolCallId || segment.id || `${segment.toolName || 'tool'}-${index}`) : segment.type === 'reasoning' ? `reasoning-${index}` : `text-${index}`"
           class="message-segment"
         >
-          <div v-if="segment.type === 'tool'" class="tool-step">
+          <div v-if="segment.type === 'reasoning'" class="reasoning-block">
+            <div class="reasoning-header">
+              <Brain :size="14" />
+              <span>推理过程</span>
+            </div>
+            <div class="reasoning-content" v-html="renderContent(segment.content)"></div>
+          </div>
+
+          <div v-else-if="segment.type === 'tool'" class="tool-step">
             <div class="tool-step-header">
               <div class="tool-step-title">
                 <FileText :size="14" />
@@ -141,7 +149,7 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 85%;
+  max-width: 80%;
   animation: message-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -169,6 +177,7 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
   padding: 16px 20px;
   border-radius: 20px;
   transition: all 0.2s ease;
+  width: 100%;
 }
 
 .message-row.assistant .message-bubble {
@@ -307,6 +316,38 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
 
 .message-segment + .message-segment {
   margin-top: 14px;
+}
+
+.reasoning-block {
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 14px;
+}
+
+.reasoning-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b5cf6;
+  margin-bottom: 10px;
+}
+
+.reasoning-content {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-dim);
+}
+
+.reasoning-content :deep(p) {
+  margin: 0 0 8px;
+}
+
+.reasoning-content :deep(p:last-child) {
+  margin: 0;
 }
 
 .tool-steps-panel {

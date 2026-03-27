@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { Send, Sparkles, Mic, MicOff, Loader2 } from 'lucide-vue-next'
+import { ref, watch, nextTick } from 'vue'
+import { Send, ArrowUp, Sparkles, Mic, MicOff, Loader2, Brain } from 'lucide-vue-next'
 
-defineProps<{ 
+const textareaRef = ref<HTMLTextAreaElement | null>(null)
+
+const props = defineProps<{ 
   modelValue: string
   loading: boolean
   disabled?: boolean
@@ -9,6 +12,7 @@ defineProps<{
   asrListening?: boolean
   asrRecording?: boolean
   asrProcessing?: boolean
+  enableThinking?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -17,14 +21,47 @@ const emit = defineEmits<{
   (e: 'toggleAsr'): void
   (e: 'startPushToTalk'): void
   (e: 'stopPushToTalk'): void
+  (e: 'toggleThinking'): void
 }>()
 
-function handleInput(e: KeyboardEvent) {
+function adjustTextareaHeight() {
+  const textarea = textareaRef.value
+  if (!textarea) return
+  
+  // 重置高度以获取正确的 scrollHeight
+  textarea.style.height = 'auto'
+  
+  // 设置新的高度，最大 300px
+  const newHeight = Math.min(textarea.scrollHeight, 300)
+  textarea.style.height = `${newHeight}px`
+  
+  // 动态控制滚动条显示：只有当内容高度超过最大高度时才显示滚动条
+  if (textarea.scrollHeight > 300) {
+    textarea.style.overflowY = 'auto'
+  } else {
+    textarea.style.overflowY = 'hidden'
+  }
+}
+
+function handleInput(e: Event) {
+  const target = e.target as HTMLTextAreaElement
+  emit('update:modelValue', target.value)
+  adjustTextareaHeight()
+}
+
+function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     emit('send')
   }
 }
+
+// 监听输入值变化，自动调整高度
+watch(() => props.modelValue, () => {
+  nextTick(() => {
+    adjustTextareaHeight()
+  })
+}, { immediate: true })
 
 function handleMicMouseDown() {
   emit('startPushToTalk')
@@ -38,17 +75,23 @@ function handleMicMouseUp() {
 <template>
   <div class="input-container">
     <div class="input-wrapper">
-      <div class="input-icon">
-        <Sparkles :size="18" />
-      </div>
+      <button 
+        class="thinking-btn"
+        :class="{ active: enableThinking }"
+        :title="enableThinking ? '已启用推理模式' : '启用推理模式'"
+        @click="emit('toggleThinking')"
+      >
+        <Brain :size="18" />
+      </button>
       
-      <input
+      <textarea
+        ref="textareaRef"
         :value="modelValue"
-        type="text"
         class="input-field"
-        placeholder="与灵枢对话..."
-        @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
-        @keydown="handleInput"
+        placeholder="与灵枢对话...（Shift+Enter 换行）"
+        rows="1"
+        @input="handleInput"
+        @keydown="handleKeydown"
       />
       
       <div class="action-buttons">
@@ -77,7 +120,8 @@ function handleMicMouseUp() {
           :disabled="!modelValue.trim() || loading || disabled"
           @click="emit('send')"
         >
-          <Send :size="18" :class="{ spinning: loading }" />
+          <div v-if="loading" class="loading-dot"></div>
+          <ArrowUp v-else :size="20" />
         </button>
       </div>
     </div>
@@ -90,18 +134,22 @@ function handleMicMouseUp() {
   bottom: 0;
   left: 0;
   right: 0;
-  padding: 20px 24px;
+  padding: 20px 0;
   background: linear-gradient(to top, var(--color-background), transparent);
-  pointer-events: none;
+  pointer-events: auto;
+  display: flex;
+  justify-content: center;
+  z-index: 10;
 }
 
 .input-wrapper {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 12px;
-  max-width: 800px;
+  width: calc(100% - 48px);
+  max-width: 1050px;
   margin: 0 auto;
-  padding: 12px 16px;
+  padding: 12px 24px;
   background: var(--color-surface);
   border: 1px solid var(--color-outline);
   border-radius: 16px;
@@ -125,6 +173,32 @@ function handleMicMouseUp() {
   color: var(--color-primary);
 }
 
+.thinking-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: 1px solid var(--color-outline);
+  border-radius: 10px;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.thinking-btn:hover:not(.active) {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.thinking-btn.active {
+  background: var(--color-primary-dim);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  box-shadow: 0 0 12px var(--color-primary-dim);
+}
+
 .input-field {
   flex: 1;
   background: transparent;
@@ -133,10 +207,33 @@ function handleMicMouseUp() {
   font-size: 15px;
   color: var(--color-text);
   line-height: 1.5;
+  resize: none;
+  min-height: 24px;
+  max-height: 300px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0;
 }
 
 .input-field::placeholder {
   color: var(--color-text-dim);
+}
+
+.input-field::-webkit-scrollbar {
+  width: 6px;
+}
+
+.input-field::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.input-field::-webkit-scrollbar-thumb {
+  background: var(--color-outline);
+  border-radius: 3px;
+}
+
+.input-field::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary);
 }
 
 .action-buttons {
@@ -159,7 +256,7 @@ function handleMicMouseUp() {
   transition: all 0.2s ease;
 }
 
-.mic-btn:hover:not(:disabled) {
+.mic-btn:hover:not(:disabled):not(.active):not(.recording) {
   border-color: var(--color-primary);
   color: var(--color-primary);
 }
@@ -210,12 +307,48 @@ function handleMicMouseUp() {
   cursor: not-allowed;
 }
 
+.loading-dot {
+  width: 12px;
+  height: 12px;
+  background: var(--color-text-inverse);
+  border-radius: 50%;
+  animation: breathing-dot 1.5s ease-in-out infinite;
+}
+
+@keyframes breathing-dot {
+  0%, 100% { 
+    transform: scale(1);
+    opacity: 1;
+    box-shadow: 0 0 0 rgba(255, 255, 255, 0);
+  }
+  50% { 
+    transform: scale(1.5);
+    opacity: 0.7;
+    box-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+  }
+}
+
 .spinning {
   animation: spin 1s linear infinite;
 }
 
 .spin {
   animation: spin 1s linear infinite;
+}
+
+.breathing {
+  animation: breathing 1.5s ease-in-out infinite;
+}
+
+@keyframes breathing {
+  0%, 100% { 
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% { 
+    transform: scale(1.3);
+    opacity: 0.6;
+  }
 }
 
 .pulse {

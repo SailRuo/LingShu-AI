@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lingshu.ai.core.service.AgentConfigService;
 import com.lingshu.ai.core.service.SystemLogService;
 import com.lingshu.ai.infrastructure.entity.AgentConfig;
+import com.lingshu.ai.infrastructure.entity.SystemSetting;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import org.springframework.stereotype.Component;
@@ -12,6 +13,9 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -21,22 +25,9 @@ public class LocalTools {
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(LocalTools.class);
 
-    /**
-     * 工具输出最大字符数。
-     * 防止大段输出反复灌入上下文，导致 ReAct 死循环。
-     */
     private static final int MAX_OUTPUT_CHARS = 4000;
-
-    /**
-     * 单轮会话内，对“相同工具 + 相同输入”的重复调用阈值。
-     * 一旦超过阈值，直接返回阻断信息，强制模型停止继续重复调用。
-     */
     private static final int MAX_REPEAT_CALLS = 2;
 
-    /**
-     * 记录工具调用次数：
-     * key = toolName + "::" + normalizedInput
-     */
     private static final ConcurrentHashMap<String, AtomicInteger> TOOL_CALL_COUNTS = new ConcurrentHashMap<>();
 
     private final SystemLogService systemLogService;
@@ -49,12 +40,96 @@ public class LocalTools {
         this.objectMapper = objectMapper;
     }
 
-    @Tool("""
+    public List<Object> getEnabledTools(SystemSetting setting) {
+        List<Object> enabled = new ArrayList<>();
+        if (setting == null || setting.getSettings() == null || !setting.getSettings().containsKey("tools")) {
+            return enabled;
+        }
+        try {
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> tools = (List<Map<String, Object>>) setting.getSettings().get("tools");
+            for (Map<String, Object> toolDef : tools) {
+                Boolean isEnabled = (Boolean) toolDef.get("enabled");
+                if (Boolean.TRUE.equals(isEnabled)) {
+                    String name = (String) toolDef.get("name");
+                    if ("readLocalFile".equals(name)) enabled.add(new ReadLocalFileAction());
+                    if ("executeCommand".equals(name)) enabled.add(new ExecuteCommandAction());
+                    if ("manageAgent".equals(name)) enabled.add(new ManageAgentAction());
+                    if ("getAgents".equals(name)) enabled.add(new GetAgentsAction());
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to parse local tools layout", e);
+        }
+        return enabled;
+    }
+
+    public class ReadLocalFileAction {
+        @Tool("""
             Reads the content of a local file.
             Do not repeatedly read the same path unless you are narrowing to a different target.
             If you already have enough information, stop calling tools and provide the final answer.
             """)
-    public String readLocalFile(String path) {
+        public String readLocalFile(String path) {
+            return readLocalFileInternal(path);
+        }
+    }
+
+    public class ExecuteCommandAction {
+        @Tool("""
+            Executes a Windows terminal command and returns the output.
+            
+            CRITICAL JSON FORMATTING RULES:
+            - The tool accepts exactly ONE argument: {"command":"..."}
+            - The command value is a JSON STRING - all inner double quotes MUST be escaped!
+            
+            WRONG (will fail):
+              {"command": "powershell -Command "Get-Date""}  <- unescaped inner quotes!
+            
+            RIGHT:
+              {"command": "powershell -Command \\"Get-Date\\""}  <- escaped as \\"
+              {"command": "powershell -Command 'Get-Date'"}    <- use single quotes instead
+            
+            BEST PRACTICE: Use single quotes inside PowerShell commands to avoid escaping:
+              {"command": "powershell -NoProfile -Command \\"Get-Date -Format 'yyyy-MM-dd HH:mm:ss'\\""}
+            
+            Windows path backslashes must be doubled: C:\\\\Program Files\\\\App
+            Output is capped to keep context manageable.
+            Never repeat the same command over and over.
+            """)
+        public String executeCommand(String command) {
+            return executeCommandInternal(command);
+        }
+    }
+
+    public class ManageAgentAction {
+        @Tool("""
+            创建或更新智能体配置。
+            【强制安全规则】：
+            1. 必须分两步进行！
+            2. 第一步：向用户展示拟定的智能体配置，询问是否确认。此时 action 必须为 "preview"。
+            3. 第二步：只有用户明确回复确认后，才能将 action 设置为 "commit" 来真正执行。
+            4. agentJson 必须是包含 name, displayName, systemPrompt 等字段的合法 JSON。
+            """)
+        public String manageAgent(
+                @P("操作类型，只能是 'preview'（预览）或 'commit'（确认执行）") String action,
+                @P("智能体配置的 JSON 字符串") String agentJson) {
+            return manageAgentInternal(action, agentJson);
+        }
+    }
+
+    public class GetAgentsAction {
+        @Tool("""
+            获取系统中已创建的所有智能体列表。
+            当你需要查看当前有哪些智能体，或者需要获取某个智能体的具体配置信息时使用。
+            返回结果是一个包含所有智能体详细配置的 JSON 数组字符串。
+            """)
+        public String getAgents() {
+            return getAgentsInternal();
+        }
+    }
+
+    private String readLocalFileInternal(String path) {
         log.info("Executing tool: readLocalFile with path: {}", path);
 
         String normalizedPath = normalizeInput(path);
@@ -89,28 +164,7 @@ public class LocalTools {
         }
     }
 
-    @Tool("""
-            Executes a Windows terminal command and returns the output.
-            
-            CRITICAL JSON FORMATTING RULES:
-            - The tool accepts exactly ONE argument: {"command":"..."}
-            - The command value is a JSON STRING - all inner double quotes MUST be escaped!
-            
-            WRONG (will fail):
-              {"command": "powershell -Command "Get-Date""}  <- unescaped inner quotes!
-            
-            RIGHT:
-              {"command": "powershell -Command \"Get-Date\""}  <- escaped as \\"
-              {"command": "powershell -Command 'Get-Date'"}    <- use single quotes instead
-            
-            BEST PRACTICE: Use single quotes inside PowerShell commands to avoid escaping:
-              {"command": "powershell -NoProfile -Command \"Get-Date -Format 'yyyy-MM-dd HH:mm:ss'\""}
-            
-            Windows path backslashes must be doubled: C:\\\\Program Files\\\\App
-            Output is capped to keep context manageable.
-            Never repeat the same command over and over.
-            """)
-    public String executeCommand(String command) {
+    private String executeCommandInternal(String command) {
         String osName = System.getProperty("os.name");
         log.info("Executing tool: executeCommand with command: {} on {}", command, osName);
 
@@ -211,17 +265,7 @@ public class LocalTools {
         }
     }
 
-    @Tool("""
-            创建或更新智能体配置。
-            【强制安全规则】：
-            1. 必须分两步进行！
-            2. 第一步：向用户展示拟定的智能体配置，询问是否确认。此时 action 必须为 "preview"。
-            3. 第二步：只有用户明确回复确认后，才能将 action 设置为 "commit" 来真正执行。
-            4. agentJson 必须是包含 name, displayName, systemPrompt 等字段的合法 JSON。
-            """)
-    public String manageAgent(
-            @P("操作类型，只能是 'preview'（预览）或 'commit'（确认执行）") String action,
-            @P("智能体配置的 JSON 字符串") String agentJson) {
+    private String manageAgentInternal(String action, String agentJson) {
         
         log.info("Executing tool: manageAgent with action: {}", action);
         systemLogService.info("ReAct工具调用: manageAgent | action=" + action, "TOOL");
@@ -269,12 +313,7 @@ public class LocalTools {
         }
     }
 
-    @Tool("""
-            获取系统中已创建的所有智能体列表。
-            当你需要查看当前有哪些智能体，或者需要获取某个智能体的具体配置信息时使用。
-            返回结果是一个包含所有智能体详细配置的 JSON 数组字符串。
-            """)
-    public String getAgents() {
+    private String getAgentsInternal() {
         log.info("Executing tool: getAgents");
         systemLogService.info("ReAct工具调用: getAgents", "TOOL");
         try {

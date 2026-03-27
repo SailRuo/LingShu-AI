@@ -8,7 +8,8 @@ import {
 } from 'naive-ui'
 import { 
   RefreshCw, Settings, Cpu, Globe, Activity, Zap, Plus, 
-  Trash2, Edit, Star, Users, Bell, Send, Brain, Wrench, Palette, Mic
+  Trash2, Edit, Star, Users, Bell, Send, Brain, Wrench, Palette, Mic,
+  Bot, MessageCircle, Gem, Rocket, Sparkles
 } from 'lucide-vue-next'
 import McpSettings from '@/components/McpSettings.vue'
 import ThemeModal from '@/components/common/ThemeModal.vue'
@@ -73,7 +74,7 @@ const agentForm = ref({
   emotionalStrategy: '',
   greetingTriggers: '',
   hiddenRules: '',
-  avatar: '🤖',
+  avatar: 'Bot',
   color: '#3b82f6',
   isActive: true
 })
@@ -374,7 +375,7 @@ function openEditAgent(agent: Agent) {
     emotionalStrategy: agent.emotionalStrategy || '',
     greetingTriggers: agent.greetingTriggers || '',
     hiddenRules: agent.hiddenRules || '',
-    avatar: agent.avatar || '🤖',
+    avatar: agent.avatar || 'Bot',
     color: agent.color || '#3b82f6',
     isActive: agent.isActive
   }
@@ -420,7 +421,15 @@ async function setDefaultAgent(id: number) {
   }
 }
 
-const avatarOptions = ['🤖', '🧠', '💬', '🎯', '⚡', '🔮', '🌟', '💡', '🚀', '🎨']
+const avatarOptions = [
+  { icon: 'Bot', label: '机器人', component: Bot },
+  { icon: 'Brain', label: '大脑', component: Brain },
+  { icon: 'Sparkles', label: '火花', component: Sparkles },
+  { icon: 'Cpu', label: '芯片', component: Cpu },
+  { icon: 'Gem', label: '宝石', component: Gem },
+  { icon: 'Rocket', label: '火箭', component: Rocket },
+  { icon: 'Zap', label: '闪电', component: Zap }
+]
 const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#84cc16']
 </script>
 
@@ -842,13 +851,15 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
           <n-grid-item>
             <n-form-item label="头像">
               <div class="avatar-selector">
-                <span 
+                <div 
                   v-for="av in avatarOptions" 
-                  :key="av" 
+                  :key="av.icon" 
                   class="avatar-option"
-                  :class="{ active: agentForm.avatar === av }"
-                  @click="agentForm.avatar = av"
-                >{{ av }}</span>
+                  :class="{ active: agentForm.avatar === av.icon }"
+                  @click="agentForm.avatar = av.icon"
+                >
+                  <component :is="av.component" :size="24" />
+                </div>
               </div>
             </n-form-item>
           </n-grid-item>
@@ -1171,21 +1182,30 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
 }
 
 .avatar-option {
-  width: 36px;
-  height: 36px;
+  width: 48px;
+  height: 48px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 12px;
   cursor: pointer;
-  font-size: 20px;
   border: 2px solid transparent;
   transition: all 0.2s;
+  color: var(--color-text-dim);
+  background: rgba(0, 0, 0, 0.05);
 }
 
-.avatar-option:hover, .avatar-option.active {
+.avatar-option:hover {
   border-color: var(--color-primary);
   background: var(--color-primary-dim);
+  color: var(--color-primary);
+}
+
+.avatar-option.active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-dim);
+  color: var(--color-primary);
+  box-shadow: 0 0 15px var(--color-primary-dim);
 }
 
 .color-option {

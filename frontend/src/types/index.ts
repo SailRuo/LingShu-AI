@@ -20,11 +20,17 @@ export interface ChatTextSegment {
   timestamp?: number;
 }
 
+export interface ChatReasoningSegment {
+  type: "reasoning";
+  content: string;
+  timestamp?: number;
+}
+
 export interface ChatToolSegment extends ChatToolStep {
   type: "tool";
 }
 
-export type ChatMessageSegment = ChatTextSegment | ChatToolSegment;
+export type ChatMessageSegment = ChatTextSegment | ChatToolSegment | ChatReasoningSegment;
 
 export interface ChatMessage {
   id?: number;

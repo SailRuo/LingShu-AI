@@ -44,25 +44,25 @@ export const polarLight: ThemeConfig = {
 
 export const cyberPurple: ThemeConfig = {
   key: 'cyberPurple',
-  label: '赛博紫',
+  label: '星空',
   icon: Sparkles,
   isDark: true,
   cssVars: {
-    // 核心颜色 - 深色背景 + 亮主色
-    '--color-background': '#0f0a1f', // 深色背景 - 降低亮度
-    '--color-surface': 'rgba(30, 25, 65, 0.9)', // 深色表面 - 降低亮度
-    '--color-surface-elevated': 'rgba(50, 40, 100, 0.92)', // 层次稍亮
-    '--color-primary': '#c084fc', // 亮紫色 - 保持醒目
-    '--color-primary-dim': 'rgba(192, 132, 252, 0.18)', // 适度光晕
-    '--color-accent': '#a855f7', // 紫色强调
+    // 核心颜色 - 纯黑宇宙背景 + 银白色主色
+    '--color-background': '#000000', // 纯黑宇宙背景
+    '--color-surface': 'rgba(10, 10, 20, 0.85)', // 黑表面 - 半透明
+    '--color-surface-elevated': 'rgba(20, 20, 35, 0.9)', // 层次稍亮
+    '--color-primary': '#e2e8f0', // 银白色 - 如恒星般明亮
+    '--color-primary-dim': 'rgba(226, 232, 240, 0.15)', // 星光光晕
+    '--color-accent': '#94a3b8', // 银灰色强调
     
     // 文字系统
-    '--color-text': '#f5f0ff', // 浅紫白
-    '--color-text-dim': '#c4b5fd', // 浅紫次要文字
-    '--color-text-inverse': '#15123a',
+    '--color-text': '#f1f5f9', // 纯白
+    '--color-text-dim': '#cbd5e1', // 银灰次要文字
+    '--color-text-inverse': '#020617',
     
     // 边框和轮廓
-    '--color-outline': 'rgba(192, 132, 252, 0.35)', // 适度可见
+    '--color-outline': 'rgba(226, 232, 240, 0.25)', // 银色边框
     
     // 状态色
     '--color-success': '#4ade80',
@@ -70,38 +70,38 @@ export const cyberPurple: ThemeConfig = {
     '--color-error': '#f87171',
     
     // 玻璃态效果
-    '--color-glass-bg': 'rgba(30, 25, 65, 0.85)', // 深色玻璃
-    '--color-glass-border': 'rgba(192, 132, 252, 0.28)',
+    '--color-glass-bg': 'rgba(10, 10, 20, 0.8)', // 黑玻璃
+    '--color-glass-border': 'rgba(226, 232, 240, 0.2)',
     
-    // Mesh 渐变背景 - 深色基调
-    '--color-bg-mesh-1': '#0f0a1f',
-    '--color-bg-mesh-2': '#5b21b6', // 深紫色
-    '--color-bg-mesh-3': '#3b0764', // 暗紫色
-    '--color-bg-mesh-4': '#0f0a1f',
+    // Mesh 渐变背景 - 宇宙基调
+    '--color-bg-mesh-1': '#000000',
+    '--color-bg-mesh-2': '#0f172a', // 深蓝黑
+    '--color-bg-mesh-3': '#1e293b', // 深灰蓝
+    '--color-bg-mesh-4': '#000000',
     
     // 气泡组件 - 增强视觉层次（调亮用户气泡）
-    '--color-bubble-ai-bg': 'rgba(192, 132, 252, 0.12)', // 更透明
-    '--color-bubble-ai-border': 'rgba(192, 132, 252, 0.28)', // 更细
-    '--color-bubble-user-bg': '#c084fc', // 调亮的紫色
-    '--color-bubble-user-border': '#a855f7', // 深边
+    '--color-bubble-ai-bg': 'rgba(226, 232, 240, 0.08)', // 更透明
+    '--color-bubble-ai-border': 'rgba(226, 232, 240, 0.2)', // 细边
+    '--color-bubble-user-bg': 'rgba(226, 232, 240, 0.15)', // 银白光
+    '--color-bubble-user-border': 'rgba(226, 232, 240, 0.3)', // 深边
     
     // 脉冲效果
-    '--color-pulse-core': 'rgba(192, 132, 252, 0.45)',
-    '--color-pulse-ring': '#c084fc',
+    '--color-pulse-core': 'rgba(226, 232, 240, 0.4)',
+    '--color-pulse-ring': '#e2e8f0',
     
     // 知识图谱节点
-    '--color-node-user': '#c084fc',
-    '--color-node-fact': '#a855f7',
-    '--color-edge': 'rgba(192, 132, 252, 0.55)',
+    '--color-node-user': '#e2e8f0',
+    '--color-node-fact': '#cbd5e1',
+    '--color-edge': 'rgba(226, 232, 240, 0.45)',
     
-    // 发光效果 - 霓虹感（强光晕）
-    '--color-glow': 'rgba(192, 132, 252, 0.65)', // 赛博紫 - 强光晕
+    // 发光效果 - 星芒感（强光晕）
+    '--color-glow': 'rgba(226, 232, 240, 0.55)', // 星空 - 银白光晕
   }
 }
 
 export const deepTechFuturistic: ThemeConfig = {
   key: 'deepTechFuturistic',
-  label: '深色·科技感',
+  label: '霓虹绿境',
   icon: Cpu,
   isDark: true,
   cssVars: {
@@ -139,8 +139,8 @@ export const deepTechFuturistic: ThemeConfig = {
     // 气泡组件 - 增强视觉层次（调亮用户气泡）
     '--color-bubble-ai-bg': 'rgba(52, 211, 153, 0.12)', // 更透明
     '--color-bubble-ai-border': 'rgba(52, 211, 153, 0.28)', // 更细
-    '--color-bubble-user-bg': '#4ade80', // 调亮的绿色
-    '--color-bubble-user-border': '#22c55e', // 深边
+    '--color-bubble-user-bg': 'rgba(52, 211, 153, 0.25)', // 半透明绿色
+    '--color-bubble-user-border': 'rgba(52, 211, 153, 0.45)', // 半透明深边
     
     // 脉冲效果
     '--color-pulse-core': 'rgba(52, 211, 153, 0.45)',
