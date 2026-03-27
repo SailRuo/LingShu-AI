@@ -185,8 +185,8 @@ onUnmounted(() => {
 }
 
 .status-light.online {
-  background: #3b82f6;
-  box-shadow: 0 0 4px #3b82f6;
+  background: #10b981;
+  box-shadow: 0 0 4px #10b981;
 }
 
 .status-light.error {

@@ -4,7 +4,6 @@ import { computed, onMounted, markRaw, h, watch } from 'vue'
 import { useThemeStore } from '@/stores/themeStore'
 import { useLocalStorage } from '@vueuse/core'
 import AppSider from '@/components/layout/AppSider.vue'
-import LatencyBar from '@/components/layout/LatencyBar.vue'
 import SystemStatusBar from '@/components/layout/SystemStatusBar.vue'
 import ResonanceView from '@/views/ResonanceView.vue'
 import InsightView from '@/views/InsightView.vue'
@@ -98,11 +97,6 @@ function getViewKey(menuKey: string): string {
 
                 <!-- Right Area -->
                 <div class="right-area">
-                  <!-- Header - Only in Right Area -->
-                  <header class="app-header">
-                    <LatencyBar />
-                  </header>
-
                   <!-- Main Content -->
                   <main class="main-content">
                     <!-- router-view placeholder for future vue-router integration -->
@@ -116,8 +110,6 @@ function getViewKey(menuKey: string): string {
                     </transition>
                   </main>
                 </div>
-
-                <!-- Footer - Full Width Across Sidebar and Content -->
                 <footer class="app-footer">
                   <SystemStatusBar />
                 </footer>
@@ -152,13 +144,8 @@ function getViewKey(menuKey: string): string {
   grid-area: right;
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-height: 0;
-  background: transparent;
-}
-
-.app-header {
-  height: 64px;
-  flex-shrink: 0;
   background: transparent;
 }
 

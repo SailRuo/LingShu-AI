@@ -46,35 +46,54 @@ export const cyberPurple: ThemeConfig = {
   icon: Sparkles,
   isDark: true,
   cssVars: {
-    '--color-background': '#1a1625',
-    '--color-surface': 'rgba(40, 30, 70, 0.75)',
-    '--color-surface-elevated': 'rgba(60, 45, 100, 0.85)',
-    '--color-primary': '#d8b4fe',
-    '--color-primary-dim': 'rgba(216, 180, 254, 0.18)',
-    '--color-accent': '#22d3ee',
+    // 核心颜色 - 提高对比度和霓虹感
+    '--color-background': '#0f0a1e', // 更深的蓝紫黑背景
+    '--color-surface': 'rgba(35, 25, 65, 0.85)', // 加深表面色
+    '--color-surface-elevated': 'rgba(55, 40, 95, 0.92)', //  elevated 层更亮
+    '--color-primary': '#f0abfc', // 霓虹紫 - 更高亮度
+    '--color-primary-dim': 'rgba(240, 171, 252, 0.2)', // 增强发光底衬
+    '--color-accent': '#22d3ee', // 保持青蓝色作为互补色
+    
+    // 文字系统 - 优化可读性
     '--color-text': '#ffffff',
-    '--color-text-dim': '#c7c7cc',
-    '--color-text-inverse': '#1a1625',
-    '--color-outline': 'rgba(216, 180, 254, 0.25)',
+    '--color-text-dim': '#a5a5b5', // 降低次要文字明度，增强层次
+    '--color-text-inverse': '#0f0a1e',
+    
+    // 边框和轮廓 - 增强可见度
+    '--color-outline': 'rgba(240, 171, 252, 0.35)', // 更高不透明度
+    
+    // 状态色 - 保持高可见度
     '--color-success': '#4ade80',
     '--color-warning': '#fbbf24',
     '--color-error': '#f87171',
-    '--color-glass-bg': 'rgba(30, 20, 60, 0.85)',
-    '--color-glass-border': 'rgba(216, 180, 254, 0.2)',
-    '--color-bg-mesh-1': '#1a1625',
-    '--color-bg-mesh-2': '#4c1d95',
-    '--color-bg-mesh-3': '#2e1065',
-    '--color-bg-mesh-4': '#1a1625',
-    '--color-bubble-ai-bg': 'rgba(216, 180, 254, 0.12)',
-    '--color-bubble-ai-border': 'rgba(216, 180, 254, 0.3)',
-    '--color-bubble-user-bg': 'rgba(216, 180, 254, 0.18)',
-    '--color-bubble-user-border': 'rgba(216, 180, 254, 0.4)',
-    '--color-pulse-core': 'rgba(216, 180, 254, 0.3)',
-    '--color-pulse-ring': '#d8b4fe',
-    '--color-node-user': '#d8b4fe',
+    
+    // 玻璃态效果 - 增强质感
+    '--color-glass-bg': 'rgba(25, 15, 55, 0.88)', // 更深的玻璃背景
+    '--color-glass-border': 'rgba(240, 171, 252, 0.3)', // 更强的边框
+    
+    // Mesh 渐变背景 - 强化紫色调
+    '--color-bg-mesh-1': '#0f0a1e',
+    '--color-bg-mesh-2': '#5b21b6', // 深紫色
+    '--color-bg-mesh-3': '#3b0764', // 暗紫色
+    '--color-bg-mesh-4': '#0f0a1e',
+    
+    // 气泡组件 - 增强对比
+    '--color-bubble-ai-bg': 'rgba(240, 171, 252, 0.15)', // 更高的不透明度
+    '--color-bubble-ai-border': 'rgba(240, 171, 252, 0.45)',
+    '--color-bubble-user-bg': 'rgba(240, 171, 252, 0.25)',
+    '--color-bubble-user-border': 'rgba(240, 171, 252, 0.55)',
+    
+    // 脉冲效果 - 更强光晕
+    '--color-pulse-core': 'rgba(240, 171, 252, 0.45)',
+    '--color-pulse-ring': '#f0abfc',
+    
+    // 知识图谱节点 - 高对比度
+    '--color-node-user': '#f0abfc',
     '--color-node-fact': '#22d3ee',
-    '--color-edge': 'rgba(216, 180, 254, 0.5)',
-    '--color-glow': 'rgba(216, 180, 254, 0.4)',
+    '--color-edge': 'rgba(240, 171, 252, 0.65)', // 更强的边线
+    
+    // 发光效果 - 霓虹感
+    '--color-glow': 'rgba(240, 171, 252, 0.6)', // 增强光晕
   }
 }
 

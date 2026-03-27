@@ -413,7 +413,7 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
                   <div class="preview-content">
                     <div class="preview-info">
                       <div class="current-theme-label">当前主题</div>
-                      <div class="current-theme-name">{{ themeStore.current.name }}</div>
+                      <div class="current-theme-name">{{ themeStore.current.label }}</div>
                     </div>
                     <n-button type="primary" size="medium">
                       <template #icon><n-icon :component="Palette" /></template>
@@ -832,6 +832,8 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
         </div>
       </template>
     </n-modal>
+
+    <ThemeModal v-model:open="showThemeModal" />
   </div>
 </template>
 
@@ -1173,5 +1175,53 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
   background: rgba(0, 0, 0, 0.05);
   border-radius: 8px;
   border-left: 3px solid var(--color-primary);
+}
+
+/* 主题选择器样式 */
+.theme-selector {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.theme-preview-card {
+  flex: 1;
+  min-width: 280px;
+  max-width: 400px;
+  padding: 20px;
+  background: var(--color-glass-bg);
+  border: 1px solid var(--color-outline);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.theme-preview-card:hover {
+  border-color: var(--color-primary);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px var(--color-primary-dim);
+}
+
+.preview-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.preview-info {
+  flex: 1;
+}
+
+.current-theme-label {
+  font-size: 12px;
+  color: var(--color-text-dim);
+  margin-bottom: 4px;
+}
+
+.current-theme-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
 }
 </style>
