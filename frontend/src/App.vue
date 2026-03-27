@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { NConfigProvider, NMessageProvider, NDialogProvider, NNotificationProvider, NLoadingBarProvider, darkTheme } from 'naive-ui'
-import { computed, onMounted, markRaw, h } from 'vue'
+import { computed, onMounted, markRaw, h, watch } from 'vue'
 import { useThemeStore } from '@/stores/themeStore'
 import { useLocalStorage } from '@vueuse/core'
 import AppSider from '@/components/layout/AppSider.vue'
@@ -19,6 +19,19 @@ const themeStore = useThemeStore()
 // 使用 LocalStorage 持久化当前菜单状态，解决刷新重置问题
 const activeMenu = useLocalStorage('lingshu-active-menu', 'resonance')
 
+// 监听菜单变化，如果是 settings-* 则自动切换到 settings
+watch(activeMenu, (newVal, oldVal) => {
+  const settingsKeys = ['settings-model', 'settings-agents', 'settings-proactive', 'settings-mcp']
+  if (settingsKeys.includes(newVal) && oldVal !== 'settings' && !settingsKeys.includes(oldVal || '')) {
+    // 从外部进入设置页面，保持当前 key 不变
+  } else if (settingsKeys.includes(newVal) && oldVal === 'settings') {
+    // 已经在设置页面内切换，保持当前 key 不变
+  } else if (newVal === 'settings') {
+    // 点击系统设置菜单，切换到 settings-model
+    activeMenu.value = 'settings-model'
+  }
+}, { immediate: true })
+
 // 视图注册表，优化架构，方便后续扩展
 const viewMap: Record<string, any> = {
   resonance: markRaw(ResonanceView),
@@ -26,6 +39,10 @@ const viewMap: Record<string, any> = {
   stream: markRaw(StreamView),
   governance: markRaw(GovernanceView),
   pocket: markRaw(() => h(ComingSoonView, { title: '全维口袋' })),
+  'settings-model': markRaw(SettingsView),
+  'settings-agents': markRaw(SettingsView),
+  'settings-proactive': markRaw(SettingsView),
+  'settings-mcp': markRaw(SettingsView),
   settings: markRaw(SettingsView),
   security: markRaw(() => h(ComingSoonView, { title: '安全保障' })),
   logs: markRaw(SystemLogView)
@@ -38,6 +55,26 @@ onMounted(() => {
 })
 
 const naiveTheme = computed(() => themeStore.current.isDark ? darkTheme : null)
+
+// 动态计算组件属性
+const currentViewComponentProps = computed(() => {
+  const settingsKeys = ['settings-model', 'settings-agents', 'settings-proactive', 'settings-mcp', 'settings']
+  if (settingsKeys.includes(activeMenu.value)) {
+    return { 
+      activeMenu: activeMenu.value, 
+      'onUpdate:activeMenu': (v: string) => { activeMenu.value = v } 
+    }
+  }
+  return {}
+})
+
+function getViewKey(menuKey: string): string {
+  const settingsKeys = ['settings-model', 'settings-agents', 'settings-proactive', 'settings-mcp', 'settings']
+  if (settingsKeys.includes(menuKey)) {
+    return 'settings'
+  }
+  return menuKey
+}
 </script>
 
 <template>
@@ -68,9 +105,14 @@ const naiveTheme = computed(() => themeStore.current.isDark ? darkTheme : null)
 
                   <!-- Main Content -->
                   <main class="main-content">
-                    <router-view v-if="false" /> <!-- Placeholder for future vue-router -->
+                    <!-- router-view placeholder for future vue-router integration -->
+                    <!-- <router-view v-if="false" /> -->
                     <transition name="fade-slide" mode="out-in">
-                      <component :is="currentView" :key="activeMenu" />
+                      <component 
+                        :is="currentView" 
+                        :key="getViewKey(activeMenu)" 
+                        v-bind="currentViewComponentProps"
+                      />
                     </transition>
                   </main>
                 </div>

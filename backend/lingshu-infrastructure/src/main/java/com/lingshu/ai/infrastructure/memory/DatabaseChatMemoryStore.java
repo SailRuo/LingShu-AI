@@ -92,7 +92,7 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
         // 过滤掉 SystemMessage，因为 system prompt 由 ChatServiceImpl 每次动态注入，不应持久化
         List<ChatMessage> persistableMessages = messages.stream()
                 .filter(m -> !(m instanceof SystemMessage))
-                .collect(Collectors.toList());
+                .toList();
         if (persistableMessages.isEmpty()) return;
 
         log.debug("Memory update: 正在同步 {} 条消息到会话 {}", messages.size(), memoryId);

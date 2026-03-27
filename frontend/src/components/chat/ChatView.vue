@@ -245,9 +245,9 @@ onUnmounted(() => {
         <p class="welcome-subtitle">与灵枢建立深度连接，探索内心世界</p>
         
         <div class="quick-actions">
-          <button class="quick-btn" @click="handleQuickAction('今天心情如何？')">
+          <button class="quick-btn" @click="handleQuickAction('我们的回忆')">
             <Sparkles :size="16" />
-            <span>今天心情如何？</span>
+            <span>我们的回忆</span>
           </button>
           <button class="quick-btn" @click="handleQuickAction('帮我分析一下')">
             <Sparkles :size="16" />

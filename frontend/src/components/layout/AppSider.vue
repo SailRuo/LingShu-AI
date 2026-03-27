@@ -22,6 +22,7 @@ const infraNav = [
   { label: '安全保障', key: 'security', icon: renderIcon(Shield) },
   { label: '系统日志', key: 'logs', icon: renderIcon(FileText) },
 ]
+
 </script>
 
 <template>

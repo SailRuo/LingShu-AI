@@ -47,7 +47,7 @@ public class DynamicChatModel implements ChatModel, StreamingChatModel {
         if (chatDelegate == null || streamingDelegate == null || !currentConfigId.equals(lastConfigId)) {
             synchronized (this) {
                 if (chatDelegate == null || streamingDelegate == null || !currentConfigId.equals(lastConfigId)) {
-                    log.info("初始化/更新动态模型代理: Source={}, Model={}, BaseUrl={}", 
+                    log.debug("初始化/更新动态模型代理: Source={}, Model={}, BaseUrl={}", 
                             setting.getSource(), setting.getChatModel(), setting.getBaseUrl());
                     
                     String source = setting.getSource();

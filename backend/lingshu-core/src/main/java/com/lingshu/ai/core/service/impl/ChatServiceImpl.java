@@ -500,19 +500,22 @@ public class ChatServiceImpl implements ChatService {
                 .append(" Retry the same tool call with valid JSON only. ");
 
         if ("executeCommand".equals(toolName)) {
-            builder.append("For executeCommand, the payload must look like ")
-                    .append("{\"command\":\"...\"}. ")
-                    .append("Escape every inner double quote as \\\\\" inside the JSON string. ")
-                    .append("Prefer single quotes inside the shell command when possible. ")
-                    .append("Windows example: {\"command\":\"start \\\"\\\" \\\"C:\\\\Program Files\\\\App\\\\app.exe\\\"\"}. ");
+            builder.append("\n\nCRITICAL: Your JSON has UNESCAPED DOUBLE QUOTES inside the command string!\n")
+                    .append("WRONG: {\"command\": \"powershell -Command \"Get-Date\"\"}  <- inner quotes NOT escaped!\n")
+                    .append("RIGHT: {\"command\": \"powershell -Command \\\"Get-Date\\\"\"}  <- inner quotes escaped as \\\"\n\n")
+                    .append("Rules:\n")
+                    .append("1. The command value must be a single JSON string.\n")
+                    .append("2. Every double quote INSIDE the command must be escaped as backslash-backslash-quote (\\\\\\\").\n")
+                    .append("3. Prefer single quotes in PowerShell commands to avoid escaping: 'Get-Date' instead of \\\"Get-Date\\\".\n")
+                    .append("4. Example: {\"command\":\"powershell -NoProfile -Command \\\"Get-Date -Format 'yyyy-MM-dd'\\\"\"}\n");
         }
 
         if (rawArguments != null && !rawArguments.isBlank()) {
-            builder.append("Previous raw arguments: ").append(previewArguments(rawArguments)).append(". ");
+            builder.append("\nYour previous (invalid) arguments: ").append(previewArguments(rawArguments));
         }
 
         if (error != null && error.getMessage() != null && !error.getMessage().isBlank()) {
-            builder.append("Parser error: ").append(error.getMessage());
+            builder.append("\nParser error: ").append(error.getMessage());
         }
 
         return builder.toString().trim();

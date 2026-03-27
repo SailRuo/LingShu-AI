@@ -91,19 +91,24 @@ public class LocalTools {
 
     @Tool("""
             Executes a Windows terminal command and returns the output.
-            This tool is for Windows commands only.
-            Use commands compatible with cmd.exe on Windows, such as 'dir', 'tasklist', 'systeminfo', 'echo %USERNAME%'.
-            Do not use Linux or macOS commands like 'ls', 'free', 'ps aux', or 'whoami' unless they are explicitly available in the current environment.
-            The tool has exactly one argument: command.
-            Tool arguments must always be valid JSON in the shape {"command":"..."}.
-            When the Windows command itself contains double quotes, escape them inside JSON as \\\".
-            Prefer simpler commands that avoid nested quoting when possible.
-            For launching a Windows app, prefer PowerShell format like:
-            {"command":"powershell -NoProfile -Command \"Start-Process -FilePath 'C:\\Program Files\\App\\app.exe'\""}
-            Avoid malformed JSON such as {"command": "start "" "C:\\Program Files\\App\\app.exe""}.
+            
+            CRITICAL JSON FORMATTING RULES:
+            - The tool accepts exactly ONE argument: {"command":"..."}
+            - The command value is a JSON STRING - all inner double quotes MUST be escaped!
+            
+            WRONG (will fail):
+              {"command": "powershell -Command "Get-Date""}  <- unescaped inner quotes!
+            
+            RIGHT:
+              {"command": "powershell -Command \"Get-Date\""}  <- escaped as \\"
+              {"command": "powershell -Command 'Get-Date'"}    <- use single quotes instead
+            
+            BEST PRACTICE: Use single quotes inside PowerShell commands to avoid escaping:
+              {"command": "powershell -NoProfile -Command \"Get-Date -Format 'yyyy-MM-dd HH:mm:ss'\""}
+            
+            Windows path backslashes must be doubled: C:\\\\Program Files\\\\App
             Output is capped to keep context manageable.
             Never repeat the same command over and over.
-            If the command output already answers the question, stop tool usage and provide the final answer.
             """)
     public String executeCommand(String command) {
         String osName = System.getProperty("os.name");
