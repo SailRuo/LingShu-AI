@@ -178,6 +178,10 @@ public class ProactiveServiceImpl implements ProactiveService {
         String systemPrompt = promptBuilderService.buildMergedSystemPrompt(agent, relationshipPrompt, memoryContext);
         String userPrompt = promptBuilderService.buildGreetingUserPrompt(relationshipPrompt, memoryContext, timeOfDay, agentName);
 
+        systemLogService.debug(String.format("SystemPrompt: %s", systemPrompt), "PROACTIVE");
+        systemLogService.debug(String.format("UserPrompt: %s", userPrompt), "PROACTIVE");
+        systemLogService.debug(String.format("MemoryContext: %s", memoryContext), "PROACTIVE");
+
         return executeStreamingChat(systemPrompt, userPrompt);
     }
 

@@ -8,12 +8,16 @@ import {
 } from 'naive-ui'
 import { 
   RefreshCw, Settings, Cpu, Globe, Activity, Zap, Plus, 
-  Trash2, Edit, Star, Users, Bell, Send, Brain, Wrench
+  Trash2, Edit, Star, Users, Bell, Send, Brain, Wrench, Palette
 } from 'lucide-vue-next'
 import McpSettings from '@/components/McpSettings.vue'
+import ThemeModal from '@/components/common/ThemeModal.vue'
+import { useThemeStore } from '@/stores/themeStore'
 
 const message = useMessage()
-const activeTab = ref('model')
+const activeTab = ref('basic')
+const showThemeModal = ref(false)
+const themeStore = useThemeStore()
 
 const settings = ref({
   source: '',
@@ -395,6 +399,34 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
     </header>
 
     <n-tabs v-model:value="activeTab" type="line" animated class="settings-tabs">
+      <n-tab-pane name="basic" tab="基础设置">
+        <div class="tab-content">
+          <section class="settings-section">
+            <div class="section-header">
+              <n-icon :component="Palette" />
+              <h2>主题外观</h2>
+            </div>
+            
+            <n-card class="glass-card">
+              <div class="theme-selector">
+                <div class="theme-preview-card" @click="showThemeModal = true">
+                  <div class="preview-content">
+                    <div class="preview-info">
+                      <div class="current-theme-label">当前主题</div>
+                      <div class="current-theme-name">{{ themeStore.current.name }}</div>
+                    </div>
+                    <n-button type="primary" size="medium">
+                      <template #icon><n-icon :component="Palette" /></template>
+                      更换主题
+                    </n-button>
+                  </div>
+                </div>
+              </div>
+            </n-card>
+          </section>
+        </div>
+      </n-tab-pane>
+
       <n-tab-pane name="model" tab="模型配置">
         <div class="tab-content">
           <n-tabs type="segment" animated>
