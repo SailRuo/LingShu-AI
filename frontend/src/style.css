@@ -18,7 +18,10 @@ body {
   color: var(--color-text);
   overflow: hidden;
   line-height: 1.5;
-  transition: background-color 0.5s ease, color 0.5s ease;
+  /* 主题切换动画 - 平滑过渡 */
+  transition: 
+    background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+    color 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -39,14 +42,17 @@ body {
   filter: blur(120px);
   opacity: 0.25;
   pointer-events: none;
-  transition: background 1s ease;
+  /* Mesh 渐变动画 - 根据主题有不同的速度 */
+  transition: background 0.6s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .mesh-1 { 
   background: var(--color-bg-mesh-1); 
   top: -30%; 
   left: -20%; 
+  /* 动画速度根据主题类型调整 */
   animation: float 50s infinite ease-in-out;
+  animation-duration: var(--mesh-animation-speed, 50s);
 }
 
 .mesh-2 { 
@@ -54,6 +60,7 @@ body {
   bottom: -30%; 
   right: -20%; 
   animation: float 60s infinite reverse ease-in-out;
+  animation-duration: var(--mesh-animation-speed, 60s);
 }
 
 .mesh-3 { 
@@ -61,6 +68,21 @@ body {
   top: 20%; 
   right: -30%; 
   animation: float 45s infinite ease-in-out;
+  animation-duration: var(--mesh-animation-speed, 45s);
+}
+
+/* 主题专属 Mesh 动画速度 */
+.dark.cyberPurple {
+  --mesh-animation-speed: 35s; /* 赛博紫 - 快速流动 */
+}
+.dark.deepTechFuturistic {
+  --mesh-animation-speed: 45s; /* 科技感 - 中速 */
+}
+.dark.midnightBlue {
+  --mesh-animation-speed: 55s; /* 午夜蓝 - 缓慢深邃 */
+}
+.light.polarLight {
+  --mesh-animation-speed: 60s; /* 极地白 - 缓慢宁静 */
 }
 
 @keyframes float {
@@ -69,11 +91,29 @@ body {
   66% { transform: translate(-2%, 5%) scale(0.98); }
 }
 
-/* Glass Effect */
+/* Glass Effect - 分层毛玻璃效果 */
 .glass-morphism {
   background: var(--color-glass-bg) !important;
-  backdrop-filter: blur(24px) !important;
-  -webkit-backdrop-filter: blur(24px) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+}
+
+/* 轻度毛玻璃 - 用于卡片、按钮 */
+.glass-light {
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+}
+
+/* 中度毛玻璃 - 用于面板、侧边栏 */
+.glass-medium {
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+}
+
+/* 重度毛玻璃 - 用于模态框、悬浮层 */
+.glass-heavy {
+  backdrop-filter: blur(32px) !important;
+  -webkit-backdrop-filter: blur(32px) !important;
 }
 
 .glass-panel {

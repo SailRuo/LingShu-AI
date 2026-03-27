@@ -280,7 +280,7 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
 
 .message-content :deep(strong) {
   font-weight: 600;
-  color: var(--color-text);
+  color: var(--color-primary);
 }
 
 .message-content :deep(em) {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { NModal } from 'naive-ui'
 import { useThemeStore } from '@/stores/themeStore'
-import { Sun, Sparkles, Cpu, Check, Zap } from 'lucide-vue-next'
+import { Sun, Sparkles, Cpu, Check, Zap, Moon } from 'lucide-vue-next'
 import { computed, ref, onMounted } from 'vue'
 import type { ThemeKey } from '@/types'
 
@@ -53,6 +53,19 @@ function getThemePreviewColors(key: ThemeKey) {
       bubbleUser: '#a855f7', // 用户气泡 - 实色紫
       bubbleUserText: '#ffffff'
     }
+  } else if (key === 'midnightBlue') {
+    return {
+      bg: '#0f172a', // 深蓝背景
+      surface: '#1e293b', // 深蓝表面
+      primary: '#38bdf8', // 天蓝色
+      primaryLight: '#7dd3fc', // 浅蓝色
+      text: '#f0f9ff',
+      outline: 'rgba(56, 189, 248, 0.4)',
+      glow: 'rgba(56, 189, 248, 0.5)',
+      bubbleAi: 'rgba(56, 189, 248, 0.2)', // AI 气泡
+      bubbleUser: '#0284c7', // 用户气泡 - 实色蓝
+      bubbleUserText: '#ffffff'
+    }
   } else {
     return {
       bg: '#022c22', // 深绿背景
@@ -98,6 +111,13 @@ const themes = computed<ThemeOption[]>(() => [
     icon: Cpu,
     isDark: true,
     description: '深邃科技 · 未来主义'
+  },
+  {
+    key: 'midnightBlue',
+    label: '午夜蓝',
+    icon: Moon,
+    isDark: true,
+    description: '深邃宁静 · 优雅蓝色'
   }
 ])
 

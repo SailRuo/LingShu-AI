@@ -1,6 +1,6 @@
 import type { GlobalThemeOverrides } from 'naive-ui'
 import type { ThemeConfig } from '@/types'
-import { Sun, Sparkles, Cpu } from 'lucide-vue-next'
+import { Sun, Sparkles, Cpu, Moon } from 'lucide-vue-next'
 
 export const polarLight: ThemeConfig = {
   key: 'polarLight',
@@ -27,16 +27,18 @@ export const polarLight: ThemeConfig = {
     '--color-bg-mesh-2': '#cbd5e1',
     '--color-bg-mesh-3': '#99f6e4',
     '--color-bg-mesh-4': '#f1f5f9',
-    '--color-bubble-ai-bg': 'rgba(13, 148, 136, 0.1)',
-    '--color-bubble-ai-border': 'rgba(13, 148, 136, 0.2)',
-    '--color-bubble-user-bg': 'rgba(13, 148, 136, 0.15)',
-    '--color-bubble-user-border': 'rgba(13, 148, 136, 0.25)',
+    // 气泡组件 - 增强视觉层次（调亮用户气泡）
+    '--color-bubble-ai-bg': 'rgba(13, 148, 136, 0.08)', // 极淡
+    '--color-bubble-ai-border': 'rgba(13, 148, 136, 0.18)', // 细边
+    '--color-bubble-user-bg': '#ffffffff', // 极浅蓝白色
+    '--color-bubble-user-border': '#e0f2fe', // 浅蓝边
     '--color-pulse-core': 'rgba(13, 148, 136, 0.2)',
     '--color-pulse-ring': '#0d9488',
     '--color-node-user': '#0d9488',
     '--color-node-fact': '#c2410c',
     '--color-edge': 'rgba(13, 148, 136, 0.4)',
-    '--color-glow': 'rgba(13, 148, 136, 0.3)',
+    // 发光效果 - 极简主义（弱光晕）
+    '--color-glow': 'rgba(13, 148, 136, 0.35)', // 极地白 - 弱光晕
   }
 }
 
@@ -46,54 +48,54 @@ export const cyberPurple: ThemeConfig = {
   icon: Sparkles,
   isDark: true,
   cssVars: {
-    // 核心颜色 - 提高对比度和霓虹感
-    '--color-background': '#0f0a1e', // 更深的蓝紫黑背景
-    '--color-surface': 'rgba(35, 25, 65, 0.85)', // 加深表面色
-    '--color-surface-elevated': 'rgba(55, 40, 95, 0.92)', //  elevated 层更亮
-    '--color-primary': '#f0abfc', // 霓虹紫 - 更高亮度
-    '--color-primary-dim': 'rgba(240, 171, 252, 0.2)', // 增强发光底衬
-    '--color-accent': '#22d3ee', // 保持青蓝色作为互补色
+    // 核心颜色 - 深色背景 + 亮主色
+    '--color-background': '#0f0a1f', // 深色背景 - 降低亮度
+    '--color-surface': 'rgba(30, 25, 65, 0.9)', // 深色表面 - 降低亮度
+    '--color-surface-elevated': 'rgba(50, 40, 100, 0.92)', // 层次稍亮
+    '--color-primary': '#c084fc', // 亮紫色 - 保持醒目
+    '--color-primary-dim': 'rgba(192, 132, 252, 0.18)', // 适度光晕
+    '--color-accent': '#a855f7', // 紫色强调
     
-    // 文字系统 - 优化可读性
-    '--color-text': '#ffffff',
-    '--color-text-dim': '#a5a5b5', // 降低次要文字明度，增强层次
-    '--color-text-inverse': '#0f0a1e',
+    // 文字系统
+    '--color-text': '#f5f0ff', // 浅紫白
+    '--color-text-dim': '#c4b5fd', // 浅紫次要文字
+    '--color-text-inverse': '#15123a',
     
-    // 边框和轮廓 - 增强可见度
-    '--color-outline': 'rgba(240, 171, 252, 0.35)', // 更高不透明度
+    // 边框和轮廓
+    '--color-outline': 'rgba(192, 132, 252, 0.35)', // 适度可见
     
-    // 状态色 - 保持高可见度
+    // 状态色
     '--color-success': '#4ade80',
     '--color-warning': '#fbbf24',
     '--color-error': '#f87171',
     
-    // 玻璃态效果 - 增强质感
-    '--color-glass-bg': 'rgba(25, 15, 55, 0.88)', // 更深的玻璃背景
-    '--color-glass-border': 'rgba(240, 171, 252, 0.3)', // 更强的边框
+    // 玻璃态效果
+    '--color-glass-bg': 'rgba(30, 25, 65, 0.85)', // 深色玻璃
+    '--color-glass-border': 'rgba(192, 132, 252, 0.28)',
     
-    // Mesh 渐变背景 - 强化紫色调
-    '--color-bg-mesh-1': '#0f0a1e',
+    // Mesh 渐变背景 - 深色基调
+    '--color-bg-mesh-1': '#0f0a1f',
     '--color-bg-mesh-2': '#5b21b6', // 深紫色
     '--color-bg-mesh-3': '#3b0764', // 暗紫色
-    '--color-bg-mesh-4': '#0f0a1e',
+    '--color-bg-mesh-4': '#0f0a1f',
     
-    // 气泡组件 - 增强对比
-    '--color-bubble-ai-bg': 'rgba(240, 171, 252, 0.15)', // 更高的不透明度
-    '--color-bubble-ai-border': 'rgba(240, 171, 252, 0.45)',
-    '--color-bubble-user-bg': 'rgba(240, 171, 252, 0.25)',
-    '--color-bubble-user-border': 'rgba(240, 171, 252, 0.55)',
+    // 气泡组件 - 增强视觉层次（调亮用户气泡）
+    '--color-bubble-ai-bg': 'rgba(192, 132, 252, 0.12)', // 更透明
+    '--color-bubble-ai-border': 'rgba(192, 132, 252, 0.28)', // 更细
+    '--color-bubble-user-bg': '#c084fc', // 调亮的紫色
+    '--color-bubble-user-border': '#a855f7', // 深边
     
-    // 脉冲效果 - 更强光晕
-    '--color-pulse-core': 'rgba(240, 171, 252, 0.45)',
-    '--color-pulse-ring': '#f0abfc',
+    // 脉冲效果
+    '--color-pulse-core': 'rgba(192, 132, 252, 0.45)',
+    '--color-pulse-ring': '#c084fc',
     
-    // 知识图谱节点 - 高对比度
-    '--color-node-user': '#f0abfc',
-    '--color-node-fact': '#22d3ee',
-    '--color-edge': 'rgba(240, 171, 252, 0.65)', // 更强的边线
+    // 知识图谱节点
+    '--color-node-user': '#c084fc',
+    '--color-node-fact': '#a855f7',
+    '--color-edge': 'rgba(192, 132, 252, 0.55)',
     
-    // 发光效果 - 霓虹感
-    '--color-glow': 'rgba(240, 171, 252, 0.6)', // 增强光晕
+    // 发光效果 - 霓虹感（强光晕）
+    '--color-glow': 'rgba(192, 132, 252, 0.65)', // 赛博紫 - 强光晕
   }
 }
 
@@ -103,42 +105,119 @@ export const deepTechFuturistic: ThemeConfig = {
   icon: Cpu,
   isDark: true,
   cssVars: {
-    '--color-background': '#0a0e1a',
-    '--color-surface': 'rgba(15, 25, 40, 0.85)',
-    '--color-surface-elevated': 'rgba(20, 35, 55, 0.9)',
-    '--color-primary': '#00ff88',
-    '--color-primary-dim': 'rgba(0, 255, 136, 0.12)',
-    '--color-accent': '#00d4ff',
-    '--color-text': '#f0f0f0',
-    '--color-text-dim': '#999999',
-    '--color-text-inverse': '#0a0e1a',
-    '--color-outline': 'rgba(0, 255, 136, 0.25)',
-    '--color-success': '#00ff88',
-    '--color-warning': '#ffcc00',
-    '--color-error': '#ff3366',
-    '--color-glass-bg': 'rgba(10, 20, 30, 0.9)',
-    '--color-glass-border': 'rgba(0, 255, 136, 0.2)',
-    '--color-bg-mesh-1': '#0a0e1a',
-    '--color-bg-mesh-2': '#0f1a2e',
-    '--color-bg-mesh-3': '#001a0d',
-    '--color-bg-mesh-4': '#0a0e1a',
-    '--color-bubble-ai-bg': 'rgba(0, 255, 136, 0.06)',
-    '--color-bubble-ai-border': 'rgba(0, 255, 136, 0.18)',
-    '--color-bubble-user-bg': 'rgba(0, 255, 136, 0.1)',
-    '--color-bubble-user-border': 'rgba(0, 255, 136, 0.25)',
-    '--color-pulse-core': 'rgba(0, 255, 136, 0.3)',
-    '--color-pulse-ring': '#00ff88',
-    '--color-node-user': '#00ff88',
-    '--color-node-fact': '#00d4ff',
-    '--color-edge': 'rgba(0, 255, 136, 0.5)',
-    '--color-glow': 'rgba(0, 255, 136, 0.45)',
+    // 核心颜色 - 深色背景 + 亮主色
+    '--color-background': '#031f1a', // 深绿背景 - 降低亮度
+    '--color-surface': 'rgba(5, 45, 35, 0.9)', // 深色表面 - 降低亮度
+    '--color-surface-elevated': 'rgba(10, 70, 55, 0.92)', // 层次稍亮
+    '--color-primary': '#34d399', // 亮绿色 - 保持醒目
+    '--color-primary-dim': 'rgba(52, 211, 153, 0.15)', // 适度光晕
+    '--color-accent': '#10b981', // 绿色强调
+    
+    // 文字系统
+    '--color-text': '#ecfdf5', // 浅绿白
+    '--color-text-dim': '#6ee7b7', // 浅绿次要文字
+    '--color-text-inverse': '#053830',
+    
+    // 边框和轮廓
+    '--color-outline': 'rgba(52, 211, 153, 0.35)', // 适度可见
+    
+    // 状态色
+    '--color-success': '#34d399',
+    '--color-warning': '#fbbf24',
+    '--color-error': '#f87171',
+    
+    // 玻璃态效果
+    '--color-glass-bg': 'rgba(5, 45, 35, 0.85)', // 深绿玻璃
+    '--color-glass-border': 'rgba(52, 211, 153, 0.28)',
+    
+    // Mesh 渐变背景 - 深色基调
+    '--color-bg-mesh-1': '#031f1a',
+    '--color-bg-mesh-2': '#0369a1', // 深蓝绿
+    '--color-bg-mesh-3': '#024838', // 深绿色
+    '--color-bg-mesh-4': '#031f1a',
+    
+    // 气泡组件 - 增强视觉层次（调亮用户气泡）
+    '--color-bubble-ai-bg': 'rgba(52, 211, 153, 0.12)', // 更透明
+    '--color-bubble-ai-border': 'rgba(52, 211, 153, 0.28)', // 更细
+    '--color-bubble-user-bg': '#4ade80', // 调亮的绿色
+    '--color-bubble-user-border': '#22c55e', // 深边
+    
+    // 脉冲效果
+    '--color-pulse-core': 'rgba(52, 211, 153, 0.45)',
+    '--color-pulse-ring': '#34d399',
+    
+    // 知识图谱节点
+    '--color-node-user': '#34d399',
+    '--color-node-fact': '#10b981',
+    '--color-edge': 'rgba(52, 211, 153, 0.55)',
+    
+    // 发光效果 - 科技光效（中光晕）
+    '--color-glow': 'rgba(52, 211, 153, 0.55)', // 科技感 - 中光晕
+  }
+}
+
+export const midnightBlue: ThemeConfig = {
+  key: 'midnightBlue',
+  label: '午夜蓝',
+  icon: Moon,
+  isDark: true,
+  cssVars: {
+    // 核心颜色 - 深蓝黑背景 + 天蓝色主色
+    '--color-background': '#0a0f1c', // 深蓝黑
+    '--color-surface': 'rgba(15, 30, 60, 0.9)', // 深蓝表面
+    '--color-surface-elevated': 'rgba(20, 50, 90, 0.92)', // 层次稍亮
+    '--color-primary': '#38bdf8', // 天蓝色
+    '--color-primary-dim': 'rgba(56, 189, 248, 0.15)', // 适度光晕
+    '--color-accent': '#818cf8', // 靛蓝色
+    
+    // 文字系统
+    '--color-text': '#f0f9ff', // 浅蓝白
+    '--color-text-dim': '#7dd3fc', // 浅蓝次要文字
+    '--color-text-inverse': '#0a0f1c',
+    
+    // 边框和轮廓
+    '--color-outline': 'rgba(56, 189, 248, 0.3)', // 适度可见
+    
+    // 状态色
+    '--color-success': '#4ade80',
+    '--color-warning': '#fbbf24',
+    '--color-error': '#f87171',
+    
+    // 玻璃态效果
+    '--color-glass-bg': 'rgba(15, 30, 60, 0.85)', // 深蓝玻璃
+    '--color-glass-border': 'rgba(56, 189, 248, 0.25)',
+    
+    // Mesh 渐变背景 - 深蓝基调
+    '--color-bg-mesh-1': '#0a0f1c',
+    '--color-bg-mesh-2': '#1e3a5f', // 深蓝色
+    '--color-bg-mesh-3': '#0f2744', // 暗蓝色
+    '--color-bg-mesh-4': '#0a0f1c',
+    
+    // 气泡组件 - 清晰层次（调亮用户气泡）
+    '--color-bubble-ai-bg': 'rgba(56, 189, 248, 0.12)', // 更透明
+    '--color-bubble-ai-border': 'rgba(56, 189, 248, 0.25)', // 细边
+    '--color-bubble-user-bg': '#38bdf8', // 调亮的天蓝色
+    '--color-bubble-user-border': '#0ea5e9', // 深边
+    
+    // 脉冲效果
+    '--color-pulse-core': 'rgba(56, 189, 248, 0.4)',
+    '--color-pulse-ring': '#38bdf8',
+    
+    // 知识图谱节点
+    '--color-node-user': '#38bdf8',
+    '--color-node-fact': '#818cf8',
+    '--color-edge': 'rgba(56, 189, 248, 0.5)',
+    
+    // 发光效果 - 柔光晕
+    '--color-glow': 'rgba(56, 189, 248, 0.45)', // 午夜蓝 - 柔光晕
   }
 }
 
 export const THEMES: Record<string, ThemeConfig> = { 
   polarLight, 
   cyberPurple,
-  deepTechFuturistic
+  deepTechFuturistic,
+  midnightBlue
 }
 
 export function buildNaiveOverrides(theme: ThemeConfig): GlobalThemeOverrides {

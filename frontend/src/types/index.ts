@@ -36,7 +36,7 @@ export interface ChatMessage {
   isToolStepsExpanded?: boolean;
 }
 
-export type ThemeKey = "polarLight" | "cyberPurple" | "deepTechFuturistic";
+export type ThemeKey = "polarLight" | "cyberPurple" | "deepTechFuturistic" | "midnightBlue";
 
 export interface ThemeCSSVars {
   "--color-background": string;
