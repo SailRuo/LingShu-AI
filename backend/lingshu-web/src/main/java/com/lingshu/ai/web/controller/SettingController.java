@@ -40,6 +40,25 @@ public class SettingController {
     }
 
     /**
+     * 获取 ASR 配置
+     */
+    @GetMapping("/asr")
+    public Map<String, Object> getAsrSetting() {
+        SystemSetting setting = settingService.getSetting();
+        return setting.getAsrConfig();
+    }
+
+    /**
+     * 保存 ASR 配置
+     */
+    @PostMapping("/asr")
+    public void saveAsrSetting(@RequestBody Map<String, Object> asrConfig) {
+        SystemSetting setting = settingService.getSetting();
+        setting.setAsrConfig(asrConfig);
+        settingService.saveSetting(setting);
+    }
+
+    /**
      * 获取当前系统配置信息（模型、API Key 等）。
      * 为了保持向后兼容，将 JSON 配置扁平化返回
      */
@@ -80,27 +99,23 @@ public class SettingController {
      */
     @PostMapping
     public void saveSetting(@RequestBody SystemSettingDTO dto) {
-        SystemSetting setting = new SystemSetting();
-        setting.setId("DEFAULT");
+        SystemSetting setting = settingService.getSetting();
         
-        // 构建 LLM 配置
-        Map<String, Object> llmConfig = new HashMap<>();
+        Map<String, Object> llmConfig = setting.getLlmConfig();
         llmConfig.put("source", dto.getSource() != null ? dto.getSource() : "ollama");
         llmConfig.put("model", dto.getChatModel() != null ? dto.getChatModel() : "");
         llmConfig.put("baseUrl", dto.getBaseUrl() != null ? dto.getBaseUrl() : "");
         llmConfig.put("apiKey", dto.getApiKey() != null ? dto.getApiKey() : "");
         setting.setLlmConfig(llmConfig);
         
-        // 构建 Embedding 配置
-        Map<String, Object> embeddingConfig = new HashMap<>();
+        Map<String, Object> embeddingConfig = setting.getEmbeddingConfig();
         embeddingConfig.put("source", dto.getEmbedSource() != null ? dto.getEmbedSource() : "ollama");
         embeddingConfig.put("model", dto.getEmbedModel() != null ? dto.getEmbedModel() : "");
         embeddingConfig.put("baseUrl", dto.getEmbedBaseUrl() != null ? dto.getEmbedBaseUrl() : "http://localhost:11434");
         embeddingConfig.put("apiKey", dto.getEmbedApiKey() != null ? dto.getEmbedApiKey() : "");
         setting.setEmbeddingConfig(embeddingConfig);
         
-        // 构建主动问候配置
-        Map<String, Object> proactiveConfig = new HashMap<>();
+        Map<String, Object> proactiveConfig = setting.getProactiveConfig();
         proactiveConfig.put("enabled", dto.getProactiveEnabled() != null ? dto.getProactiveEnabled() : true);
         proactiveConfig.put("inactiveThresholdMinutes", dto.getInactiveThresholdMinutes() != null ? dto.getInactiveThresholdMinutes() : 5);
         proactiveConfig.put("greetingCooldownSeconds", dto.getGreetingCooldownSeconds() != null ? dto.getGreetingCooldownSeconds() : 300);

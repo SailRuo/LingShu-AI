@@ -109,6 +109,21 @@ public class SystemSetting {
         return createDefaultProactiveConfig();
     }
 
+    /**
+     * 获取 ASR 配置
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getAsrConfig() {
+        if (settings == null) {
+            return createDefaultAsrConfig();
+        }
+        Object asr = settings.get("asr");
+        if (asr instanceof Map) {
+            return (Map<String, Object>) asr;
+        }
+        return createDefaultAsrConfig();
+    }
+
     // ========== 便捷访问方法 ==========
     
     /**
@@ -238,6 +253,16 @@ public class SystemSetting {
     }
 
     /**
+     * 更新 ASR 配置
+     */
+    public void setAsrConfig(Map<String, Object> config) {
+        if (this.settings == null) {
+            this.settings = new java.util.HashMap<>();
+        }
+        this.settings.put("asr", config);
+    }
+
+    /**
      * 创建默认 LLM 配置
      */
     public Map<String, Object> createDefaultLlmConfig() {
@@ -270,6 +295,16 @@ public class SystemSetting {
         config.put("inactiveThresholdMinutes", 5);
         config.put("greetingCooldownSeconds", 300);
         config.put("inactiveCheckIntervalMs", 3600000L);
+        return config;
+    }
+
+    /**
+     * 创建默认 ASR 配置
+     */
+    public Map<String, Object> createDefaultAsrConfig() {
+        Map<String, Object> config = new java.util.HashMap<>();
+        config.put("enabled", false);
+        config.put("url", "http://localhost:50001");
         return config;
     }
 }

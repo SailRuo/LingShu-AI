@@ -2,7 +2,7 @@
 import { NModal } from 'naive-ui'
 import { useThemeStore } from '@/stores/themeStore'
 import { Sun, Sparkles, Cpu, Check, Zap, Moon } from 'lucide-vue-next'
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref } from 'vue'
 import type { ThemeKey } from '@/types'
 
 const props = defineProps<{
@@ -23,9 +23,6 @@ const hoveredTheme = ref<string | null>(null)
 
 // 从实际主题 CSS 变量动态获取颜色
 function getThemePreviewColors(key: ThemeKey) {
-  const root = document.documentElement
-  const style = getComputedStyle(root)
-  
   // 根据主题类型返回不同的颜色组合 - 使用实色而非透明度
   if (key === 'polarLight') {
     return {

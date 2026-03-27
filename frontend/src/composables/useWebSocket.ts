@@ -109,7 +109,6 @@ export function useWebSocket() {
   }
 
   function handleMessage(message: WebSocketMessage) {
-    console.log('[WebSocket] 收到消息:', message.type, message)
 
     switch (message.type) {
       case 'connected':

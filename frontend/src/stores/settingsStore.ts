@@ -7,11 +7,23 @@ export interface SystemSettings {
   apiKey: string
 }
 
+export interface AsrSettings {
+  enabled: boolean
+  url: string
+  sensitivity: number
+}
+
 const settings = ref<SystemSettings>({
   source: 'openai',
   model: '',
   baseUrl: '',
   apiKey: ''
+})
+
+const asrSettings = ref<AsrSettings>({
+  enabled: false,
+  url: 'http://localhost:50001',
+  sensitivity: 0.5
 })
 
 const isLoaded = ref(false)
@@ -34,6 +46,22 @@ async function fetchSettings() {
   }
 }
 
+async function fetchAsrSettings() {
+  try {
+    const res = await fetch('/api/settings/asr')
+    if (res.ok) {
+      const data = await res.json()
+      asrSettings.value = {
+        enabled: data.enabled ?? false,
+        url: data.url ?? 'http://localhost:50001',
+        sensitivity: data.sensitivity ?? 0.5
+      }
+    }
+  } catch (err) {
+    console.error('Failed to fetch ASR settings', err)
+  }
+}
+
 async function saveSettings() {
   try {
     await fetch('/api/settings', {
@@ -51,11 +79,26 @@ async function saveSettings() {
   }
 }
 
+async function saveAsrSettings() {
+  try {
+    await fetch('/api/settings/asr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(asrSettings.value)
+    })
+  } catch (err) {
+    console.error('Failed to save ASR settings', err)
+  }
+}
+
 export function useSettings() {
   return {
     settings,
+    asrSettings,
     isLoaded,
     fetchSettings,
-    saveSettings
+    fetchAsrSettings,
+    saveSettings,
+    saveAsrSettings
   }
 }

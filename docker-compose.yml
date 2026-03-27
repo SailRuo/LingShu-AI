@@ -1,4 +1,5 @@
 services:
+  # ==================== 数据库服务 ====================
   neo4j:
     image: neo4j:5.26.0
     container_name: lingshu-neo4j
@@ -8,8 +9,16 @@ services:
     environment:
       - NEO4J_AUTH=neo4j/lingshu123
     volumes:
-      - ./data/neo4j/data:/data
-      - ./data/neo4j/logs:/logs
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    networks:
+      - lingshu-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7474"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -21,7 +30,15 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=lingshu123
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - lingshu-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d lingshu"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
@@ -29,5 +46,79 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - ./data/redis:/data
+      - redis_data:/data
     command: redis-server --appendonly yes
+    networks:
+      - lingshu-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # ==================== 应用服务 ====================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Spring 配置
+      - SPRING_PROFILES_ACTIVE=docker
+      - SERVER_PORT=8080
+      
+      # Neo4j 配置
+      - SPRING_NEO4J_URI=bolt://neo4j:7687
+      - SPRING_NEO4J_AUTHENTICATION_USERNAME=neo4j
+      - SPRING_NEO4J_AUTHENTICATION_PASSWORD=lingshu123
+      
+      # PostgreSQL 配置
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/lingshu
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=lingshu123
+      - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver
+      
+      # Redis 配置
+      - SPRING_DATA_REDIS_HOST=redis
+      - SPRING_DATA_REDIS_PORT=6379
+      
+      # JVM 参数
+      - JAVA_OPTS=-Xms512m -Xmx1g -XX:+UseG1GC
+    volumes:
+      - app_logs:/app/logs
+    networks:
+      - lingshu-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+# ==================== 网络配置 ====================
+networks:
+  lingshu-network:
+    driver: bridge
+
+# ==================== 数据卷配置 ====================
+volumes:
+  neo4j_data:
+    name: lingshu_neo4j_data
+  neo4j_logs:
+    name: lingshu_neo4j_logs
+  postgres_data:
+    name: lingshu_postgres_data
+  redis_data:
+    name: lingshu_redis_data
+  app_logs:
+    name: lingshu_app_logs

@@ -1,0 +1,58 @@
+# Spring Boot 应用配置 - Docker 环境
+spring:
+  application:
+    name: lingshu-ai
+  
+  # Neo4j 配置
+  neo4j:
+    uri: ${SPRING_NEO4J_URI:bolt://neo4j:7687}
+    authentication:
+      username: ${SPRING_NEO4J_AUTHENTICATION_USERNAME:neo4j}
+      password: ${SPRING_NEO4J_AUTHENTICATION_PASSWORD:lingshu123}
+  
+  # PostgreSQL 配置
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://postgres:5432/lingshu}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:lingshu123}
+    driver-class-name: org.postgresql.Driver
+  
+  # JPA 配置
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  
+  # Redis 配置
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+  
+  # Actuator 健康检查
+  management:
+    endpoints:
+      web:
+        exposure:
+          include: health,info
+
+# 服务器配置
+server:
+  port: ${SERVER_PORT:8080}
+
+# 日志配置
+logging:
+  level:
+    root: INFO
+    com.lingshu.ai: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: /app/logs/lingshu.log
+    max-size: 10MB
+    max-history: 30

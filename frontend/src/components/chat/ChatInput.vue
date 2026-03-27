@@ -1,10 +1,22 @@
 <script setup lang="ts">
-import { Send, Sparkles } from 'lucide-vue-next'
+import { Send, Sparkles, Mic, MicOff, Loader2 } from 'lucide-vue-next'
 
-defineProps<{ modelValue: string; loading: boolean; disabled?: boolean }>()
+defineProps<{ 
+  modelValue: string
+  loading: boolean
+  disabled?: boolean
+  asrEnabled?: boolean
+  asrListening?: boolean
+  asrRecording?: boolean
+  asrProcessing?: boolean
+}>()
+
 const emit = defineEmits<{
   (e: 'update:modelValue', v: string): void
   (e: 'send'): void
+  (e: 'toggleAsr'): void
+  (e: 'startPushToTalk'): void
+  (e: 'stopPushToTalk'): void
 }>()
 
 function handleInput(e: KeyboardEvent) {
@@ -12,6 +24,14 @@ function handleInput(e: KeyboardEvent) {
     e.preventDefault()
     emit('send')
   }
+}
+
+function handleMicMouseDown() {
+  emit('startPushToTalk')
+}
+
+function handleMicMouseUp() {
+  emit('stopPushToTalk')
 }
 </script>
 
@@ -31,13 +51,35 @@ function handleInput(e: KeyboardEvent) {
         @keydown="handleInput"
       />
       
-      <button 
-        class="send-btn"
-        :disabled="!modelValue.trim() || loading || disabled"
-        @click="emit('send')"
-      >
-        <Send :size="18" :class="{ spinning: loading }" />
-      </button>
+      <div class="action-buttons">
+        <button 
+          v-if="asrEnabled"
+          class="mic-btn"
+          :class="{ 
+            active: asrListening,
+            recording: asrRecording,
+            processing: asrProcessing
+          }"
+          :disabled="disabled || asrProcessing"
+          @click="emit('toggleAsr')"
+          @mousedown="handleMicMouseDown"
+          @mouseup="handleMicMouseUp"
+          @mouseleave="handleMicMouseUp"
+          :title="asrListening ? '点击关闭语音输入' : '点击开启语音输入'"
+        >
+          <Loader2 v-if="asrProcessing" :size="18" class="spin" />
+          <MicOff v-else-if="!asrListening" :size="18" />
+          <Mic v-else :size="18" :class="{ pulse: asrRecording }" />
+        </button>
+        
+        <button 
+          class="send-btn"
+          :disabled="!modelValue.trim() || loading || disabled"
+          @click="emit('send')"
+        >
+          <Send :size="18" :class="{ spinning: loading }" />
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -97,6 +139,53 @@ function handleInput(e: KeyboardEvent) {
   color: var(--color-text-dim);
 }
 
+.action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mic-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: 1px solid var(--color-outline);
+  border-radius: 10px;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mic-btn:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.mic-btn.active {
+  background: var(--color-primary-dim);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.mic-btn.recording {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-text-inverse);
+  box-shadow: 0 0 20px var(--color-primary-dim);
+}
+
+.mic-btn.processing {
+  opacity: 0.7;
+}
+
+.mic-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .send-btn {
   display: flex;
   align-items: center;
@@ -125,8 +214,21 @@ function handleInput(e: KeyboardEvent) {
   animation: spin 1s linear infinite;
 }
 
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+.pulse {
+  animation: pulse 1s ease-in-out infinite;
+}
+
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.2); }
 }
 </style>

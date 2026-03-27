@@ -4,7 +4,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lingshu.ai.core.service.ChatService;
 import com.lingshu.ai.core.service.ProactiveService;
 import com.lingshu.ai.core.service.AffinityService;
+import com.lingshu.ai.core.service.AsrService;
+import com.lingshu.ai.infrastructure.entity.SystemSetting;
 import com.lingshu.ai.infrastructure.entity.UserState;
+import com.lingshu.ai.core.service.SettingService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
@@ -25,16 +28,22 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     private final ChatService chatService;
     private final ProactiveService proactiveService;
     private final AffinityService affinityService;
+    private final AsrService asrService;
+    private final SettingService settingService;
     
     private static final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
     private static final Map<String, String> sessionUserMap = new ConcurrentHashMap<>();
 
     public ChatWebSocketHandler(ChatService chatService, 
                                 ProactiveService proactiveService,
-                                AffinityService affinityService) {
+                                AffinityService affinityService,
+                                AsrService asrService,
+                                SettingService settingService) {
         this.chatService = chatService;
         this.proactiveService = proactiveService;
         this.affinityService = affinityService;
+        this.asrService = asrService;
+        this.settingService = settingService;
     }
 
     @Override
@@ -63,6 +72,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 case "register" -> handleRegister(session, data);
                 case "chat" -> handleChat(session, data);
                 case "history" -> handleHistory(session, data);
+                case "audio" -> handleAudio(session, data);
                 case "ping" -> sendMessage(session, Map.of("type", "pong"));
                 default -> log.warn("未知消息类型: {}", type);
             }
@@ -203,6 +213,89 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             "size", size,
             "beforeId", beforeId
         ));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void handleAudio(WebSocketSession session, Map<String, Object> data) {
+        String base64Audio = (String) data.get("data");
+        String mimeType = (String) data.get("mimeType");
+        
+        if (base64Audio == null || base64Audio.isBlank()) {
+            try {
+                sendMessage(session, Map.of(
+                    "type", "asrError",
+                    "message", "音频数据为空"
+                ));
+            } catch (IOException e) {
+                log.error("发送错误消息失败", e);
+            }
+            return;
+        }
+
+        SystemSetting setting = settingService.getSetting();
+        Map<String, Object> asrConfig = setting.getAsrConfig();
+        
+        if (asrConfig == null) {
+            asrConfig = setting.createDefaultAsrConfig();
+        }
+        
+        Boolean enabled = (Boolean) asrConfig.get("enabled");
+        if (enabled == null || !enabled) {
+            try {
+                sendMessage(session, Map.of(
+                    "type", "asrError",
+                    "message", "ASR 服务未启用"
+                ));
+            } catch (IOException e) {
+                log.error("发送错误消息失败", e);
+            }
+            return;
+        }
+        
+        String asrUrl = (String) asrConfig.get("url");
+        if (asrUrl == null || asrUrl.isBlank()) {
+            try {
+                sendMessage(session, Map.of(
+                    "type", "asrError",
+                    "message", "ASR 服务地址未配置"
+                ));
+            } catch (IOException e) {
+                log.error("发送错误消息失败", e);
+            }
+            return;
+        }
+
+        log.info("处理音频识别请求: mimeType={}, dataLength={}", mimeType, base64Audio.length());
+        
+        asrService.recognizeFromBase64(asrUrl, base64Audio, mimeType)
+                .thenAccept(text -> {
+                    try {
+                        if (text != null && !text.isBlank()) {
+                            sendMessage(session, Map.of(
+                                "type", "asrResult",
+                                "text", text
+                            ));
+                        } else {
+                            sendMessage(session, Map.of(
+                                "type", "asrResult",
+                                "text", ""
+                            ));
+                        }
+                    } catch (IOException e) {
+                        log.error("发送识别结果失败", e);
+                    }
+                })
+                .exceptionally(ex -> {
+                    try {
+                        sendMessage(session, Map.of(
+                            "type", "asrError",
+                            "message", "语音识别失败: " + ex.getMessage()
+                        ));
+                    } catch (IOException e) {
+                        log.error("发送错误消息失败", e);
+                    }
+                    return null;
+                });
     }
 
     private void sendMessage(WebSocketSession session, Map<String, Object> message) throws IOException {

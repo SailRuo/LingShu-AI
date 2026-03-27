@@ -8,16 +8,7 @@ const props = defineProps<{
 
 const emit = defineEmits(['update:show'])
 
-const {
-  settings,
-  chatModelOptions,
-  loadingChatModels,
-  fetchSettings,
-  saveSettings,
-  fetchChatModels,
-  debouncedFetchChatModels,
-  handleSourceChange
-} = useSettings()
+const { settings, saveSettings } = useSettings()
 
 async function handleSave() {
   try {
@@ -35,7 +26,7 @@ async function handleSave() {
       <n-space vertical size="large">
         <n-divider title-placement="left">核心内核配置</n-divider>
         <div class="source-toggle">
-          <n-radio-group v-model:value="settings.source" size="medium" @update:value="handleSourceChange">
+          <n-radio-group v-model:value="settings.source" size="medium">
             <n-radio-button value="ollama">Ollama (本地)</n-radio-button>
             <n-radio-button value="openai">Custom / OpenAI</n-radio-button>
           </n-radio-group>
@@ -43,13 +34,13 @@ async function handleSave() {
 
         <n-form label-placement="top">
           <n-form-item label="默认模型 ID">
-            <n-select v-model:value="settings.model" :options="chatModelOptions" :loading="loadingChatModels" filterable tag />
+            <n-select v-model:value="settings.model" filterable tag />
           </n-form-item>
           <n-form-item label="服务基地址 (Base URL)">
-            <n-input v-model:value="settings.baseUrl" placeholder="http://localhost:11434" @update:value="debouncedFetchChatModels" />
+            <n-input v-model:value="settings.baseUrl" placeholder="http://localhost:11434" />
           </n-form-item>
           <n-form-item v-if="settings.source === 'openai'" label="API 密钥 (Access Key)">
-            <n-input v-model:value="settings.apiKey" type="password" show-password-on="click" placeholder="sk-..." @update:value="debouncedFetchChatModels" />
+            <n-input v-model:value="settings.apiKey" type="password" show-password-on="click" placeholder="sk-..." />
           </n-form-item>
         </n-form>
 

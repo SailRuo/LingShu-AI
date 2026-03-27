@@ -4,6 +4,7 @@ import { NScrollbar, useDialog, useMessage } from 'naive-ui'
 import { useChat } from '@/composables/useChat'
 import { useWebSocket, type WebSocketMessage } from '@/composables/useWebSocket'
 import { useSettings } from '@/stores/settingsStore'
+import { useAsr } from '@/composables/useAsr'
 import ChatMessageComponent from '@/components/chat/ChatMessage.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
 import { Sparkles, Loader2, Wifi, WifiOff, Trash2 } from 'lucide-vue-next'
@@ -32,12 +33,28 @@ const {
   connect,
   disconnect,
   sendChat,
+  send,
   on,
   off,
   startHeartbeat
 } = useWebSocket()
 
 const { settings, fetchSettings } = useSettings()
+
+const {
+  isListening: asrListening,
+  isRecording: asrRecording,
+  isProcessing: asrProcessing,
+  config: asrConfig,
+  loadConfig: loadAsrConfig,
+  startListening: startAsrListening,
+  stopListening: stopAsrListening,
+  startPushToTalk,
+  stopPushToTalk,
+  handleAsrResult,
+  handleAsrError,
+  setSendAudioCallback
+} = useAsr()
 
 const dialog = useDialog()
 const message = useMessage()
@@ -113,24 +130,24 @@ async function handleScroll(e: Event) {
   }
 }
 
-async function handleWebSocketMessage(message: WebSocketMessage) {
-  switch (message.type) {
+async function handleWebSocketMessage(msg: WebSocketMessage) {
+  switch (msg.type) {
     case 'chatStart':
       isTyping.value = true
       startAssistantMessage()
       break
       
     case 'chatChunk':
-      appendAssistantChunk(message.content || '')
+      appendAssistantChunk(msg.content || '')
       isTyping.value = false
       scrollToBottom()
       break
 
     case 'toolCallStart':
       upsertToolStep({
-        toolCallId: message.toolCallId,
-        toolName: message.toolName,
-        arguments: message.arguments,
+        toolCallId: msg.toolCallId,
+        toolName: msg.toolName,
+        arguments: msg.arguments,
         status: 'running',
         isError: false
       })
@@ -140,13 +157,13 @@ async function handleWebSocketMessage(message: WebSocketMessage) {
 
     case 'toolCallEnd':
       upsertToolStep({
-        toolCallId: message.toolCallId,
-        toolName: message.toolName,
-        arguments: message.arguments,
-        result: message.result,
-        output: message.result,
-        status: message.isError ? 'error' : 'success',
-        isError: !!message.isError
+        toolCallId: msg.toolCallId,
+        toolName: msg.toolName,
+        arguments: msg.arguments,
+        result: msg.result,
+        output: msg.result,
+        status: msg.isError ? 'error' : 'success',
+        isError: !!msg.isError
       })
       scrollToBottom()
       break
@@ -159,16 +176,16 @@ async function handleWebSocketMessage(message: WebSocketMessage) {
       
     case 'error':
       isTyping.value = false
-      failLatestAssistantMessage(message.message || '发生错误')
+      failLatestAssistantMessage(msg.message || '发生错误')
       await syncLatestAssistantMessage()
       scrollToBottom()
       break
       
     case 'proactiveGreeting':
-      if (message.content) {
+      if (msg.content) {
         messages.value.push({ 
           role: 'assistant', 
-          content: message.content, 
+          content: msg.content, 
           timestamp: Date.now() 
         })
         scrollToBottom()
@@ -176,18 +193,30 @@ async function handleWebSocketMessage(message: WebSocketMessage) {
       break
       
     case 'userState':
-      console.log('用户状态更新:', message)
+      console.log('用户状态更新:', msg)
+      break
+
+    case 'asrResult':
+      handleAsrResult(msg.text || '')
+      if (msg.text && msg.text.trim()) {
+        inputMessage.value = msg.text
+        handleSend()
+      }
+      break
+
+    case 'asrError':
+      handleAsrError(msg.message || '语音识别失败')
       break
   }
 }
 
 onMounted(async () => {
   await initChat()
-  // 仅在由于是新会话导致没有消息记录时，才主动触发欢迎语
   if (messages.value.length === 0) {
     initWelcome()
   }
   await fetchSettings()
+  await loadAsrConfig()
 
   connect()
 
@@ -195,19 +224,34 @@ onMounted(async () => {
 
   stopHeartbeat = startHeartbeat(30000)
 
-  // 延迟执行滚动，确保在 fade-slide 切换动画完成后进行
+  setSendAudioCallback((base64: string, mimeType: string) => {
+    send({ type: 'audio', data: base64, mimeType })
+  })
+
   setTimeout(() => {
     scrollToBottom('auto')
   }, 100)
 })
 
 onUnmounted(() => {
+  stopAsrListening()
   disconnect()
   off('*', handleWebSocketMessage)
   if (stopHeartbeat) {
     stopHeartbeat()
   }
 })
+
+async function handleToggleAsr() {
+  if (asrListening.value) {
+    await stopAsrListening()
+  } else {
+    const success = await startAsrListening()
+    if (!success) {
+      message.error('无法启动语音输入，请检查麦克风权限')
+    }
+  }
+}
 </script>
 
 <template>
@@ -302,7 +346,14 @@ onUnmounted(() => {
       v-model="inputMessage"
       :loading="isTyping"
       :disabled="!isConnected"
+      :asr-enabled="asrConfig.enabled"
+      :asr-listening="asrListening"
+      :asr-recording="asrRecording"
+      :asr-processing="asrProcessing"
       @send="handleSend"
+      @toggle-asr="handleToggleAsr"
+      @start-push-to-talk="startPushToTalk"
+      @stop-push-to-talk="stopPushToTalk"
     />
   </div>
 </template>

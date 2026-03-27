@@ -1,0 +1,33 @@
+# 前端静态资源目录（本地已打包到 JAR）
+backend/lingshu-web/src/main/resources/static/
+
+# Docker 相关
+Dockerfile
+.dockerignore
+
+# Maven target（需要本地构建后复制）
+target/
+!*/target/
+
+# 数据目录（生产环境使用命名卷）
+data/
+
+# 日志文件
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Git
+.git/
+.gitignore
+
+# 文档
+doc/
+
+# 其他配置文件
+*.md
+run_backend.bat
+fx-frontend/

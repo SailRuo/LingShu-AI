@@ -8,7 +8,7 @@ import {
 } from 'naive-ui'
 import { 
   RefreshCw, Settings, Cpu, Globe, Activity, Zap, Plus, 
-  Trash2, Edit, Star, Users, Bell, Send, Brain, Wrench, Palette
+  Trash2, Edit, Star, Users, Bell, Send, Brain, Wrench, Palette, Mic
 } from 'lucide-vue-next'
 import McpSettings from '@/components/McpSettings.vue'
 import ThemeModal from '@/components/common/ThemeModal.vue'
@@ -87,6 +87,13 @@ interface LocalTool {
 
 const localTools = ref<LocalTool[]>([])
 const loadingLocalTools = ref(false)
+
+const asrSettings = ref({
+  enabled: false,
+  url: 'http://localhost:50001',
+  sensitivity: 0.5
+})
+const savingAsr = ref(false)
 
 async function fetchChatModels(silent = false) {
   if (!settings.value.baseUrl || !settings.value.source) return
@@ -225,10 +232,41 @@ async function saveLocalTools() {
   }
 }
 
+async function fetchAsrSettings() {
+  try {
+    const res = await fetch('/api/settings/asr')
+    const data = await res.json()
+    asrSettings.value = {
+      enabled: data.enabled ?? false,
+      url: data.url ?? 'http://localhost:50001',
+      sensitivity: data.sensitivity ?? 0.5
+    }
+  } catch (err) {
+    console.error('Failed to fetch ASR settings', err)
+  }
+}
+
+async function saveAsrSettings() {
+  savingAsr.value = true
+  try {
+    await fetch('/api/settings/asr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(asrSettings.value)
+    })
+    message.success('ASR 配置已保存')
+  } catch (err) {
+    message.error('保存 ASR 配置失败')
+  } finally {
+    savingAsr.value = false
+  }
+}
+
 onMounted(() => {
   fetchSettings()
   fetchAgents()
   fetchLocalTools()
+  fetchAsrSettings()
 })
 
 const handleSave = async () => {
@@ -714,6 +752,60 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
               <n-button type="primary" size="large" @click="saveLocalTools" :loading="loadingLocalTools">
                 <template #icon><n-icon :component="Zap" /></template>
                 保存工具配置
+              </n-button>
+            </div>
+          </section>
+        </div>
+      </n-tab-pane>
+
+      <n-tab-pane name="asr" tab="语音识别">
+        <div class="tab-content">
+          <section class="settings-section">
+            <div class="section-header">
+              <n-icon :component="Mic" />
+              <h2>ASR 语音识别配置</h2>
+            </div>
+            
+            <n-card class="glass-card">
+              <div class="setting-item">
+                <div class="item-label">
+                  <span class="label-text">启用语音识别</span>
+                </div>
+                <n-switch v-model:value="asrSettings.enabled" />
+              </div>
+
+              <div class="setting-item mt-4">
+                <div class="item-label">
+                  <span class="label-text">ASR 服务地址</span>
+                </div>
+                <n-input 
+                  v-model:value="asrSettings.url" 
+                  placeholder="http://localhost:50001" 
+                  size="large"
+                  :disabled="!asrSettings.enabled"
+                />
+                <div class="item-hint">SenseVoice ASR 服务地址，默认端口 50001</div>
+              </div>
+
+              <div class="setting-item mt-4">
+                <div class="item-label">
+                  <span class="label-text">VAD 灵敏度</span>
+                </div>
+                <n-input-number 
+                  v-model:value="asrSettings.sensitivity" 
+                  :min="0" 
+                  :max="1" 
+                  :step="0.1"
+                  :disabled="!asrSettings.enabled"
+                />
+                <div class="item-hint">语音活动检测灵敏度，值越高越灵敏 (0-1)</div>
+              </div>
+            </n-card>
+
+            <div class="save-section">
+              <n-button type="primary" size="large" @click="saveAsrSettings" :loading="savingAsr">
+                <template #icon><n-icon :component="Zap" /></template>
+                保存 ASR 配置
               </n-button>
             </div>
           </section>

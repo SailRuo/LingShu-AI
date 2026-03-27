@@ -152,14 +152,40 @@ public class AiConfig {
 
     @Bean
     public dev.langchain4j.store.embedding.EmbeddingStore<dev.langchain4j.data.segment.TextSegment> embeddingStore() {
+        // 从 JDBC URL 解析数据库配置 (例如：jdbc:postgresql://postgres:5432/lingshu)
+        String dbHost = "localhost";
+        int dbPort = 5432;
+        String dbName = "lingshu";
+        
+        if (jdbcUrl != null && jdbcUrl.contains(":postgresql://")) {
+            try {
+                // 解析 JDBC URL: jdbc:postgresql://host:port/database
+                String[] parts = jdbcUrl.substring(jdbcUrl.indexOf(":postgresql://") + 14).split("/");
+                if (parts.length > 0) {
+                    String[] hostPort = parts[0].split(":");
+                    dbHost = hostPort[0];
+                    if (hostPort.length > 1) {
+                        dbPort = Integer.parseInt(hostPort[1]);
+                    }
+                }
+                if (parts.length > 1) {
+                    dbName = parts[1];
+                }
+            } catch (Exception e) {
+                log.warn("Failed to parse JDBC URL, using defaults: {}", e.getMessage());
+            }
+        }
+        
+        log.info("Initializing PgVectorEmbeddingStore with host={}, port={}, database={}", dbHost, dbPort, dbName);
+        
         return dev.langchain4j.store.embedding.pgvector.PgVectorEmbeddingStore.builder()
-                .host("localhost")
-                .port(5432)
-                .database("lingshu")
+                .host(dbHost)
+                .port(dbPort)
+                .database(dbName)
                 .user(username)
                 .password(password)
                 .table("memory_segments")
-                .dimension(4096) // 针对 Qwen2.5/Llama3 等模型通常返回 4096 维嵌入
+                .dimension(4096)
                 .build();
     }
 
