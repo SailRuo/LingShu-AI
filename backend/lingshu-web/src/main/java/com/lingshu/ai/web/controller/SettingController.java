@@ -20,6 +20,26 @@ public class SettingController {
     }
 
     /**
+     * 获取本地工具配置
+     */
+    @GetMapping("/local-tools")
+    public Map<String, Object> getLocalToolsSetting() {
+        SystemSetting setting = settingService.getLocalToolsSetting();
+        return setting.getSettings();
+    }
+
+    /**
+     * 保存本地工具配置
+     */
+    @PostMapping("/local-tools")
+    public void saveLocalToolsSetting(@RequestBody Map<String, Object> settings) {
+        SystemSetting setting = new SystemSetting();
+        setting.setId("local_tools");
+        setting.setSettings(settings);
+        settingService.saveLocalToolsSetting(setting);
+    }
+
+    /**
      * 获取当前系统配置信息（模型、API Key 等）。
      * 为了保持向后兼容，将 JSON 配置扁平化返回
      */

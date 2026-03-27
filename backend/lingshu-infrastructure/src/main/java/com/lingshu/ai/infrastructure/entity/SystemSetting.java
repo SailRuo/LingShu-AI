@@ -28,24 +28,21 @@ public class SystemSetting {
      * 所有配置项的 JSON 存储
      * 结构示例：
      * {
-     *   "llm": {
-     *     "source": "ollama",
-     *     "model": "qwen2.5:latest",
-     *     "baseUrl": "http://localhost:11434",
-     *     "apiKey": ""
-     *   },
-     *   "embedding": {
-     *     "source": "ollama",
-     *     "model": "nomic-embed-text",
-     *     "baseUrl": "http://localhost:11434",
-     *     "apiKey": ""
-     *   },
-     *   "proactive": {
-     *     "enabled": true,
-     *     "inactiveThresholdMinutes": 5,
-     *     "greetingCooldownSeconds": 300,
-     *     "inactiveCheckIntervalMs": 3600000
-     *   }
+     *   "llm": { ... },
+     *   "embedding": { ... },
+     *   "proactive": { ... }
+     * }
+     * 
+     * 或者对于 local_tools ID：
+     * {
+     *   "tools": [
+     *     {
+     *       "name": "executeCommand",
+     *       "displayName": "执行终端命令",
+     *       "enabled": true,
+     *       "prompt": "..."
+     *     }
+     *   ]
      * }
      */
     @Type(JsonType.class)

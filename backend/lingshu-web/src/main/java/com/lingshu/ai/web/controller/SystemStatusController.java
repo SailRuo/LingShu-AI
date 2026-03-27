@@ -101,20 +101,31 @@ public class SystemStatusController {
         } else if ("openai".equalsIgnoreCase(embedSource)) {
             try {
                 String base = embedBaseUrl;
+                String embedApiKey = setting.getEmbedApiKey();
                 if (base == null || base.isBlank()) {
                     embedStatus = "model_missing";
                 } else {
                     if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
                     String url = (base.contains("/v1") || base.endsWith("/v1")) ? base + "/models" : base + "/v1/models";
                     try {
-                        restTemplate.getForObject(url, String.class);
+                        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+                        if (embedApiKey != null && !embedApiKey.isBlank()) {
+                            headers.set("Authorization", "Bearer " + embedApiKey);
+                        }
+                        org.springframework.http.HttpEntity<String> entity = new org.springframework.http.HttpEntity<>(headers);
+                        restTemplate.exchange(url, org.springframework.http.HttpMethod.GET, entity, String.class);
                         embedStatus = (embedModel != null && !embedModel.isBlank()) ? "online" : "model_missing";
                     } catch (Exception e) {
-                        if (e.getMessage() != null && (e.getMessage().contains("401") || e.getMessage().contains("403"))) {
+                        if (e.getMessage() != null && (e.getMessage().contains("401") || e.getMessage().contains("403") || e.getMessage().contains("400"))) {
                             embedStatus = (embedModel != null && !embedModel.isBlank()) ? "online" : "model_missing";
                         } else if (!base.contains("/v1")) {
                             String fallbackUrl = base + "/models";
-                            restTemplate.getForObject(fallbackUrl, String.class);
+                            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+                            if (embedApiKey != null && !embedApiKey.isBlank()) {
+                                headers.set("Authorization", "Bearer " + embedApiKey);
+                            }
+                            org.springframework.http.HttpEntity<String> entity = new org.springframework.http.HttpEntity<>(headers);
+                            restTemplate.exchange(fallbackUrl, org.springframework.http.HttpMethod.GET, entity, String.class);
                             embedStatus = (embedModel != null && !embedModel.isBlank()) ? "online" : "model_missing";
                         } else {
                             throw e;

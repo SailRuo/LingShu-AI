@@ -53,4 +53,10 @@ public class FactNode {
     private Long supersedesFactId;
 
     private Long contradictsFactId;
+
+    private String emotionalTone;
+
+    private java.util.Set<String> involvedEntities;
+
+    private String originalMessage;
 }

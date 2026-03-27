@@ -1,4 +1,4 @@
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 
 export interface SystemSettings {
   source: string
@@ -50,16 +50,6 @@ async function saveSettings() {
     console.error('Failed to save settings', err)
   }
 }
-
-watch(
-  () => settings.value,
-  () => {
-    if (isLoaded.value) {
-      saveSettings()
-    }
-  },
-  { deep: true }
-)
 
 export function useSettings() {
   return {

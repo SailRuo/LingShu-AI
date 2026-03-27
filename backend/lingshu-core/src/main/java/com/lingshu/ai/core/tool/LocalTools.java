@@ -1,6 +1,10 @@
 package com.lingshu.ai.core.tool;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lingshu.ai.core.service.AgentConfigService;
 import com.lingshu.ai.core.service.SystemLogService;
+import com.lingshu.ai.infrastructure.entity.AgentConfig;
+import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import org.springframework.stereotype.Component;
 
@@ -8,6 +12,7 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -35,9 +40,13 @@ public class LocalTools {
     private static final ConcurrentHashMap<String, AtomicInteger> TOOL_CALL_COUNTS = new ConcurrentHashMap<>();
 
     private final SystemLogService systemLogService;
+    private final AgentConfigService agentConfigService;
+    private final ObjectMapper objectMapper;
 
-    public LocalTools(SystemLogService systemLogService) {
+    public LocalTools(SystemLogService systemLogService, AgentConfigService agentConfigService, ObjectMapper objectMapper) {
         this.systemLogService = systemLogService;
+        this.agentConfigService = agentConfigService;
+        this.objectMapper = objectMapper;
     }
 
     @Tool("""
@@ -194,6 +203,84 @@ public class LocalTools {
             log.error("Error executing command: {}", command, e);
             systemLogService.error("ReAct工具失败: executeCommand | " + e.getMessage(), "TOOL");
             return "Error executing command: " + e.getMessage();
+        }
+    }
+
+    @Tool("""
+            创建或更新智能体配置。
+            【强制安全规则】：
+            1. 必须分两步进行！
+            2. 第一步：向用户展示拟定的智能体配置，询问是否确认。此时 action 必须为 "preview"。
+            3. 第二步：只有用户明确回复确认后，才能将 action 设置为 "commit" 来真正执行。
+            4. agentJson 必须是包含 name, displayName, systemPrompt 等字段的合法 JSON。
+            """)
+    public String manageAgent(
+            @P("操作类型，只能是 'preview'（预览）或 'commit'（确认执行）") String action,
+            @P("智能体配置的 JSON 字符串") String agentJson) {
+        
+        log.info("Executing tool: manageAgent with action: {}", action);
+        systemLogService.info("ReAct工具调用: manageAgent | action=" + action, "TOOL");
+
+        try {
+            // 1. 将 LLM 生成的 JSON 转换为我们现成的 AgentConfig 实体
+            AgentConfig config = objectMapper.readValue(agentJson, AgentConfig.class);
+            
+            if (config.getName() == null || config.getName().isBlank()) {
+                return "操作失败：智能体的 name (英文标识) 不能为空。";
+            }
+
+            // 2. 预览模式：不调用 Service，直接返回草案让 LLM 询问用户
+            if ("preview".equalsIgnoreCase(action)) {
+                String previewMsg = "【系统拦截】草案已生成。请将以下配置展示给用户，并询问是否确认执行：\n" + agentJson;
+                systemLogService.debug("ReAct工具结果: manageAgent | preview 模式拦截", "TOOL");
+                return previewMsg;
+            }
+            
+            // 3. 提交模式：调用现成的 AgentConfigService
+            if ("commit".equalsIgnoreCase(action)) {
+                Optional<AgentConfig> existing = agentConfigService.getAgentByName(config.getName());
+                
+                if (existing.isPresent()) {
+                    // 调用现成的更新接口
+                    agentConfigService.updateAgent(existing.get().getId(), config);
+                    String msg = "智能体 [" + config.getName() + "] 更新成功！已持久化到数据库。";
+                    systemLogService.success("ReAct工具结果: manageAgent | " + msg, "TOOL");
+                    return msg;
+                } else {
+                    // 调用现成的创建接口
+                    agentConfigService.createAgent(config);
+                    String msg = "智能体 [" + config.getName() + "] 创建成功！已持久化到数据库。";
+                    systemLogService.success("ReAct工具结果: manageAgent | " + msg, "TOOL");
+                    return msg;
+                }
+            }
+            
+            return "未知的 action 类型，请使用 'preview' 或 'commit'";
+            
+        } catch (Exception e) {
+            log.error("Error executing manageAgent", e);
+            systemLogService.error("ReAct工具失败: manageAgent | " + e.getMessage(), "TOOL");
+            return "解析或执行失败，请检查 JSON 格式: " + e.getMessage();
+        }
+    }
+
+    @Tool("""
+            获取系统中已创建的所有智能体列表。
+            当你需要查看当前有哪些智能体，或者需要获取某个智能体的具体配置信息时使用。
+            返回结果是一个包含所有智能体详细配置的 JSON 数组字符串。
+            """)
+    public String getAgents() {
+        log.info("Executing tool: getAgents");
+        systemLogService.info("ReAct工具调用: getAgents", "TOOL");
+        try {
+            java.util.List<AgentConfig> agents = agentConfigService.getAllAgents();
+            String result = objectMapper.writeValueAsString(agents);
+            systemLogService.success("ReAct工具结果: getAgents | 获取到 " + agents.size() + " 个智能体", "TOOL");
+            return result;
+        } catch (Exception e) {
+            log.error("Error executing getAgents", e);
+            systemLogService.error("ReAct工具失败: getAgents | " + e.getMessage(), "TOOL");
+            return "获取智能体列表失败: " + e.getMessage();
         }
     }
 

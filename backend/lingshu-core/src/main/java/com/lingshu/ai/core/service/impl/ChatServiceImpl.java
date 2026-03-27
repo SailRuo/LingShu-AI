@@ -35,15 +35,11 @@ public class ChatServiceImpl implements ChatService {
     private final AgentConfigService agentConfigService;
     private final ChatSessionRepository sessionRepository;
     private final ChatMessageRepository messageRepository;
-    private final AiConfig.Assistant assistant;
-    private final AiConfig.StreamingAssistant streamingAssistant;
     private final StreamingChatModel streamingChatLanguageModel;
     private final RestTemplate restTemplate;
     private final SettingService settingService;
     private final SystemLogService systemLogService;
     private final AffinityService affinityService;
-    private final EmotionAnalyzer emotionAnalyzer;
-    private final ProactiveService proactiveService;
     private final PromptBuilderService promptBuilderService;
     private final ChatMemoryProvider chatMemoryProvider;
     private final LocalTools localTools;
@@ -59,15 +55,11 @@ public class ChatServiceImpl implements ChatService {
                            AgentConfigService agentConfigService,
                            ChatSessionRepository sessionRepository,
                            ChatMessageRepository messageRepository,
-                           AiConfig.Assistant assistant,
-                           AiConfig.StreamingAssistant streamingAssistant,
                            StreamingChatModel streamingChatLanguageModel,
                            RestTemplate restTemplate,
                            SettingService settingService,
                            SystemLogService systemLogService,
                            AffinityService affinityService,
-                           EmotionAnalyzer emotionAnalyzer,
-                           ProactiveService proactiveService,
                            PromptBuilderService promptBuilderService,
                            ChatMemoryProvider chatMemoryProvider,
                            LocalTools localTools,
@@ -79,15 +71,11 @@ public class ChatServiceImpl implements ChatService {
         this.agentConfigService = agentConfigService;
         this.sessionRepository = sessionRepository;
         this.messageRepository = messageRepository;
-        this.assistant = assistant;
-        this.streamingAssistant = streamingAssistant;
         this.streamingChatLanguageModel = streamingChatLanguageModel;
         this.restTemplate = restTemplate;
         this.settingService = settingService;
         this.systemLogService = systemLogService;
         this.affinityService = affinityService;
-        this.emotionAnalyzer = emotionAnalyzer;
-        this.proactiveService = proactiveService;
         this.promptBuilderService = promptBuilderService;
         this.chatMemoryProvider = chatMemoryProvider;
         this.localTools = localTools;

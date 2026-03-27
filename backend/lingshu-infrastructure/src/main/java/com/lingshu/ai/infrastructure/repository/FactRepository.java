@@ -13,6 +13,12 @@ import java.util.Map;
 @Repository
 public interface FactRepository extends Neo4jRepository<FactNode, Long> {
 
+    @Query("CREATE INDEX IF NOT EXISTS FOR (f:Fact) ON (f.originalMessage)")
+    void createOriginalMessageIndex();
+
+    @Query("CREATE INDEX IF NOT EXISTS FOR (f:Fact) ON (f.emotionalTone)")
+    void createEmotionalToneIndex();
+
     @Query("MATCH (f:Fact) WHERE ANY(keyword IN $keywords WHERE toLower(f.content) CONTAINS toLower(keyword)) RETURN f LIMIT 5")
     List<FactNode> findFactsByKeywords(List<String> keywords);
 

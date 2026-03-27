@@ -71,16 +71,17 @@ public class TurnPostProcessingServiceImpl {
                     decision.getConfidence()
             ), "POST_PROCESS");
 
+            EmotionAnalysis emotionResult = null;
             if (decision.isAnalyzeEmotion()) {
                 systemLogService.info("后处理事件: 已触发情感分析", "POST_PROCESS");
-                analyzeEmotion(userId, userMessage);
+                emotionResult = analyzeEmotion(userId, userMessage);
             } else {
                 systemLogService.debug("后处理事件: 跳过情感分析", "POST_PROCESS");
             }
 
             if (decision.isExtractFacts()) {
                 systemLogService.info("后处理事件: 已触发事实提取", "POST_PROCESS");
-                extractFacts(userId, userMessage);
+                extractFacts(userId, userMessage, emotionResult);
             } else {
                 systemLogService.debug("后处理事件: 跳过事实提取", "POST_PROCESS");
             }
@@ -101,13 +102,13 @@ public class TurnPostProcessingServiceImpl {
         }
     }
 
-    private void analyzeEmotion(String userId, String userMessage) {
+    private EmotionAnalysis analyzeEmotion(String userId, String userMessage) {
         try {
             systemLogService.info("回合后处理: 开始情感分析", "EMOTION");
             EmotionAnalysis emotion = emotionAnalyzer.analyze(userMessage);
             if (emotion == null) {
                 systemLogService.debug("情感分析返回空结果", "EMOTION");
-                return;
+                return null;
             }
 
             affinityService.updateEmotion(userId, emotion.getEmotion(), emotion.getIntensity());
@@ -126,15 +127,17 @@ public class TurnPostProcessingServiceImpl {
             if (emotion.needsAttention()) {
                 systemLogService.info("检测到用户需要关注", "EMOTION");
             }
+            return emotion;
         } catch (Exception e) {
             log.warn("情感分析失败: {}", e.getMessage(), e);
+            return null;
         }
     }
 
-    private void extractFacts(String userId, String userMessage) {
+    private void extractFacts(String userId, String userMessage, EmotionAnalysis emotion) {
         try {
             systemLogService.info("回合后处理: 开始事实提取", "MEMORY");
-            memoryService.extractFacts(userId, userMessage);
+            memoryService.extractFacts(userId, userMessage, emotion);
         } catch (Exception e) {
             log.warn("事实提取失败: {}", e.getMessage(), e);
         }

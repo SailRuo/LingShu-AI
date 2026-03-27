@@ -97,13 +97,27 @@ public class MemoryServiceImpl implements MemoryService {
         this.factSemanticClassifier = AiServices.builder(FactSemanticClassifier.class)
                 .chatModel(chatLanguageModel)
                 .build();
+
+        try {
+            factRepository.createOriginalMessageIndex();
+            factRepository.createEmotionalToneIndex();
+            log.info("Neo4j indexes initialized successfully.");
+        } catch (Exception e) {
+            log.warn("Failed to create Neo4j indexes: {}", e.getMessage());
+        }
     }
 
 
-    @Async("taskExecutor")
     @Override
     public void extractFacts(String userId, String message) {
-        log.debug("Memory pulse: Analyzing input for cognitive facts: {}", message);
+        extractFacts(userId, message, null);
+    }
+
+    @Async("taskExecutor")
+    @Override
+    public void extractFacts(String userId, String message, com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
+        final String messageSnapshot = message;
+        log.debug("Memory pulse: Analyzing input for cognitive facts: {}", messageSnapshot);
         systemLogService.info("记忆脉冲: 启动认知事实分析...", "MEMORY");
         systemLogService.startTimer("fact_extraction");
 
@@ -126,7 +140,7 @@ public class MemoryServiceImpl implements MemoryService {
 
         com.lingshu.ai.core.dto.MemoryUpdate report = null;
         try {
-            String rawJson = factExtractor.analyze(message, currentFactsBuilder.toString());
+            String rawJson = factExtractor.analyze(messageSnapshot, currentFactsBuilder.toString());
             // 清理可能存在的 markdown 标签（防御性处理）
             rawJson = rawJson.replaceAll("(?s)```(json)?", "").trim();
             report = objectMapper.readValue(rawJson, com.lingshu.ai.core.dto.MemoryUpdate.class);
@@ -186,19 +200,34 @@ public class MemoryServiceImpl implements MemoryService {
                 }
 
                 log.info("Aha! New persistent fact candidate: {}", fact);
-                FactWriteResult writeResult = persistFactCandidate(user, fact.trim());
+                FactWriteResult writeResult = persistFactCandidate(user, fact.trim(), messageSnapshot, emotion);
                 user = writeResult.user;
 
                 if (!writeResult.createdNewFact || writeResult.savedFact == null) {
                     continue;
                 }
 
+                String emotionalToneStr;
+                if (emotion != null) {
+                    emotionalToneStr = emotion.getEmotion();
+                } else {
+                    emotionalToneStr = inferEmotionalToneFromKeywords(messageSnapshot);
+                }
+
                 java.util.Map<String, String> metadata = new java.util.HashMap<>();
                 if (writeResult.savedFact.getId() != null) {
                     metadata.put("fact_id", writeResult.savedFact.getId().toString());
                 }
+                metadata.put("emotional_tone", emotionalToneStr);
+                metadata.put("category", writeResult.savedFact.getClusterKey() != null ? writeResult.savedFact.getClusterKey() : "unknown");
+                metadata.put("timestamp", java.time.LocalDateTime.now().toString());
 
-                TextSegment segment = TextSegment.from(writeResult.savedFact.getContent(), new dev.langchain4j.data.document.Metadata(metadata));
+                String fullContext = String.format(
+                        "用户记录原始消息：%s|||提取事实陈述：%s",
+                        messageSnapshot != null ? messageSnapshot : "无记录",
+                        writeResult.savedFact.getContent()
+                );
+                TextSegment segment = TextSegment.from(fullContext, new dev.langchain4j.data.document.Metadata(metadata));
 
                 systemLogService.embeddingStart(writeResult.savedFact.getContent().length(), "MEMORY");
                 try {
@@ -217,6 +246,16 @@ public class MemoryServiceImpl implements MemoryService {
         }
 
         systemLogService.endTimer("fact_extraction", "记忆脉冲处理完成", "MEMORY");
+    }
+
+    private String inferEmotionalToneFromKeywords(String message) {
+        if (message == null) return "neutral";
+        String lower = message.toLowerCase();
+        if (lower.matches(".*(开心|高兴|喜欢|爱|棒|good|happy|love).*"))
+            return "positive";
+        if (lower.matches(".*(难过|悲伤|讨厌|恨|bad|sad|hate).*"))
+            return "negative";
+        return "neutral";
     }
 
     @Override
@@ -287,10 +326,19 @@ public class MemoryServiceImpl implements MemoryService {
                 var match = matches.get(i);
                 String matchText = match.embedded().text();
                 double score = match.score();
+
+                String displayText = matchText;
+                if (matchText.contains("|||")) {
+                    String[] parts = matchText.split("\\|\\|\\|");
+                    if (parts.length == 2) {
+                        displayText = parts[1].replace("提取事实陈述：", "").trim();
+                    }
+                }
+
                 log.trace("Match text: {} (score: {})", matchText, score);
                 contextBuilder.append(matchText).append(" (relevant); ");
-                String displayText = matchText.length() > 40 ? matchText.substring(0, 40) + "..." : matchText;
-                systemLogService.info(String.format("  [%d] 相似度: %.3f | 内容: %s", i + 1, score, displayText), "MEMORY");
+                String abbreviated = displayText.length() > 40 ? displayText.substring(0, 40) + "..." : displayText;
+                systemLogService.info(String.format("  [%d] 相似度: %.3f | 内容: %s", i + 1, score, abbreviated), "MEMORY");
 
                 Long factId = null;
                 if (match.embedded().metadata() != null && match.embedded().metadata().getString("fact_id") != null) {
@@ -740,7 +788,7 @@ public class MemoryServiceImpl implements MemoryService {
         return (leftPositive && rightNegative) || (rightPositive && leftNegative);
     }
 
-    private FactWriteResult persistFactCandidate(UserNode user, String factText) {
+    private FactWriteResult persistFactCandidate(UserNode user, String factText, String originalMessage, com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
         LocalDateTime now = LocalDateTime.now();
         String normalized = normalizeSemanticText(factText);
         SemanticProfile semanticProfile = classifyFactSemantics(factText, user);
@@ -836,7 +884,7 @@ public class MemoryServiceImpl implements MemoryService {
             bestMatch.setLastActivatedAt(now);
             bestMatch.setActivityScore(calculateActivityScore(now, now));
             factRepository.save(bestMatch);
-            FactNode factNode = buildNewFactNode(factText, normalized, clusterKey, subType, semanticProfile.confidence, semanticProfile.source, now);
+            FactNode factNode = buildNewFactNode(factText, normalized, clusterKey, subType, semanticProfile.confidence, semanticProfile.source, now, originalMessage, emotion);
             factNode.setContradictsFactId(bestMatch.getId());
             factNode.setStatus("conflicted");
             systemLogService.info("检测到冲突记忆，创建冲突版本: " + shortenLabel(factText, 24), "MEMORY");
@@ -848,7 +896,7 @@ public class MemoryServiceImpl implements MemoryService {
             bestMatch.setLastActivatedAt(now);
             bestMatch.setActivityScore(calculateActivityScore(now, now));
             factRepository.save(bestMatch);
-            FactNode factNode = buildNewFactNode(factText, normalized, clusterKey, subType, semanticProfile.confidence, semanticProfile.source, now);
+            FactNode factNode = buildNewFactNode(factText, normalized, clusterKey, subType, semanticProfile.confidence, semanticProfile.source, now, originalMessage, emotion);
             factNode.setSupersedesFactId(bestMatch.getId());
             factNode.setVersion((bestMatch.getVersion() == null ? 1 : bestMatch.getVersion()) + 1);
             factNode.setStatus("active");
@@ -856,7 +904,7 @@ public class MemoryServiceImpl implements MemoryService {
             return saveNewFact(user, factNode);
         }
 
-        FactNode factNode = buildNewFactNode(factText, normalized, clusterKey, subType, semanticProfile.confidence, semanticProfile.source, now);
+        FactNode factNode = buildNewFactNode(factText, normalized, clusterKey, subType, semanticProfile.confidence, semanticProfile.source, now, originalMessage, emotion);
         return saveNewFact(user, factNode);
     }
 
@@ -875,7 +923,20 @@ public class MemoryServiceImpl implements MemoryService {
         return new FactWriteResult(savedUser, savedFact, true);
     }
 
-    private FactNode buildNewFactNode(String factText, String normalized, String clusterKey, String subType, double semanticConfidence, String source, LocalDateTime now) {
+    private FactNode buildNewFactNode(String factText, String normalized, String clusterKey, String subType, double semanticConfidence, String source, LocalDateTime now, String originalMessage, com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
+        double baseImportance = 0.8;
+        if (emotion != null && emotion.getIntensity() != null) {
+            double intensityBoost = emotion.getIntensity() * 0.2;
+            baseImportance = Math.min(1.0, baseImportance + intensityBoost);
+        }
+        
+        String toneStr = "neutral";
+        if (emotion != null && emotion.getEmotion() != null) {
+            toneStr = emotion.getEmotion();
+        } else {
+            toneStr = inferEmotionalToneFromKeywords(originalMessage);
+        }
+
         return FactNode.builder()
                 .content(factText)
                 .category(clusterKey)
@@ -884,7 +945,7 @@ public class MemoryServiceImpl implements MemoryService {
                 .clusterKey(clusterKey)
                 .observedAt(now)
                 .lastActivatedAt(now)
-                .importance(0.8)
+                .importance(baseImportance)
                 .confidence(round(Math.max(0.72, semanticConfidence)))
                 .classificationSource(source)
                 .activityScore(calculateActivityScore(now, now))
@@ -892,6 +953,9 @@ public class MemoryServiceImpl implements MemoryService {
                 .decayRate(0.015)
                 .ttlDays(180)
                 .version(1)
+                .originalMessage(originalMessage)
+                .emotionalTone(toneStr)
+                .involvedEntities(java.util.Optional.ofNullable(extractEntities(factText)).filter(l -> !l.isEmpty()).map(java.util.HashSet::new).orElse(null))
                 .build();
     }
 

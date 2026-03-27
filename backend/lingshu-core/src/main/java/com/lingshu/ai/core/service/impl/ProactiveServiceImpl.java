@@ -88,15 +88,27 @@ public class ProactiveServiceImpl implements ProactiveService {
                     systemLogService.info(String.format("用户 %s 不活跃 %d 分钟，标记需要问候", 
                             state.getUserId(), minutesInactive), "PROACTIVE");
                     
+                    // 使用 AI 生成个性化问候语（基于记忆和关系）
                     String timeOfDay = getTimeOfDay();
-                    String greeting = generateContextualGreeting(state.getUserId(), timeOfDay);
+                    generateGreeting(state.getUserId())
+                        .collectList()
+                        .subscribe(tokens -> {
+                            String greeting = String.join("", tokens);
+                            state.setLastGreetTime(LocalDateTime.now());
+                            state.setNeedsGreeting(false);
+                            userStateRepository.save(state);
+                            
+                            eventPublisher.publishEvent(new ProactiveGreetingEvent(this, state.getUserId(), greeting));
+                            
+                            systemLogService.success(String.format("已为不活跃用户 %s 推送问候", state.getUserId()), "PROACTIVE");
+                        }, error -> {
+                            log.error("为用户 {} 生成问候语失败：{}", state.getUserId(), error.getMessage());
+                            systemLogService.error(String.format("问候生成失败：%s", error.getMessage()), "PROACTIVE");
+                            state.setNeedsGreeting(false);
+                            userStateRepository.save(state);
+                        });
                     
-                    state.setLastGreetTime(LocalDateTime.now());
-                    state.setNeedsGreeting(false);
-                    
-                    eventPublisher.publishEvent(new ProactiveGreetingEvent(this, state.getUserId(), greeting));
-                    
-                    systemLogService.success(String.format("已为不活跃用户 %s 推送问候", state.getUserId()), "PROACTIVE");
+                    return; // 提前返回，避免重复保存
                 }
             }
 
@@ -125,20 +137,28 @@ public class ProactiveServiceImpl implements ProactiveService {
         for (UserState state : usersToGreet) {
             try {
                 if (canSendGreeting(state)) {
-                    String timeOfDay = getTimeOfDay();
-                    String greeting = generateContextualGreeting(state.getUserId(), timeOfDay);
-                    
-                    state.setLastGreetTime(LocalDateTime.now());
-                    state.setNeedsGreeting(false);
-                    userStateRepository.save(state);
-                    
-                    eventPublisher.publishEvent(new ProactiveGreetingEvent(this, state.getUserId(), greeting));
-                    
-                    systemLogService.success(String.format("已为用户 %s 生成问候消息", state.getUserId()), "PROACTIVE");
+                    // 使用 AI 生成个性化问候语（基于记忆和关系）
+                    generateGreeting(state.getUserId())
+                        .collectList()
+                        .subscribe(tokens -> {
+                            String greeting = String.join("", tokens);
+                            state.setLastGreetTime(LocalDateTime.now());
+                            state.setNeedsGreeting(false);
+                            userStateRepository.save(state);
+                                    
+                            eventPublisher.publishEvent(new ProactiveGreetingEvent(this, state.getUserId(), greeting));
+                                    
+                            systemLogService.success(String.format("已为用户 %s 生成问候消息", state.getUserId()), "PROACTIVE");
+                        }, error -> {
+                            log.error("为用户 {} 生成问候语失败：{}", state.getUserId(), error.getMessage());
+                            systemLogService.error(String.format("问候生成失败：%s", error.getMessage()), "PROACTIVE");
+                            state.setNeedsGreeting(false);
+                            userStateRepository.save(state);
+                        });
                 }
             } catch (Exception e) {
-                log.error("为用户 {} 生成问候失败: {}", state.getUserId(), e.getMessage());
-                systemLogService.error(String.format("问候生成失败: %s", e.getMessage()), "PROACTIVE");
+                log.error("为用户 {} 生成问候失败：{}", state.getUserId(), e.getMessage());
+                systemLogService.error(String.format("问候生成失败：%s", e.getMessage()), "PROACTIVE");
             }
         }
     }

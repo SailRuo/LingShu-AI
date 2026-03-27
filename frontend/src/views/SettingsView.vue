@@ -8,7 +8,7 @@ import {
 } from 'naive-ui'
 import { 
   RefreshCw, Settings, Cpu, Globe, Activity, Zap, Plus, 
-  Trash2, Edit, Star, Users, Bell, Send, Brain
+  Trash2, Edit, Star, Users, Bell, Send, Brain, Wrench
 } from 'lucide-vue-next'
 import McpSettings from '@/components/McpSettings.vue'
 
@@ -74,13 +74,15 @@ const agentForm = ref({
   isActive: true
 })
 
+interface LocalTool {
+  name: string
+  displayName: string
+  enabled: boolean
+  prompt: string
+}
 
-
-
-
-
-
-
+const localTools = ref<LocalTool[]>([])
+const loadingLocalTools = ref(false)
 
 async function fetchChatModels(silent = false) {
   if (!settings.value.baseUrl || !settings.value.source) return
@@ -190,9 +192,39 @@ async function fetchAgents() {
   }
 }
 
+async function fetchLocalTools() {
+  loadingLocalTools.value = true
+  try {
+    const res = await fetch('/api/settings/local-tools')
+    const data = await res.json()
+    if (data && data.tools) {
+      localTools.value = data.tools
+    }
+  } catch (err) {
+    console.error('Failed to fetch local tools', err)
+    message.error('获取本地工具配置失败')
+  } finally {
+    loadingLocalTools.value = false
+  }
+}
+
+async function saveLocalTools() {
+  try {
+    await fetch('/api/settings/local-tools', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tools: localTools.value })
+    })
+    message.success('本地工具配置已保存')
+  } catch (err) {
+    message.error('保存本地工具配置失败')
+  }
+}
+
 onMounted(() => {
   fetchSettings()
   fetchAgents()
+  fetchLocalTools()
 })
 
 const handleSave = async () => {
@@ -616,6 +648,46 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
         </div>
       </n-tab-pane>
 
+      <n-tab-pane name="local-tools" tab="本地工具">
+        <div class="tab-content">
+          <section class="settings-section">
+            <div class="section-header">
+              <n-icon :component="Wrench" />
+              <h2>本地工具管理</h2>
+            </div>
+            
+            <div class="tools-grid">
+              <n-card v-for="tool in localTools" :key="tool.name" class="glass-card tool-card">
+                <div class="tool-header">
+                  <div class="tool-info">
+                    <div class="tool-name">{{ tool.displayName }}</div>
+                    <div class="tool-id">@{{ tool.name }}</div>
+                  </div>
+                  <n-switch v-model:value="tool.enabled" />
+                </div>
+                <div class="tool-prompt">
+                  <div class="item-label">工具提示词 (Prompt)</div>
+                  <n-input 
+                    v-model:value="tool.prompt" 
+                    type="textarea" 
+                    :rows="4" 
+                    placeholder="定义工具的调用规则和描述..." 
+                    :disabled="!tool.enabled"
+                  />
+                </div>
+              </n-card>
+            </div>
+
+            <div class="save-section">
+              <n-button type="primary" size="large" @click="saveLocalTools" :loading="loadingLocalTools">
+                <template #icon><n-icon :component="Zap" /></template>
+                保存工具配置
+              </n-button>
+            </div>
+          </section>
+        </div>
+      </n-tab-pane>
+
       <n-tab-pane name="mcp" tab="MCP 插件">
         <McpSettings />
       </n-tab-pane>
@@ -733,7 +805,7 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
 
 <style scoped>
 .settings-view {
-  padding: 40px 60px;
+  padding: 24px 32px;
   max-width: 1200px;
   margin: 0 auto;
   animation: fadeIn 0.6s cubic-bezier(0.23, 1, 0.32, 1);
@@ -745,18 +817,18 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
 }
 
 .settings-header {
-  margin-bottom: 32px;
+  margin-bottom: 16px;
   border-bottom: 1px solid var(--color-outline);
-  padding-bottom: 24px;
+  padding-bottom: 12px;
 }
 
 .page-title {
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 800;
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   background: linear-gradient(135deg, var(--color-text), var(--color-primary));
   -webkit-background-clip: text;
   background-clip: text;
@@ -765,21 +837,21 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
 
 .page-subtitle {
   color: var(--color-text-dim);
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .settings-tabs {
   background: var(--color-surface);
   border-radius: 16px;
-  padding: 16px;
+  padding: 12px;
 }
 
 .tab-content {
-  padding: 16px 0;
+  padding: 12px 0;
 }
 
 .settings-section {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .section-header {
@@ -897,10 +969,46 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
   line-height: 1.5;
 }
 
+.tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  gap: 16px;
+}
+
+.tool-card {
+  padding: 16px;
+}
+
+.tool-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.tool-info {
+  flex: 1;
+}
+
+.tool-name {
+  font-weight: 600;
+  font-size: 16px;
+  margin-bottom: 4px;
+}
+
+.tool-id {
+  font-size: 12px;
+  color: var(--color-text-dim);
+}
+
+.tool-prompt {
+  margin-top: 12px;
+}
+
 .agent-actions {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .agent-modal {
