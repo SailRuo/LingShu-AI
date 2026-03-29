@@ -5,13 +5,15 @@ import { useChat } from '@/composables/useChat'
 import { useWebSocket, type WebSocketMessage } from '@/composables/useWebSocket'
 import { useSettings } from '@/stores/settingsStore'
 import { useAsr } from '@/composables/useAsr'
+import { useTts } from '@/composables/useTts'
 import ChatMessageComponent from '@/components/chat/ChatMessage.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
-import { Sparkles, Loader2, Wifi, WifiOff, Trash2 } from 'lucide-vue-next'
+import { Sparkles, Loader2, Wifi, WifiOff, Trash2, Volume2, VolumeX } from 'lucide-vue-next'
 
 const {
   messages,
   inputMessage,
+  inputImages,
   isTyping,
   welcomeGreeting,
   isLoadingHistory,
@@ -43,6 +45,12 @@ const {
 const { settings, fetchSettings } = useSettings()
 
 const {
+  isPlaying: ttsPlaying,
+  speak: ttsSpeak,
+  stop: ttsStop
+} = useTts()
+
+const {
   isListening: asrListening,
   isRecording: asrRecording,
   isProcessing: asrProcessing,
@@ -64,121 +72,59 @@ const scrollRef = ref<InstanceType<typeof NScrollbar> | null>(null)
 const isLoadingMore = ref(false)
 const prevScrollHeight = ref(0)
 const enableThinking = ref(false)
-const isAIThinking = ref(false) // AI 正在思考/回复
-const starSpeed = ref(1) // 星星移动速度
-const meteors = ref<Array<{id: number, x: number, y: number, duration: number, delay: number}>>([])
+const autoScrollEnabled = ref(true) // 是否开启自动滚动到底部
 let stopHeartbeat: (() => void) | null = null
-let starAnimationId: number | null = null
-let meteorTimer: number | null = null
 
-// 检测用户是否已经在底部（允许 50px 的误差）
-function isUserAtBottom(): boolean {
-  const scrollContainer = scrollRef.value
-  if (!scrollContainer) return true
-  
-  // 尝试不同的方式获取滚动容器
-  let scrollElement: HTMLElement | null = null
-  
-  // 方式 1: 直接访问 $el
-  const el = (scrollContainer as any).$el
-  if (el && typeof el.querySelector === 'function') {
-    scrollElement = el.querySelector('.n-scrollbar-container') || el
-  }
-  
-  // 方式 2: 如果没有找到，尝试使用 containerRef
-  if (!scrollElement && (scrollContainer as any).containerRef) {
-    scrollElement = (scrollContainer as any).containerRef
-  }
-  
-  // 如果还是没找到，返回 true（默认认为在底部）
-  if (!scrollElement) return true
-  
-  const { scrollTop, scrollHeight, clientHeight } = scrollElement
-  const threshold = 50 // 50px 误差范围
+// 检测用户是否已经在底部（用于判断是否应该开启自动滚动）
+function isAtBottom(el: HTMLElement): boolean {
+  const { scrollTop, scrollHeight, clientHeight } = el
+  const threshold = 15 // 15px 误差范围
   return scrollHeight - scrollTop - clientHeight < threshold
 }
 
-function scrollToBottom(behavior: 'auto' | 'smooth' = 'smooth') {
+function scrollToBottom(behavior: 'auto' | 'smooth' = 'auto') {
   nextTick(() => {
     scrollRef.value?.scrollTo({ top: 999999, behavior })
   })
 }
 
-// 监听消息变化，自动滚动到最下方（只在用户在底部时才滚动）
+// 监听消息变化，仅在开启了自动滚动时才滚动
 watch(() => messages.value.length, () => {
-  if (isUserAtBottom()) {
+  if (autoScrollEnabled.value) {
     scrollToBottom()
   }
-}, { flush: 'post' }) // 确保在 DOM 更新后执行
-
-// 监听 AI 思考状态
-watch(isTyping, (newVal) => {
-  if (newVal) {
-    // AI 开始回复，启动星辰移动效果
-    startStarMovement()
-  }
-})
-
-// 启动星辰移动效果
-function startStarMovement() {
-  isAIThinking.value = true
-  starSpeed.value = 1.5 // 初始速度降低 (原来 3)
-  
-  // 逐渐减速
-  const decreaseInterval = setInterval(() => {
-    if (!isTyping.value) {
-      clearInterval(decreaseInterval)
-      return
-    }
-    
-    starSpeed.value = Math.max(0.2, starSpeed.value - 0.15) // 减速幅度减小 (原来 0.3)
-    
-    if (starSpeed.value <= 0.2) {
-      clearInterval(decreaseInterval)
-    }
-  }, 1500) // 减速间隔增长 (原来 800)
-}
-
-// 创建流星效果
-function createMeteor() {
-  const id = Date.now()
-  const x = Math.random() * 100
-  const y = Math.random() * 30 // 流星从上方向下
-  const duration = 1 + Math.random() * 1.5 // 1-2.5 秒
-  const delay = Math.random() * 3 // 0-3 秒延迟
-  
-  meteors.value.push({ id, x, y, duration, delay })
-  
-  // 移除流星
-  setTimeout(() => {
-    meteors.value = meteors.value.filter(m => m.id !== id)
-  }, (duration + delay) * 1000)
-}
-
-// 启动流星定时器
-function startMeteorTimer() {
-  if (meteorTimer !== null) return
-  
-  // 每 3-6 秒创建一个流星
-  const createMeteorLoop = () => {
-    createMeteor()
-    const nextDelay = 3000 + Math.random() * 3000
-    meteorTimer = window.setTimeout(createMeteorLoop, nextDelay)
-  }
-  
-  createMeteorLoop()
-}
+}, { flush: 'post' })
 
 function handleSend() {
   const text = inputMessage.value.trim()
-  if (!text || isTyping.value) return
+  const images = inputImages.value
+  if ((!text && images.length === 0) || isTyping.value) return
 
-  messages.value.push({ role: 'user', content: text, timestamp: Date.now() })
-  inputMessage.value = ''
-  isTyping.value = true
-  scrollToBottom()
+  if (isConnected.value) {
+    messages.value.push({ 
+      role: 'user', 
+      content: text, 
+      timestamp: Date.now(),
+      images: images.length > 0 ? [...images] : undefined
+    })
+    inputMessage.value = ''
+    inputImages.value = []
+    isTyping.value = true
+    autoScrollEnabled.value = true // 用户发送消息，强制开启自动滚动
+    scrollToBottom('smooth') 
 
-  sendChat(text, undefined, settings.value.model, settings.value.apiKey, settings.value.baseUrl, enableThinking.value)
+    sendChat(
+      text, 
+      undefined, 
+      settings.value.model, 
+      settings.value.apiKey, 
+      settings.value.baseUrl, 
+      enableThinking.value,
+      images.length > 0 ? [...images] : undefined
+    )
+  } else {
+    message.warning('系统连接已断开，请等待重连')
+  }
 }
 
 function handleToggleThinking() {
@@ -211,6 +157,11 @@ async function handleClearHistory() {
 
 async function handleScroll(e: Event) {
   const target = e.target as HTMLElement
+  if (!target) return
+
+  // 更新自动滚动状态：如果用户在底部附近，开启自动滚动；否则关闭
+  autoScrollEnabled.value = isAtBottom(target)
+
   if (target.scrollTop < 50 && hasMoreHistory.value && !isLoadingMore.value) {
     isLoadingMore.value = true
     prevScrollHeight.value = target.scrollHeight
@@ -238,15 +189,14 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
     case 'chatChunk':
       appendAssistantChunk(msg.content || '')
       isTyping.value = false
-      // 只在用户在底部时才滚动
-      if (isUserAtBottom()) {
+      if (autoScrollEnabled.value) {
         scrollToBottom()
       }
       break
 
     case 'reasoningChunk':
       appendReasoningChunk(msg.content || '')
-      if (isUserAtBottom()) {
+      if (autoScrollEnabled.value) {
         scrollToBottom()
       }
       break
@@ -260,7 +210,7 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
         isError: false
       })
       isTyping.value = false
-      if (isUserAtBottom()) {
+      if (autoScrollEnabled.value) {
         scrollToBottom()
       }
       break
@@ -275,26 +225,37 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
         status: msg.isError ? 'error' : 'success',
         isError: !!msg.isError
       })
-      if (isUserAtBottom()) {
+      if (autoScrollEnabled.value) {
         scrollToBottom()
       }
       break
       
     case 'chatEnd':
       isTyping.value = false
-      await syncLatestAssistantMessage()
-      // 消息结束时，如果用户在底部，就滚动到底部
-      if (isUserAtBottom()) {
-        scrollToBottom()
+      const lastMsg = await syncLatestAssistantMessage()
+      if (autoScrollEnabled.value) {
+        scrollToBottom('smooth')
+      }
+      if (settings.value.ttsEnabled && lastMsg && lastMsg.content) {
+        ttsSpeak(lastMsg.content)
       }
       break
       
     case 'error':
       isTyping.value = false
-      failLatestAssistantMessage(msg.message || '发生错误')
+      const errorMsg = msg.message || '发生错误'
+      failLatestAssistantMessage(errorMsg)
       await syncLatestAssistantMessage()
-      // 错误时也保持用户当前位置，除非用户在底部
-      if (isUserAtBottom()) {
+      
+      // 提取友好提示
+      let friendlyMsg = errorMsg
+      if (errorMsg.toLowerCase().includes('context size') || 
+          errorMsg.toLowerCase().includes('context_length_exceeded')) {
+        friendlyMsg = '对话上下文过长，请尝试开启新对话或清理历史记录。'
+      }
+      message.error(friendlyMsg)
+
+      if (autoScrollEnabled.value) {
         scrollToBottom()
       }
       break
@@ -306,9 +267,11 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
           content: msg.content, 
           timestamp: Date.now() 
         })
-        // 主动问候时，如果用户在底部就滚动
-        if (isUserAtBottom()) {
+        if (autoScrollEnabled.value) {
           scrollToBottom()
+        }
+        if (settings.value.ttsEnabled) {
+          ttsSpeak(msg.content)
         }
       }
       break
@@ -344,9 +307,6 @@ onMounted(async () => {
   on('*', handleWebSocketMessage)
 
   stopHeartbeat = startHeartbeat(30000)
-  
-  // 启动流星效果
-  startMeteorTimer()
 
   setSendAudioCallback((base64: string, mimeType: string) => {
     send({ type: 'audio', data: base64, mimeType })
@@ -364,12 +324,6 @@ onUnmounted(() => {
   if (stopHeartbeat) {
     stopHeartbeat()
   }
-  if (starAnimationId !== null) {
-    cancelAnimationFrame(starAnimationId)
-  }
-  if (meteorTimer !== null) {
-    clearTimeout(meteorTimer)
-  }
 })
 
 async function handleToggleAsr() {
@@ -381,6 +335,17 @@ async function handleToggleAsr() {
       message.error('无法启动语音输入，请检查麦克风权限')
     }
   }
+}
+
+const { saveSettings } = useSettings()
+
+async function handleToggleTts() {
+  settings.value.ttsEnabled = !settings.value.ttsEnabled
+  if (!settings.value.ttsEnabled) {
+    ttsStop()
+  }
+  await saveSettings()
+  message.info(settings.value.ttsEnabled ? '语音合成已开启' : '语音合成已关闭')
 }
 </script>
 
@@ -395,6 +360,16 @@ async function handleToggleAsr() {
       </div>
 
       <div class="chat-actions" v-if="messages.length > 0">
+        <button 
+          class="action-btn tts-btn" 
+          :class="{ active: settings.ttsEnabled, playing: ttsPlaying }"
+          @click="handleToggleTts" 
+          :title="settings.ttsEnabled ? '关闭语音' : '开启语音'"
+        >
+          <Volume2 v-if="settings.ttsEnabled" :size="16" />
+          <VolumeX v-else :size="16" />
+        </button>
+
         <button 
           class="action-btn clear-btn" 
           @click="handleClearHistory" 
@@ -437,28 +412,6 @@ async function handleToggleAsr() {
 
     <!-- Messages Area -->
     <n-scrollbar ref="scrollRef" class="messages-area" v-if="messages.length > 0" @scroll="handleScroll">
-      <!-- 星空背景 -->
-      <div class="stars-background">
-        <!-- 动态星星 -->
-        <div class="star" v-for="i in 50" :key="i" :style="{
-          left: Math.random() * 100 + '%',
-          top: Math.random() * 100 + '%',
-          animationDelay: Math.random() * 3 + 's',
-          width: Math.random() * 2 + 1 + 'px',
-          height: Math.random() * 2 + 1 + 'px',
-          transform: `translateY(${isAIThinking ? (Math.random() * 20 * starSpeed) : 0}px)`,
-          transition: isAIThinking ? 'transform 0.1s linear' : 'transform 0.5s ease-out'
-        }"></div>
-        
-        <!-- 流星 -->
-        <div class="meteor" v-for="meteor in meteors" :key="meteor.id" :style="{
-          left: meteor.x + '%',
-          top: meteor.y + '%',
-          animationDuration: meteor.duration + 's',
-          animationDelay: meteor.delay + 's'
-        }"></div>
-      </div>
-      
       <div class="messages-content">
         <!-- Load More Indicator -->
         <div class="load-more-indicator" v-if="hasMoreHistory">
@@ -480,22 +433,18 @@ async function handleToggleAsr() {
           :key="i"
           :message="msg"
           :time-label="formatTime(msg.timestamp)"
+          :class="{ 'loading-message': msg.isLoading && !msg.content }"
         />
         
-        <!-- Typing Indicator -->
-        <div class="typing-indicator" v-if="isTyping">
-          <div class="typing-dots">
-            <span></span>
-            <span></span>
-            <span></span>
-          </div>
-        </div>
+
+
       </div>
     </n-scrollbar>
 
     <!-- Input Area -->
     <ChatInput
       v-model="inputMessage"
+      v-model:images="inputImages"
       :loading="isTyping"
       :asr-enabled="asrConfig.enabled"
       :asr-listening="asrListening"
@@ -530,6 +479,24 @@ async function handleToggleAsr() {
   align-items: center;
   gap: 8px;
   z-index: 100;
+}
+
+/* Mobile: Increase z-index to avoid being covered by sidebar */
+@media (max-width: 767px) {
+  .chat-header {
+    z-index: 1000;
+    pointer-events: none;
+  }
+  
+  .chat-header > * {
+    pointer-events: auto;
+  }
+  
+  .connection-status,
+  .chat-actions,
+  .action-btn {
+    pointer-events: auto !important;
+  }
 }
 
 /* Connection Status */
@@ -575,6 +542,25 @@ async function handleToggleAsr() {
   background: rgba(255, 255, 255, 0.05);
   color: var(--color-text-dim);
   backdrop-filter: blur(8px);
+}
+
+.tts-btn {
+  margin-right: 8px;
+}
+
+.tts-btn.active {
+  color: var(--color-primary);
+  background: rgba(52, 211, 153, 0.1);
+  border-color: rgba(52, 211, 153, 0.2);
+}
+
+.tts-btn.playing {
+  animation: tts-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes tts-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 rgba(52, 211, 153, 0); }
+  50% { transform: scale(1.1); box-shadow: 0 0 10px rgba(52, 211, 153, 0.3); }
 }
 
 .clear-btn:hover {
@@ -765,6 +751,11 @@ async function handleToggleAsr() {
   opacity: 0.6;
 }
 
+/* 加载消息样式 */
+.loading-message {
+  /* 确保加载消息正常显示 */
+}
+
 .spin {
   animation: spin 1s linear infinite;
 }
@@ -774,19 +765,6 @@ async function handleToggleAsr() {
   to { transform: rotate(360deg); }
 }
 
-/* 星空背景 */
-.stars-background {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  overflow: hidden;
-  pointer-events: none;
-  z-index: 0;
-}
-
-/* 消息区域 - 在星空背景之上 */
 .messages-area {
   position: relative;
   z-index: 1;
@@ -795,87 +773,5 @@ async function handleToggleAsr() {
 
 .messages-area :deep(.n-scrollbar-container) {
   pointer-events: auto;
-}
-
-.star {
-  position: absolute;
-  background: rgba(255, 255, 255, 0.8);
-  border-radius: 50%;
-  box-shadow: 0 0 4px rgba(255, 255, 255, 0.5);
-  animation: twinkle 2s ease-in-out infinite;
-  will-change: transform;
-}
-
-/* 流星效果 */
-.meteor {
-  position: absolute;
-  width: 2px;
-  height: 2px;
-  background: linear-gradient(to bottom right, rgba(255, 255, 255, 1), transparent);
-  border-radius: 50%;
-  box-shadow: 
-    0 0 10px rgba(255, 255, 255, 0.8),
-    0 0 20px rgba(147, 197, 253, 0.6),
-    -30px 0 15px rgba(255, 255, 255, 0.3);
-  animation: meteor-shower 2s ease-in-out forwards;
-  opacity: 0;
-}
-
-@keyframes meteor-shower {
-  0% {
-    opacity: 0;
-    transform: translate(0, 0) scale(0.5);
-  }
-  10% {
-    opacity: 1;
-  }
-  50% {
-    transform: translate(100px, 150px) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: translate(200px, 300px) scale(0.3);
-  }
-}
-
-@keyframes twinkle {
-  0%, 100% {
-    opacity: 0.3;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.2);
-  }
-}
-
-/* Typing Indicator */
-.typing-indicator {
-  display: flex;
-  padding: 16px 0;
-}
-
-.typing-dots {
-  display: flex;
-  gap: 6px;
-  padding: 12px 16px;
-  background: var(--color-surface);
-  border-radius: 16px;
-}
-
-.typing-dots span {
-  width: 8px;
-  height: 8px;
-  background: var(--color-primary);
-  border-radius: 50%;
-  animation: dot-bounce 1.4s infinite;
-}
-
-.typing-dots span:nth-child(2) { animation-delay: 0.15s; }
-.typing-dots span:nth-child(3) { animation-delay: 0.3s; }
-
-@keyframes dot-bounce {
-  0%, 100% { transform: translateY(0); opacity: 0.4; }
-  50% { transform: translateY(-6px); opacity: 1; }
 }
 </style>

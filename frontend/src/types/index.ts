@@ -30,7 +30,15 @@ export interface ChatToolSegment extends ChatToolStep {
   type: "tool";
 }
 
-export type ChatMessageSegment = ChatTextSegment | ChatToolSegment | ChatReasoningSegment;
+export interface ChatImageSegment {
+  type: "image";
+  url?: string;
+  base64?: string;
+  mimeType?: string;
+  timestamp?: number;
+}
+
+export type ChatMessageSegment = ChatTextSegment | ChatToolSegment | ChatReasoningSegment | ChatImageSegment;
 
 export interface ChatMessage {
   id?: number;
@@ -40,6 +48,8 @@ export interface ChatMessage {
   segments?: ChatMessageSegment[];
   toolSteps?: ChatToolStep[];
   isToolStepsExpanded?: boolean;
+  isLoading?: boolean;  // 标记是否为加载状态
+  images?: string[];
 }
 
 export type ThemeKey = "polarLight" | "cyberPurple" | "deepTechFuturistic" | "midnightBlue";

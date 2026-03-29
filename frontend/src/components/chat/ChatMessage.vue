@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import MarkdownIt from 'markdown-it'
-import { FileText, Brain } from 'lucide-vue-next'
+import { FileText, Brain, Loader2 } from 'lucide-vue-next'
 import type { ChatMessage, ChatMessageSegment, ChatToolSegment, ChatReasoningSegment } from '@/types'
 
 const props = defineProps<{
   message: ChatMessage
   timeLabel: string
+  isLastUserMessage?: boolean  // 是否是最后一条用户消息（用于显示加载状态）
 }>()
 
 const md = new MarkdownIt({
@@ -74,6 +75,11 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
     return props.message.segments
   }
 
+  // 如果是加载状态且没有内容，返回空数组
+  if (props.message.isLoading && !props.message.content) {
+    return []
+  }
+
   if (props.message.content) {
     return [{
       type: 'text',
@@ -87,8 +93,23 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
 </script>
 
 <template>
-  <div class="message-row" :class="message.role">
-    <div class="message-bubble">
+  <div class="message-row" :class="[message.role, { 'is-loading': message.role === 'assistant' && message.isLoading && !message.content && !displaySegments.length }]">
+    <!-- AI 加载状态：只显示加载动画，不显示气泡框 -->
+    <div v-if="message.role === 'assistant' && message.isLoading && !message.content && !displaySegments.length" class="assistant-loading-container">
+      <div class="loading-stars">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+    </div>
+    
+    <!-- 正常消息气泡框 -->
+    <div v-else class="message-bubble">
+      <!-- 渲染用户发送的图片 -->
+      <div v-if="message.role === 'user' && message.images && message.images.length > 0" class="message-images">
+        <img v-for="(img, index) in message.images" :key="index" :src="img" alt="User uploaded image" class="message-image" />
+      </div>
+
       <template v-if="message.role === 'assistant' && displaySegments.length">
         <div
           v-for="(segment, index) in displaySegments"
@@ -150,6 +171,24 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
   flex-direction: column;
   gap: 8px;
   max-width: 80%;
+}
+
+.message-row.assistant {
+  align-self: flex-start;
+}
+
+.message-row.user {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+/* 用户消息入场动画 */
+.message-row.user {
+  animation: message-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* AI 消息入场动画（加载完成后） */
+.message-row.assistant:not(.is-loading) {
   animation: message-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -164,37 +203,69 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
   }
 }
 
-.message-row.assistant {
-  align-self: flex-start;
+/* AI 加载容器 */
+.assistant-loading-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 20px;
 }
 
-.message-row.user {
-  align-self: flex-end;
-  align-items: flex-end;
+.message-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.message-images + .message-content {
+  margin-top: 4px;
+}
+
+.message-image {
+  max-width: 300px;
+  max-height: 300px;
+  border-radius: 8px;
+  object-fit: contain;
+  border: 1px solid var(--color-outline);
 }
 
 .message-bubble {
   padding: 16px 20px;
   border-radius: 20px;
-  transition: all 0.2s ease;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   width: 100%;
+  position: relative;
+  overflow: hidden;
 }
 
 .message-row.assistant .message-bubble {
   background: var(--color-bubble-ai-bg);
   border: 1px solid var(--color-bubble-ai-border);
   border-bottom-left-radius: 6px;
+  box-shadow: 0 2px 12px rgba(52, 211, 153, 0.1);
 }
 
 .message-row.user .message-bubble {
   background: var(--color-bubble-user-bg);
   border: 1px solid var(--color-bubble-user-border);
   border-bottom-right-radius: 6px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
 }
 
 .message-bubble:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.15);
+}
+
+.message-row.assistant .message-bubble::before {
+  display: none;
+}
+
+.message-row.user .message-bubble::before {
+  display: none;
 }
 
 .message-content {
@@ -501,5 +572,35 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
 .meta-time {
   font-size: 12px;
   color: var(--color-text-dim);
+}
+
+/* AI 加载动画 */
+.loading-stars {
+  display: flex;
+  gap: 8px;
+}
+
+.loading-stars span {
+  width: 10px;
+  height: 10px;
+  background: var(--color-primary);
+  border-radius: 50%;
+  box-shadow: 0 0 12px var(--color-primary);
+  animation: star-pulse 2s infinite;
+}
+
+.loading-stars span:nth-child(2) { animation-delay: 0.3s; }
+.loading-stars span:nth-child(3) { animation-delay: 0.6s; }
+
+@keyframes star-pulse {
+  0%, 100% { 
+    transform: scale(1); 
+    opacity: 0.6;
+  }
+  50% { 
+    transform: scale(1.5); 
+    opacity: 1;
+    box-shadow: 0 0 20px var(--color-primary);
+  }
 }
 </style>

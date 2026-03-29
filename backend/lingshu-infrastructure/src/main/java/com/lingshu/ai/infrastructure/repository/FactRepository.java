@@ -59,7 +59,7 @@ public interface FactRepository extends Neo4jRepository<FactNode, Long> {
     @Query("MATCH (a:Fact)-[r:RELATED_TO|SUPERSEDES|CONTRADICTS]->(b:Fact) " +
            "WHERE id(a) IN $factIds AND id(b) IN $factIds " +
            "RETURN id(a) AS sourceId, id(b) AS targetId, type(r) AS type, r.weight AS weight, r.lastActivatedAt AS lastActivatedAt")
-    List<Map<String, Object>> findFactRelationsByFactIds(List<Long> factIds);
+    List<FactRelationProjection> findFactRelationsByFactIds(List<Long> factIds);
 
     Page<FactNode> findAllByStatus(String status, Pageable pageable);
 }

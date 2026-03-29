@@ -51,7 +51,7 @@ public class SummarizingMcpToolProvider implements ToolProvider {
         });
 
         return ToolProviderResult.builder()
-                .tools(wrappedTools)
+                .addAll(wrappedTools)
                 .build();
     }
 
@@ -61,7 +61,7 @@ public class SummarizingMcpToolProvider implements ToolProvider {
             
             String result = delegate.execute(toolExecutionRequest, memoryId);
             
-            if (summarizer.shouldSummarize(result)) {
+            if (summarizer.shouldSummarize(toolSpec.name(), result)) {
                 String userIntent = userIntentSupplier != null ? userIntentSupplier.get() : null;
                 
                 ToolResultSummarizer.SummarizeResult summarizeResult = 
@@ -82,11 +82,24 @@ public class SummarizingMcpToolProvider implements ToolProvider {
     }
 
     private String formatSummarizedResult(String toolName, ToolResultSummarizer.SummarizeResult result) {
-        return String.format(
-                "[工具 %s 返回数据已总结，原始长度: %d 字符]\n\n%s",
-                toolName,
-                result.originalLength(),
-                result.content()
-        );
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("[工具 %s 返回数据已总结，原始长度: %d 字符]\n", toolName, result.originalLength()));
+        
+        if (!result.relevant()) {
+            sb.append("[内容与用户问题无关]\n");
+        }
+        
+        sb.append("\n摘要：\n").append(result.content()).append("\n");
+        
+        if (!result.keyPoints().isEmpty()) {
+            sb.append("\n关键点：\n");
+            for (int i = 0; i < result.keyPoints().size(); i++) {
+                sb.append(String.format("%d. %s\n", i + 1, result.keyPoints().get(i)));
+            }
+        }
+        
+        sb.append(String.format("\n[置信度: %.0f%%]", result.confidence() * 100));
+        
+        return sb.toString();
     }
 }

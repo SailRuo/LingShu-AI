@@ -17,6 +17,7 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -119,6 +120,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
 
     private void handleChat(WebSocketSession session, Map<String, Object> data) throws IOException {
         String message = (String) data.get("message");
+        List<String> images = (List<String>) data.get("images");
         Long agentId = data.get("agentId") != null ?
                 ((Number) data.get("agentId")).longValue() : null;
         String userId = sessionUserMap.getOrDefault(session.getId(), "User");
@@ -127,7 +129,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         String baseUrl = (String) data.get("baseUrl");
         Boolean enableThinking = (Boolean) data.get("enableThinking");
 
-        if (message == null || message.isBlank()) {
+        if ((message == null || message.isBlank()) && (images == null || images.isEmpty())) {
             sendMessage(session, Map.of(
                 "type", "error",
                 "message", "消息不能为空"
@@ -136,17 +138,18 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         }
 
 
-        log.info("处理聊天消息: userId={}, message={}, model={}, baseUrl={}, enableThinking={}", userId,
-                message.length() > 50 ? message.substring(0, 50) + "..." : message,
+        log.info("处理聊天消息: userId={}, message={}, imagesCount={}, model={}, baseUrl={}, enableThinking={}", userId,
+                message != null && message.length() > 50 ? message.substring(0, 50) + "..." : message,
+                images != null ? images.size() : 0,
                 model, baseUrl, enableThinking);
 
         sendMessage(session, Map.of(
             "type", "chatStart",
-            "userMessage", message
+            "userMessage", message != null ? message : ""
         ));
 
         try {
-            chatService.streamChat(message, agentId, userId, model, apiKey, baseUrl, enableThinking, new ChatService.ToolEventListener() {
+            chatService.streamChat(message, images, agentId, userId, model, apiKey, baseUrl, enableThinking, new ChatService.ToolEventListener() {
                         @Override
                         public void onToolStart(String toolCallId, String toolName, String arguments) {
                             try {

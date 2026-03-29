@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, h, computed } from 'vue'
 import {
-  NButton, NIcon, NCard, NTag, NSwitch, NPopconfirm, NModal,
+  NButton, NIcon, NTag, NSwitch, NPopconfirm, NModal,
   NForm, NFormItem, NInput, NSelect, useMessage, NSpace, NEmpty,
-  NSpin, NDynamicInput
+  NSpin, NDynamicInput, NDataTable, NTooltip
 } from 'naive-ui'
-import { Plus, Trash2, Edit, Plug, Activity, Server, FileJson } from 'lucide-vue-next'
+import { Plus, Trash2, Edit, Plug, FileJson, RefreshCw } from 'lucide-vue-next'
 
 const message = useMessage()
 const loading = ref(false)
@@ -14,10 +14,7 @@ const showModal = ref(false)
 const showImportModal = ref(false)
 const importJsonText = ref('')
 const editingServer = ref<any>(null)
-const testingPing = ref<Record<number, boolean>>({})
-const showToolsModal = ref(false)
-const currentTools = ref<any[]>([])
-const currentServerName = ref('')
+const togglingServer = ref<Record<number, boolean>>({})
 
 const formModel = ref({
   name: '',
@@ -28,6 +25,130 @@ const formModel = ref({
   url: '',
   isActive: true
 })
+
+const columns = computed(() => [
+  {
+    title: '服务名称',
+    key: 'name',
+    width: 240,
+    ellipsis: { tooltip: true },
+    render: (row: any) => {
+      return h('span', { style: { fontWeight: 600, fontSize: '14px' } }, row.name)
+    }
+  },
+  {
+    title: '类型',
+    key: 'transportType',
+    width: 100,
+    align: 'center' as const,
+    render: (row: any) => {
+      const type = (row.transportType || '').toLowerCase()
+      return h(NTag, { 
+        type: type === 'stdio' ? 'info' : 'success', 
+        size: 'small', 
+        bordered: false,
+        round: true
+      }, {
+        default: () => type.toUpperCase()
+      })
+    }
+  },
+  {
+    title: '工具信息',
+    key: 'tools',
+    minWidth: 300,
+    ellipsis: { tooltip: true },
+    render: (row: any) => {
+      if (row.tools && row.tools.length > 0) {
+        return h(NSpace, { size: 4 }, {
+          default: () => row.tools.map((t: any) => 
+            h(NTooltip, { 
+              trigger: 'hover', 
+              placement: 'top',
+              style: { maxWidth: '320px' }
+            }, {
+              trigger: () => h(NTag, { 
+                size: 'small', 
+                round: true, 
+                bordered: true,
+                style: { 
+                  background: 'rgba(var(--color-primary-rgb), 0.05)',
+                  color: 'var(--color-primary)',
+                  borderColor: 'rgba(var(--color-primary-rgb), 0.2)',
+                  fontSize: '11px',
+                  cursor: 'help'
+                }
+              }, { default: () => t.name }),
+              default: () => t.description || '无描述'
+            })
+          )
+        })
+      }
+      const detail = row.transportType === 'stdio' 
+        ? `${row.command || ''} ${row.args ? JSON.parse(row.args).join(' ') : ''}`
+        : row.url || ''
+      return h('div', {
+        style: { 
+          fontSize: '13px', 
+          color: 'var(--color-text-dim)',
+          fontFamily: 'monospace'
+        }
+      }, detail)
+    }
+  },
+  {
+    title: '状态',
+    key: 'isActive',
+    width: 80,
+    align: 'center' as const,
+    render: (row: any) => {
+      return h(NSwitch, {
+        size: 'small',
+        value: row.isActive,
+        loading: togglingServer.value[row.id] || false,
+        onUpdateValue: () => toggleActive(row)
+      })
+    }
+  },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 200,
+    align: 'center' as const,
+    render: (row: any) => {
+      return h(NSpace, { justify: 'center' }, {
+        default: () => [
+          h(NButton, {
+            size: 'small',
+            onClick: () => exportServer(row),
+            secondary: true
+          }, {
+            icon: () => h(NIcon, { component: FileJson, size: 16 })
+          }),
+          h(NButton, {
+            size: 'small',
+            onClick: () => openEdit(row),
+            secondary: true
+          }, {
+            icon: () => h(NIcon, { component: Edit, size: 16 })
+          }),
+          h(NPopconfirm, {
+            onPositiveClick: () => deleteServer(row.id)
+          }, {
+            trigger: () => h(NButton, {
+              size: 'small',
+              type: 'error',
+              secondary: true
+            }, {
+              icon: () => h(NIcon, { component: Trash2, size: 16 })
+            }),
+            default: () => '确定删除该 MCP 配置吗？这不会删除本地文件。'
+          })
+        ]
+      })
+    }
+  }
+])
 
 const transportOptions = [
   { label: 'STDIO (本地子进程)', value: 'STDIO' },
@@ -140,8 +261,11 @@ async function saveServer() {
 }
 
 async function toggleActive(server: any) {
+  const serverId = server.id
+  togglingServer.value[serverId] = true
+  
   try {
-    const res = await fetch(`/api/mcp/${server.id}/toggle`, { method: 'POST' })
+    const res = await fetch(`/api/mcp/${serverId}/toggle`, { method: 'POST' })
     if (res.ok) {
       server.isActive = !server.isActive
       message.success(server.isActive ? '服务已启用' : '服务已停用')
@@ -150,6 +274,8 @@ async function toggleActive(server: any) {
     }
   } catch (e) {
     message.error('状态切换失败')
+  } finally {
+    togglingServer.value[serverId] = false
   }
 }
 
@@ -167,29 +293,40 @@ async function deleteServer(id: number) {
   }
 }
 
-async function pingServer(id: number) {
-  testingPing.value[id] = true
-  try {
-    const res = await fetch(`/api/mcp/${id}/ping`, { method: 'POST' })
-    if (res.ok) {
-      const data = await res.json()
-      if (data.status === 'success') {
-        currentTools.value = data.tools || []
-        currentServerName.value = servers.value.find(s => s.id === id)?.name || ''
-        showToolsModal.value = true
-        message.success(`测通成功 (发现 ${currentTools.value.length} 个工具)`)
-      } else {
-        message.warning('通信异常: ' + (data.message || '未知错误'))
-      }
-    } else {
-      message.error('测通请求失败')
+function exportServer(server: any) {
+  const mcpConfig: any = {}
+  const serverName = server.name || 'mcp-server'
+  
+  if (server.transportType?.toUpperCase() === 'SSE') {
+    mcpConfig[serverName] = {
+      url: server.url
     }
-  } catch (e) {
-    message.error('测通验证出错')
-  } finally {
-    testingPing.value[id] = false
+  } else {
+    try {
+      mcpConfig[serverName] = {
+        command: server.command,
+        args: server.args ? JSON.parse(server.args) : [],
+        env: server.env ? JSON.parse(server.env) : {}
+      }
+    } catch (e) {
+      mcpConfig[serverName] = {
+        command: server.command,
+        args: [],
+        env: {}
+      }
+    }
   }
+  
+  const blob = new Blob([JSON.stringify({ mcpServers: mcpConfig }, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${serverName}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+  message.success('配置已导出')
 }
+
 
 async function handleImport() {
   if (!importJsonText.value.trim()) {
@@ -231,78 +368,52 @@ function renderEnvInput() {
 </script>
 
 <template>
-  <div class="mcp-settings-container">
-    <div class="section-header">
-      <n-icon :component="Plug" />
-      <h2>MCP 插件列表</h2>
-      <n-space class="create-btn">
-        <n-button quaternary size="small" @click="showImportModal = true">
-          <template #icon><n-icon :component="FileJson" /></template>
-          从 JSON 导入
+  <div class="mcp-settings-view">
+    <header class="view-header">
+      <div class="header-title">
+        <n-icon :size="24" color="var(--color-primary)"><Plug /></n-icon>
+        <h2>MCP 插件管理</h2>
+      </div>
+      <p class="header-desc">通过 Model Context Protocol (MCP) 扩展 AI 能力。您可以集成 StdIO 子进程或远程 SSE 服务，为模型提供实时工具调用能力。</p>
+    </header>
+
+    <div class="toolbar glass">
+      <div class="toolbar-left">
+        <n-button secondary @click="fetchServers">
+          <template #icon><n-icon><RefreshCw /></n-icon></template>
+          刷新列表
         </n-button>
-        <n-button type="primary" size="small" @click="openCreate">
-          <template #icon><n-icon :component="Plus" /></template>
-          添加服务
-        </n-button>
-      </n-space>
+      </div>
+      <div class="toolbar-right">
+        <n-space>
+          <n-button secondary @click="showImportModal = true">
+            <template #icon><n-icon :component="FileJson" /></template>
+            从 JSON 导入
+          </n-button>
+          <n-button type="primary" @click="openCreate">
+            <template #icon><n-icon :component="Plus" /></template>
+            添加 MCP 服务
+          </n-button>
+        </n-space>
+      </div>
     </div>
 
-    <n-spin :show="loading">
-      <div v-if="servers.length === 0" class="empty-state">
-        <n-empty description="暂未配置任何 MCP 服务" />
-      </div>
-      
-      <div v-else class="servers-grid">
-        <n-card v-for="s in servers" :key="s.id" class="glass-card server-card">
-          <div class="server-header">
-            <div class="server-title-group">
-              <span class="server-icon" :class="{ 'active': s.isActive }">
-                <n-icon :component="Server" />
-              </span>
-              <div class="server-info">
-                <div class="server-name">
-                  {{ s.name }}
-                  <n-tag :type="s.transportType === 'stdio' ? 'info' : 'success'" size="small">
-                    {{ s.transportType.toUpperCase() }}
-                  </n-tag>
-                </div>
-                <div class="server-detail" v-if="s.transportType === 'stdio'">
-                  {{ s.command }} {{ s.args ? JSON.parse(s.args).join(' ') : '' }}
-                </div>
-                <div class="server-detail" v-else>
-                  {{ s.url }}
-                </div>
-              </div>
-            </div>
-            <div class="server-switch">
-              <n-switch :value="s.isActive" @update:value="toggleActive(s)" />
-            </div>
-          </div>
-          
-          <div class="server-actions mt-4">
-            <n-space>
-              <n-button size="small" :loading="testingPing[s.id]" @click="pingServer(s.id)" :disabled="!s.isActive">
-                <template #icon><n-icon :component="Activity" /></template>
-                测通
-              </n-button>
-              <n-button size="small" @click="openEdit(s)">
-                <template #icon><n-icon :component="Edit" /></template>
-                编辑
-              </n-button>
-              <n-popconfirm @positive-click="deleteServer(s.id)">
-                <template #trigger>
-                  <n-button size="small" type="error" ghost>
-                    <template #icon><n-icon :component="Trash2" /></template>
-                  </n-button>
-                </template>
-                确定删除该 MCP 配置吗？这不会删除本地文件。
-              </n-popconfirm>
-            </n-space>
-          </div>
-        </n-card>
-      </div>
-    </n-spin>
+    <div class="table-container glass">
+      <n-spin :show="loading">
+        <div v-if="servers.length === 0" class="empty-state">
+          <n-empty description="暂未配置任何 MCP 服务" />
+        </div>
+        <n-data-table
+          v-else
+          :columns="columns"
+          :data="servers"
+          :row-key="(row) => row.id"
+          class="custom-table"
+        />
+      </n-spin>
+    </div>
 
+    <!-- Modals remain mostly the same but ensure consistent style -->
     <n-modal 
       v-model:show="showModal" 
       preset="card" 
@@ -387,146 +498,76 @@ function renderEnvInput() {
         </div>
       </template>
     </n-modal>
-
-    <n-modal 
-      v-model:show="showToolsModal" 
-      preset="card" 
-      :title="'工具详情: ' + currentServerName" 
-      class="mcp-modal"
-      :style="{ width: '600px' }"
-    >
-      <div v-if="currentTools.length === 0" style="padding: 20px; text-align: center;">
-        <n-empty description="该服务未发现任何可用工具" />
-      </div>
-      <div v-else class="tools-list">
-        <div v-for="t in currentTools" :key="t.name" class="tool-item">
-          <div class="tool-name">{{ t.name }}</div>
-          <div class="tool-desc">{{ t.description || '无描述' }}</div>
-        </div>
-      </div>
-    </n-modal>
   </div>
 </template>
 
 <style scoped>
-.mcp-settings-container {
+.mcp-settings-view {
   height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  gap: 16px;
 }
 
-.section-header {
+.view-header {
+  flex-shrink: 0;
+}
+
+.header-title {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 16px;
-  color: var(--color-text);
-  padding: 16px 0;
+  gap: 12px;
+  margin-bottom: 8px;
 }
 
-.section-header h2 {
-  font-size: 16px;
-  font-weight: 700;
+.header-title h2 {
   margin: 0;
-  flex: 1;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text);
+  letter-spacing: 0.5px;
 }
 
-.create-btn {
-  margin-left: auto;
+.header-desc {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-dim);
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: rgba(var(--color-surface-rgb), 0.3);
+  border: 1px solid var(--color-outline);
+}
+
+.toolbar-left, .toolbar-right {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.table-container {
+  flex: 1;
+  min-height: 0;
+  border-radius: 12px;
+  background: rgba(var(--color-surface-rgb), 0.3);
+  border: 1px solid var(--color-outline);
+  overflow: hidden;
+  padding: 16px;
+}
+
+.custom-table {
+  height: 100%;
 }
 
 .empty-state {
   padding: 40px;
-  background: var(--color-glass-bg);
-  border-radius: 16px;
-  border: 1px dashed var(--color-outline);
-}
-
-.servers-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-  gap: 16px;
-}
-
-.glass-card {
-  background: var(--color-glass-bg) !important;
-  backdrop-filter: blur(20px);
-  border: 1px solid var(--color-glass-border) !important;
-  border-radius: 16px !important;
-  transition: all 0.2s ease;
-}
-
-.glass-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 20px -10px rgba(0,0,0,0.15);
-}
-
-.server-card {
-  padding: 16px;
-}
-
-.server-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-}
-
-.server-title-group {
-  display: flex;
-  gap: 12px;
-  flex: 1;
-}
-
-.server-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0,0,0,0.05);
-  color: var(--color-text-dim);
-  transition: all 0.3s ease;
-}
-
-.server-icon.active {
-  background: var(--color-primary-dim);
-  color: var(--color-primary);
-}
-
-.server-info {
-  flex: 1;
-  overflow: hidden;
-}
-
-.server-name {
-  font-weight: 600;
-  font-size: 15px;
-  margin-bottom: 4px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.server-detail {
-  font-size: 12px;
-  color: var(--color-text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: monospace;
-  background: rgba(0,0,0,0.03);
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.mt-4 {
-  margin-top: 16px;
-}
-
-.server-actions {
-  display: flex;
-  justify-content: flex-end;
-  border-top: 1px dashed var(--color-outline);
-  padding-top: 12px;
+  text-align: center;
 }
 
 .mcp-modal {
@@ -548,33 +589,11 @@ function renderEnvInput() {
 
 .mb-4 { margin-bottom: 16px; }
 
-.tools-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  max-height: 400px;
-  overflow-y: auto;
-  padding-right: 4px;
-}
 
-.tool-item {
-  padding: 12px;
-  background: rgba(0,0,0,0.03);
-  border-radius: 8px;
-  border-left: 4px solid var(--color-primary);
-}
-
-.tool-name {
-  font-weight: 600;
-  font-size: 14px;
-  margin-bottom: 4px;
-  color: var(--color-primary);
-  font-family: monospace;
-}
-
-.tool-desc {
-  font-size: 13px;
-  color: var(--color-text-dim);
-  line-height: 1.5;
+/* Glass effect fallback if not globally defined */
+.glass {
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 </style>
+

@@ -45,4 +45,34 @@ public class SystemSettingDTO {
 
     @JsonProperty("inactiveCheckIntervalMs")
     private Long inactiveCheckIntervalMs;
+
+    @JsonProperty("memoryModelSource")
+    private String memoryModelSource;
+
+    @JsonProperty("memoryModel")
+    private String memoryModel;
+
+    @JsonProperty("memoryModelBaseUrl")
+    private String memoryModelBaseUrl;
+
+    @JsonProperty("memoryModelApiKey")
+    private String memoryModelApiKey;
+
+    @JsonProperty("ttsBaseUrl")
+    private String ttsBaseUrl;
+
+    @JsonProperty("ttsApiKey")
+    private String ttsApiKey;
+
+    @JsonProperty("ttsDefaultVoice")
+    private String ttsDefaultVoice;
+
+    @JsonProperty("ttsDefaultSpeed")
+    private Double ttsDefaultSpeed;
+
+    @JsonProperty("ttsDefaultFormat")
+    private String ttsDefaultFormat;
+
+    @JsonProperty("ttsEnabled")
+    private Boolean ttsEnabled;
 }

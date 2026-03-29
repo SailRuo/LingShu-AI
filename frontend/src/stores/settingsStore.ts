@@ -5,6 +5,12 @@ export interface SystemSettings {
   model: string
   baseUrl: string
   apiKey: string
+  ttsBaseUrl: string
+  ttsApiKey: string
+  ttsDefaultVoice: string
+  ttsDefaultSpeed: number
+  ttsDefaultFormat: string
+  ttsEnabled: boolean
 }
 
 export interface AsrSettings {
@@ -17,7 +23,13 @@ const settings = ref<SystemSettings>({
   source: 'openai',
   model: '',
   baseUrl: '',
-  apiKey: ''
+  apiKey: '',
+  ttsBaseUrl: 'http://localhost:5050',
+  ttsApiKey: '',
+  ttsDefaultVoice: 'alloy',
+  ttsDefaultSpeed: 1.0,
+  ttsDefaultFormat: 'mp3',
+  ttsEnabled: false
 })
 
 const asrSettings = ref<AsrSettings>({
@@ -37,7 +49,13 @@ async function fetchSettings() {
         source: data.source || 'openai',
         model: data.chatModel || '',
         baseUrl: data.baseUrl || '',
-        apiKey: data.apiKey || ''
+        apiKey: data.apiKey || '',
+        ttsBaseUrl: data.ttsBaseUrl || 'http://localhost:5050',
+        ttsApiKey: data.ttsApiKey || '',
+        ttsDefaultVoice: data.ttsDefaultVoice || 'alloy',
+        ttsDefaultSpeed: data.ttsDefaultSpeed || 1.0,
+        ttsDefaultFormat: data.ttsDefaultFormat || 'mp3',
+        ttsEnabled: data.ttsEnabled ?? false
       }
       isLoaded.value = true
     }
@@ -71,7 +89,13 @@ async function saveSettings() {
         source: settings.value.source,
         chatModel: settings.value.model,
         baseUrl: settings.value.baseUrl,
-        apiKey: settings.value.apiKey
+        apiKey: settings.value.apiKey,
+        ttsBaseUrl: settings.value.ttsBaseUrl,
+        ttsApiKey: settings.value.ttsApiKey,
+        ttsDefaultVoice: settings.value.ttsDefaultVoice,
+        ttsDefaultSpeed: settings.value.ttsDefaultSpeed,
+        ttsDefaultFormat: settings.value.ttsDefaultFormat,
+        ttsEnabled: settings.value.ttsEnabled
       })
     })
   } catch (err) {

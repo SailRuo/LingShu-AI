@@ -10,13 +10,23 @@ import com.lingshu.ai.infrastructure.entity.ChatMessage;
 import com.lingshu.ai.infrastructure.entity.ChatSession;
 import com.lingshu.ai.infrastructure.repository.ChatMessageRepository;
 import com.lingshu.ai.infrastructure.repository.ChatSessionRepository;
+import dev.langchain4j.data.message.Content;
+import dev.langchain4j.data.message.ImageContent;
+import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.TextContent;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.http.client.jdk.JdkHttpClientBuilder;
+import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.ChatMemoryProvider;
 
 import dev.langchain4j.mcp.client.McpClient;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.listener.ChatModelListener;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
+import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.tool.ToolErrorContext;
 import dev.langchain4j.service.tool.ToolErrorHandlerResult;
@@ -28,6 +38,7 @@ import reactor.core.publisher.Sinks;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executors;
 
@@ -245,22 +256,30 @@ public class ChatServiceImpl implements ChatService {
     @Override
     public Flux<String> streamChat(String message, Long agentId, String userId, String model, String apiKey, String baseUrl,
                                    Boolean enableThinking, ToolEventListener toolEventListener) {
+        return streamChat(message, null, agentId, userId, model, apiKey, baseUrl, enableThinking, toolEventListener);
+    }
+
+    @Override
+    public Flux<String> streamChat(String message, List<String> images, Long agentId, String userId, String model, String apiKey, String baseUrl,
+                                   Boolean enableThinking, ToolEventListener toolEventListener) {
         ChatSession session = getOrCreateSession();
         AgentConfig agent = getAgent(agentId);
+        
+        String safeMessage = message != null ? message : "";
 
-        systemLogService.info("收到用户消息 (流式): " + (message.length() > 20 ? message.substring(0, 20) + "..." : message) + ", enableThinking=" + enableThinking, "CHAT");
+        systemLogService.info("收到用户消息 (流式): " + (safeMessage.length() > 20 ? safeMessage.substring(0, 20) + "..." : safeMessage) + ", enableThinking=" + enableThinking + ", images=" + (images != null ? images.size() : 0), "CHAT");
 
         Sinks.Many<String> sink = Sinks.many().unicast().onBackpressureBuffer();
         StringBuilder assistantResponseStore = new StringBuilder();
 
-        com.lingshu.ai.core.dto.EmotionContextResult emotionResult = emotionPreAnalysisService.analyzeBeforeResponse(userId, message, session.getId());
+        com.lingshu.ai.core.dto.EmotionContextResult emotionResult = emotionPreAnalysisService.analyzeBeforeResponse(userId, safeMessage, session.getId());
         String emotionPrompt = "";
         if (emotionResult != null) {
             emotionPrompt = emotionPreAnalysisService.getEmotionPromptInjection(userId);
             systemLogService.info("情感前置分析完成，已注入情感状态到 Prompt", "EMOTION");
         }
 
-        String longTermContext = memoryService.retrieveContext(userId, message);
+        String longTermContext = memoryService.retrieveContext(userId, safeMessage);
         String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
         String systemPrompt = promptBuilderService.buildMergedSystemPrompt(agent, relationshipPrompt, longTermContext);
         
@@ -273,12 +292,9 @@ public class ChatServiceImpl implements ChatService {
 
         systemLogService.startTimer("llm_LLM");
 
-        AiConfig.RawStreamingAssistant assistantToUse;
-        AiServices<AiConfig.RawStreamingAssistant> builder;
+        StreamingChatModel streamingModelToUse = streamingChatLanguageModel;
 
         if (model != null && baseUrl != null) {
-            StreamingChatModel tempModel;
-            
             JdkHttpClientBuilder httpClientBuilder =
                     dev.langchain4j.http.client.jdk.JdkHttpClient.builder()
                             .httpClientBuilder(java.net.http.HttpClient.newBuilder()
@@ -288,7 +304,7 @@ public class ChatServiceImpl implements ChatService {
             
             if ("ollama".equalsIgnoreCase(baseUrl) || baseUrl.contains("11434")) {
                 log.info("使用 Ollama 模式, baseUrl={}, model={}", baseUrl, model);
-                tempModel = dev.langchain4j.model.ollama.OllamaStreamingChatModel.builder()
+                streamingModelToUse = dev.langchain4j.model.ollama.OllamaStreamingChatModel.builder()
                         .baseUrl(baseUrl)
                         .modelName(model)
                         .timeout(java.time.Duration.ofMinutes(5))
@@ -299,7 +315,7 @@ public class ChatServiceImpl implements ChatService {
                         ? baseUrl
                         : baseUrl + (baseUrl.endsWith("/") ? "v1" : "/v1");
                 log.info("使用 OpenAI 兼容模式, effectiveUrl={}, model={}, apiKey={}, enableThinking={}", effectiveUrl, model, apiKey != null ? "***" : "null", enableThinking);
-                var openAiBuilder = dev.langchain4j.model.openai.OpenAiStreamingChatModel.builder()
+                var openAiBuilder = OpenAiStreamingChatModel.builder()
                         .baseUrl(effectiveUrl)
                         .apiKey(apiKey != null ? apiKey : "no-key")
                         .modelName(model)
@@ -312,82 +328,206 @@ public class ChatServiceImpl implements ChatService {
                     log.info("启用 Thinking/Reasoning 模式");
                 }
                 
-                tempModel = openAiBuilder.build();
+                streamingModelToUse = openAiBuilder.build();
             }
-            builder = AiServices.builder(AiConfig.RawStreamingAssistant.class)
-                    .streamingChatModel(tempModel)
-                    .chatMemoryProvider(chatMemoryProvider)
-                    .toolArgumentsErrorHandler(this::handleToolArgumentsError)
-                    .maxSequentialToolsInvocations(15);
-        } else {
-            builder = AiServices.builder(AiConfig.RawStreamingAssistant.class)
-                    .streamingChatModel(streamingChatLanguageModel)
-                    .chatMemoryProvider(chatMemoryProvider)
-                    .toolArgumentsErrorHandler(this::handleToolArgumentsError)
-                    .maxSequentialToolsInvocations(15);
         }
 
-        java.util.List<Object> enabledLocalTools = localTools.getEnabledTools(settingService.getLocalToolsSetting());
+        systemLogService.debug("准备发送流式对话请求，SystemPrompt 长度: " + systemPrompt.length(), "CHAT");
+
+        // 构建多模态 UserMessage
+        List<Content> contents = new ArrayList<>();
+        if (!safeMessage.isBlank()) {
+            contents.add(TextContent.from(safeMessage));
+        }
+        if (images != null && !images.isEmpty()) {
+            for (String base64Image : images) {
+                String compressed = com.lingshu.ai.core.util.ImageCompressor.compressToBase64(base64Image);
+                String base64Data = extractBase64Data(compressed);
+                String mimeType = extractMimeType(compressed);
+                contents.add(ImageContent.from(base64Data, mimeType));
+            }
+        }
+        
+        // 如果既没有文本也没有图片，添加一个默认文本避免报错
+        if (contents.isEmpty()) {
+            contents.add(TextContent.from(" "));
+        }
+
+        UserMessage userMessageObj = UserMessage.from(contents);
+
+        if (images != null && !images.isEmpty()) {
+            streamMultimodalRequest(streamingModelToUse, session.getId(), systemPrompt, userMessageObj,
+                    userId, safeMessage, assistantResponseStore, sink);
+            return sink.asFlux();
+        }
+
+        AiServices<AiConfig.StreamingAssistant> builder = AiServices.builder(AiConfig.StreamingAssistant.class)
+                .streamingChatModel(streamingModelToUse)
+                .chatMemoryProvider(chatMemoryProvider)
+                .toolArgumentsErrorHandler(this::handleToolArgumentsError)
+                .maxSequentialToolsInvocations(15);
+
+        List<Object> enabledLocalTools = localTools.getEnabledTools(settingService.getLocalToolsSetting());
         if (!enabledLocalTools.isEmpty()) {
             builder.tools(enabledLocalTools.toArray());
         }
 
         List<McpClient> mcpClients = mcpService.getActiveClients();
         if (!mcpClients.isEmpty()) {
-            String userIntent = message;
+            String userIntent = safeMessage;
             builder.toolProvider(new SummarizingMcpToolProvider(
                     mcpClients, toolResultSummarizer, () -> userIntent));
         }
-        assistantToUse = builder.build();
 
-        systemLogService.debug("准备发送流式对话请求，SystemPrompt 长度: " + systemPrompt.length(), "CHAT");
+        builder.build()
+                .chat(session.getId(), safeMessage.isBlank() ? " " : safeMessage, systemPrompt)
+            .onPartialThinking(thinking -> {
+                systemLogService.thinking(thinking.text(), "LLM");
+                sink.tryEmitNext("\u0001REASONING\u0001" + thinking.text() + "\u0001/REASONING\u0001");
+            })
+            .beforeToolExecution(beforeToolExecution -> {
+                if (toolEventListener == null) {
+                    return;
+                }
+                var request = beforeToolExecution.request();
+                toolEventListener.onToolStart(request.id(), request.name(), request.arguments());
+            })
+            .onPartialResponse(token -> {
+                if (assistantResponseStore.isEmpty()) {
+                    systemLogService.info("流式输出已开启，接收首个 token...", "LLM");
+                }
+                assistantResponseStore.append(token);
+                sink.tryEmitNext(token);
+            })
+            .onToolExecuted(toolExecution -> {
+                if (toolEventListener == null) {
+                    return;
+                }
+                var request = toolExecution.request();
+                toolEventListener.onToolEnd(
+                        request.id(),
+                        request.name(),
+                        request.arguments(),
+                        toolExecution.result(),
+                        toolExecution.hasFailed()
+                );
+            })
+            .onCompleteResponse(response -> {
+                int tokenCount = assistantResponseStore.length() / 4;
+                systemLogService.llmEnd(tokenCount, "LLM");
+                systemLogService.success("对话完成，回复长度: " + assistantResponseStore.length() + " 字符", "CHAT");
+                sink.tryEmitComplete();
+                postProcessAfterResponse(userId, safeMessage, assistantResponseStore.toString());
+            })
+            .onError(error -> {
+                log.error("流式对话发生错误: {}", error.getMessage(), error);
+                systemLogService.error("LLM 调用失败: " + error.getMessage(), "LLM");
 
-        assistantToUse.chat(session.getId(), message, systemPrompt)
-                .onPartialThinking(thinking -> {
-                    systemLogService.thinking(thinking.text(), "LLM");
-                    sink.tryEmitNext("\u0001REASONING\u0001" + thinking.text() + "\u0001/REASONING\u0001");
-                })
-                .beforeToolExecution(beforeToolExecution -> {
-                    if (toolEventListener == null) {
-                        return;
-                    }
-                    var request = beforeToolExecution.request();
-                    toolEventListener.onToolStart(request.id(), request.name(), request.arguments());
-                })
-                .onPartialResponse(token -> {
-                    if (assistantResponseStore.isEmpty()) {
-                        systemLogService.info("流式输出已开启，接收首个 token...", "LLM");
-                    }
-                    assistantResponseStore.append(token);
-                    sink.tryEmitNext(token);
-                })
-                .onToolExecuted(toolExecution -> {
-                    if (toolEventListener == null) {
-                        return;
-                    }
-                    var request = toolExecution.request();
-                    toolEventListener.onToolEnd(
-                            request.id(),
-                            request.name(),
-                            request.arguments(),
-                            toolExecution.result(),
-                            toolExecution.hasFailed()
-                    );
-                })
-                .onCompleteResponse(response -> {
-                    int tokenCount = assistantResponseStore.length() / 4;
-                    systemLogService.llmEnd(tokenCount, "LLM");
-                    systemLogService.success("对话完成，回复长度: " + assistantResponseStore.length() + " 字符", "CHAT");
-                    sink.tryEmitComplete();
-                    postProcessAfterResponse(userId, message, assistantResponseStore.toString());
-                })
-                .onError(error -> {
-                    systemLogService.llmError(error.getMessage(), "LLM");
+                String errorMsg = error.getMessage() != null ? error.getMessage() : "";
+
+                if (errorMsg.contains("context length") || errorMsg.contains("n_ctx") || errorMsg.contains("n_keep")) {
+                    sink.tryEmitError(new RuntimeException("输入内容过长，超出模型上下文限制。请尝试：\n1. 减少图片数量或使用更小的图片\n2. 清除对话历史后重试\n3. 切换到支持更长上下文的模型"));
+                } else if (errorMsg.contains("image") || errorMsg.contains("vision") || errorMsg.contains("multimodal")) {
+                    sink.tryEmitError(new RuntimeException("当前模型不支持图像识别，请切换到支持视觉的模型（如 Qwen-VL 等）或移除图片后重试。"));
+                } else {
                     sink.tryEmitError(error);
-                })
-                .start();
+                }
+            })
+            .start();
 
         return sink.asFlux();
+    }
+
+    private void streamMultimodalRequest(StreamingChatModel streamingModel,
+                                         Long sessionId,
+                                         String systemPrompt,
+                                         UserMessage userMessage,
+                                         String userId,
+                                         String safeMessage,
+                                         StringBuilder assistantResponseStore,
+                                         Sinks.Many<String> sink) {
+        ChatMemory chatMemory = chatMemoryProvider.get(sessionId);
+        chatMemory.add(SystemMessage.from(systemPrompt));
+        chatMemory.add(userMessage);
+
+        ChatRequest request = ChatRequest.builder()
+                .messages(chatMemory.messages())
+                .build();
+
+        streamingModel.chat(request, new StreamingChatResponseHandler() {
+            @Override
+            public void onPartialResponse(String partialResponse) {
+                handleStreamingToken(partialResponse, assistantResponseStore, sink);
+            }
+
+            @Override
+            public void onPartialThinking(dev.langchain4j.model.chat.response.PartialThinking partialThinking) {
+                systemLogService.thinking(partialThinking.text(), "LLM");
+                sink.tryEmitNext("\u0001REASONING\u0001" + partialThinking.text() + "\u0001/REASONING\u0001");
+            }
+
+            @Override
+            public void onCompleteResponse(ChatResponse response) {
+                if (response != null && response.aiMessage() != null) {
+                    chatMemory.add(response.aiMessage());
+                }
+                completeStreamingResponse(userId, safeMessage, assistantResponseStore, sink);
+            }
+
+            @Override
+            public void onError(Throwable error) {
+                handleStreamingError(error, sink);
+            }
+        });
+    }
+
+    private void handleStreamingToken(String token,
+                                      StringBuilder assistantResponseStore,
+                                      Sinks.Many<String> sink) {
+        if (assistantResponseStore.isEmpty()) {
+            systemLogService.info("娴佸紡杈撳嚭宸插紑鍚紝鎺ユ敹棣栦釜 token...", "LLM");
+        }
+        assistantResponseStore.append(token);
+        sink.tryEmitNext(token);
+    }
+
+    private void completeStreamingResponse(String userId,
+                                           String safeMessage,
+                                           StringBuilder assistantResponseStore,
+                                           Sinks.Many<String> sink) {
+        int tokenCount = assistantResponseStore.length() / 4;
+        systemLogService.llmEnd(tokenCount, "LLM");
+        systemLogService.success("瀵硅瘽瀹屾垚锛屽洖澶嶉暱搴? " + assistantResponseStore.length() + " 瀛楃", "CHAT");
+        sink.tryEmitComplete();
+        postProcessAfterResponse(userId, safeMessage, assistantResponseStore.toString());
+    }
+
+    private void handleStreamingError(Throwable error, Sinks.Many<String> sink) {
+        log.error("娴佸紡瀵硅瘽鍙戠敓閿欒: {}", error.getMessage(), error);
+        systemLogService.error("LLM 璋冪敤澶辫触: " + error.getMessage(), "LLM");
+
+        String errorMsg = error.getMessage() != null ? error.getMessage() : "";
+        if (errorMsg.contains("context length") || errorMsg.contains("n_ctx") || errorMsg.contains("n_keep")) {
+            sink.tryEmitError(new RuntimeException("杈撳叆鍐呭杩囬暱锛岃秴鍑烘ā鍨嬩笂涓嬫枃闄愬埗銆傝灏濊瘯锛歕n1. 鍑忓皯鍥剧墖鏁伴噺鎴栦娇鐢ㄦ洿灏忕殑鍥剧墖\n2. 娓呴櫎瀵硅瘽鍘嗗彶鍚庨噸璇昞n3. 鍒囨崲鍒版敮鎸佹洿闀夸笂涓嬫枃鐨勬ā鍨?"));
+        } else if (errorMsg.contains("image") || errorMsg.contains("vision") || errorMsg.contains("multimodal")) {
+            sink.tryEmitError(new RuntimeException("褰撳墠妯″瀷涓嶆敮鎸佸浘鍍忚瘑鍒紝璇峰垏鎹㈠埌鏀寔瑙嗚鐨勬ā鍨嬶紙濡?Qwen-VL 绛夛級鎴栫Щ闄ゅ浘鐗囧悗閲嶈瘯銆?"));
+        } else {
+            sink.tryEmitError(error);
+        }
+    }
+
+    private String extractBase64Data(String base64Image) {
+        if (base64Image == null || base64Image.isBlank()) {
+            return "";
+        }
+        return base64Image.contains(",") ? base64Image.split(",", 2)[1] : base64Image;
+    }
+
+    private String extractMimeType(String base64Image) {
+        if (base64Image != null && base64Image.startsWith("data:") && base64Image.contains(";")) {
+            return base64Image.substring(5, base64Image.indexOf(';'));
+        }
+        return "image/jpeg";
     }
 
     @Override

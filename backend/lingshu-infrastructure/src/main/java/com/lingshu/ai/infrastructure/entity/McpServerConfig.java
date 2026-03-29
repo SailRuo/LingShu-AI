@@ -49,4 +49,7 @@ public class McpServerConfig {
     protected void onUpdate() {
         updatedAt = LocalDateTime.now();
     }
+
+    @Transient
+    private java.util.List<java.util.Map<String, Object>> tools;
 }

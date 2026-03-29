@@ -244,11 +244,43 @@ function aggregateHistoryMessages(historyMessages: HistoryMessage[]): ChatMessag
     const current = chronological[index];
 
     if (current.role === "user") {
+      let content = current.content ?? "";
+      let images: string[] | undefined = undefined;
+
+      // 如果内容是 JSON 数组（多模态格式），进行解析
+      if (content.trim().startsWith('[')) {
+        try {
+          const parsed = JSON.parse(content);
+          if (Array.isArray(parsed) && parsed.some((p: any) => p.type === 'text' || p.type === 'image')) {
+            let extractedContent = "";
+            let extractedImages: string[] = [];
+            for (const part of parsed) {
+              if (part.type === 'text') {
+                extractedContent += (part.text || part.content || "");
+              } else if (part.type === 'image') {
+                if (part.base64) {
+                  extractedImages.push(`data:${part.mimeType || 'image/jpeg'};base64,${part.base64}`);
+                } else if (part.url) {
+                  extractedImages.push(part.url);
+                }
+              }
+            }
+            content = extractedContent;
+            if (extractedImages.length > 0) {
+              images = extractedImages;
+            }
+          }
+        } catch (e) {
+          // 如果解析失败，保持原样
+        }
+      }
+
       aggregated.push({
         id: current.id,
         role: "user",
-        content: current.content ?? "",
+        content: content,
         timestamp: toTimestamp(current.timestamp),
+        images: images
       });
       index++;
       continue;
@@ -405,8 +437,9 @@ function mergeMessageBatches(
 }
 
 export function useChat() {
-  const messages = ref<ChatMessage[]>([]);
-  const inputMessage = ref("");
+  const messages = ref<ChatMessage[]>([])
+  const inputMessage = ref('')
+  const inputImages = ref<string[]>([])
   const isTyping = ref(false);
   const welcomeGreeting = ref("欢迎回来");
   const isLoadingHistory = ref(false);
@@ -426,6 +459,7 @@ export function useChat() {
       segments: [],
       toolSteps: [],
       isToolStepsExpanded: true,
+      isLoading: true,  // 标记为加载状态
     };
     messages.value.push(assistantMessage);
     return assistantMessage;
@@ -543,7 +577,34 @@ export function useChat() {
 
   function failLatestAssistantMessage(errorMessage?: string) {
     updateLastAssistant((message) => {
-      const normalizedError = (errorMessage ?? "").trim() || "发生错误";
+      let normalizedError = (errorMessage ?? "").trim() || "发生错误";
+      
+      // 尝试解析 JSON 格式的错误消息
+      if (normalizedError.includes('{')) {
+        try {
+          // 提取 JSON 部分
+          const jsonMatch = normalizedError.match(/\{.*\}/);
+          if (jsonMatch) {
+            const errorObj = JSON.parse(jsonMatch[0]);
+            const innerMessage = errorObj.error?.message || errorObj.message;
+            if (innerMessage) {
+              normalizedError = innerMessage;
+            }
+          }
+        } catch (e) {
+          // 解析失败则保持原样
+        }
+      }
+
+      // 针对特定错误的友好提示
+      if (normalizedError.toLowerCase().includes('context size') || 
+          normalizedError.toLowerCase().includes('context_length_exceeded') ||
+          normalizedError.toLowerCase().includes('too many tokens')) {
+        normalizedError = "对话上下文过长，请尝试开启新对话或清理历史记录。";
+      } else if (normalizedError.includes('聊天处理失败:')) {
+        normalizedError = normalizedError.replace('聊天处理失败:', '').trim();
+      }
+
       const nextToolSteps = (message.toolSteps ?? []).map((step) => {
         if (step.status !== "running") {
           return step;
@@ -606,7 +667,7 @@ export function useChat() {
         .find((message) => message.role === "assistant");
 
       if (!latestAssistant) {
-        return;
+        return null;
       }
 
       const lastAssistantIndex = [...messages.value]
@@ -616,15 +677,18 @@ export function useChat() {
 
       if (lastAssistantIndex == null) {
         messages.value.push(latestAssistant);
-        return;
+        return latestAssistant;
       }
 
       messages.value[lastAssistantIndex] = {
         ...messages.value[lastAssistantIndex],
         ...latestAssistant,
       };
+      
+      return latestAssistant;
     } catch (error) {
       console.error("Sync latest assistant message error:", error);
+      return null;
     }
   }
 
@@ -713,10 +777,18 @@ export function useChat() {
 
   async function sendMessage(scrollCallback?: () => void) {
     const text = inputMessage.value.trim();
-    if (!text || isTyping.value) return;
+    const currentImages = [...inputImages.value];
+    if ((!text && currentImages.length === 0) || isTyping.value) return;
 
-    messages.value.push({ role: "user", content: text, timestamp: Date.now() });
+    messages.value.push({ 
+      role: "user", 
+      content: text, 
+      timestamp: Date.now(),
+      ...(currentImages.length > 0 ? { images: currentImages } : {})
+    });
+    
     inputMessage.value = "";
+    inputImages.value = [];
     isTyping.value = true;
     scrollCallback?.();
 
@@ -728,10 +800,15 @@ export function useChat() {
     messages.value.push(assistantMessage);
 
     try {
+      const payload: Record<string, any> = { message: text };
+      if (currentImages.length > 0) {
+        payload.images = currentImages;
+      }
+      
       const res = await fetch("/api/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) throw new Error("Stream request failed");
@@ -818,6 +895,7 @@ export function useChat() {
   return {
     messages,
     inputMessage,
+    inputImages,
     isTyping,
     welcomeGreeting,
     isLoadingHistory,
@@ -827,6 +905,7 @@ export function useChat() {
     loadHistory,
     startAssistantMessage,
     appendAssistantChunk,
+    appendReasoningChunk,
     upsertToolStep,
     failLatestAssistantMessage,
     syncLatestAssistantMessage,

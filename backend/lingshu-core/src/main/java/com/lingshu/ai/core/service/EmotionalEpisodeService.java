@@ -2,11 +2,11 @@ package com.lingshu.ai.core.service;
 
 import com.lingshu.ai.core.dto.EmotionAnalysis;
 import com.lingshu.ai.core.dto.EmotionalEpisodeResult;
+import com.lingshu.ai.core.model.DynamicMemoryModel;
 import com.lingshu.ai.infrastructure.entity.EmotionalEpisode;
 import com.lingshu.ai.infrastructure.entity.UserNode;
 import com.lingshu.ai.infrastructure.repository.EmotionalEpisodeRepository;
 import com.lingshu.ai.infrastructure.repository.UserRepository;
-import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,23 +25,23 @@ public class EmotionalEpisodeService {
     private final EmotionalEpisodeRepository episodeRepository;
     private final UserRepository userRepository;
     private final SystemLogService systemLogService;
-    private final ChatModel chatModel;
+    private final DynamicMemoryModel dynamicMemoryModel;
     private EmotionalEpisodeExtractor episodeExtractor;
 
     public EmotionalEpisodeService(EmotionalEpisodeRepository episodeRepository,
                                    UserRepository userRepository,
                                    SystemLogService systemLogService,
-                                   ChatModel chatModel) {
+                                   DynamicMemoryModel dynamicMemoryModel) {
         this.episodeRepository = episodeRepository;
         this.userRepository = userRepository;
         this.systemLogService = systemLogService;
-        this.chatModel = chatModel;
+        this.dynamicMemoryModel = dynamicMemoryModel;
     }
 
     private EmotionalEpisodeExtractor getExtractor() {
         if (episodeExtractor == null) {
             episodeExtractor = AiServices.builder(EmotionalEpisodeExtractor.class)
-                    .chatModel(chatModel)
+                    .chatModel(dynamicMemoryModel)
                     .build();
         }
         return episodeExtractor;

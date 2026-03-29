@@ -124,6 +124,35 @@ public class SystemSetting {
         return createDefaultAsrConfig();
     }
 
+    /**
+     * 获取记忆模型配置（用于情感分析和事实提取）
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getMemoryModelConfig() {
+        if (settings == null) {
+            return createDefaultMemoryModelConfig();
+        }
+        Object memoryModel = settings.get("memoryModel");
+        if (memoryModel instanceof Map) {
+            return (Map<String, Object>) memoryModel;
+        }
+        Object sentiment = settings.get("sentiment");
+        if (sentiment instanceof Map) {
+            return (Map<String, Object>) sentiment;
+        }
+        return createDefaultMemoryModelConfig();
+    }
+
+    /**
+     * 获取情感分析模型配置（兼容旧接口）
+     * @deprecated 使用 getMemoryModelConfig() 代替
+     */
+    @Deprecated
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getSentimentConfig() {
+        return getMemoryModelConfig();
+    }
+
     // ========== 便捷访问方法 ==========
     
     /**
@@ -234,6 +263,86 @@ public class SystemSetting {
     }
 
     /**
+     * 获取工具结果总结阈值（字符数）
+     * 超过此阈值的结果会被总结
+     */
+    public Integer getToolResultSummaryThreshold() {
+        Object value = getLlmConfig().get("toolResultSummaryThreshold");
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        return 2000;
+    }
+
+    /**
+     * 获取情感分析模型的 source，为空时使用对话模型配置
+     * @deprecated 使用 getMemoryModelSource() 代替
+     */
+    @Deprecated
+    public String getSentimentSource() {
+        return getMemoryModelSource();
+    }
+
+    /**
+     * 获取情感分析模型的 model，为空时使用对话模型配置
+     * @deprecated 使用 getMemoryModel() 代替
+     */
+    @Deprecated
+    public String getSentimentModel() {
+        return getMemoryModel();
+    }
+
+    /**
+     * 获取情感分析模型的 baseUrl，为空时使用对话模型配置
+     * @deprecated 使用 getMemoryModelBaseUrl() 代替
+     */
+    @Deprecated
+    public String getSentimentBaseUrl() {
+        return getMemoryModelBaseUrl();
+    }
+
+    /**
+     * 获取情感分析模型的 apiKey，为空时使用对话模型配置
+     * @deprecated 使用 getMemoryModelApiKey() 代替
+     */
+    @Deprecated
+    public String getSentimentApiKey() {
+        return getMemoryModelApiKey();
+    }
+
+    /**
+     * 获取记忆模型的 source，为空时使用对话模型配置
+     */
+    public String getMemoryModelSource() {
+        String value = (String) getMemoryModelConfig().get("source");
+        return (value != null && !value.isBlank()) ? value : getSource();
+    }
+
+    /**
+     * 获取记忆模型的 model，为空时使用对话模型配置
+     */
+    public String getMemoryModel() {
+        String value = (String) getMemoryModelConfig().get("model");
+        return (value != null && !value.isBlank()) ? value : getChatModel();
+    }
+
+    /**
+     * 获取记忆模型的 baseUrl，为空时使用对话模型配置
+     */
+    public String getMemoryModelBaseUrl() {
+        String value = (String) getMemoryModelConfig().get("baseUrl");
+        return (value != null && !value.isBlank()) ? value : getBaseUrl();
+    }
+
+    /**
+     * 获取记忆模型的 apiKey，为空时使用对话模型配置
+     */
+    public String getMemoryModelApiKey() {
+        String value = (String) getMemoryModelConfig().get("apiKey");
+        return (value != null && !value.isBlank()) ? value : getApiKey();
+    }
+
+    /**
      * 更新 LLM 配置
      */
     public void setLlmConfig(Map<String, Object> config) {
@@ -271,6 +380,16 @@ public class SystemSetting {
             this.settings = new java.util.HashMap<>();
         }
         this.settings.put("asr", config);
+    }
+
+    /**
+     * 更新情感分析模型配置
+     */
+    public void setSentimentConfig(Map<String, Object> config) {
+        if (this.settings == null) {
+            this.settings = new java.util.HashMap<>();
+        }
+        this.settings.put("sentiment", config);
     }
 
     /**
@@ -317,6 +436,76 @@ public class SystemSetting {
         Map<String, Object> config = new java.util.HashMap<>();
         config.put("enabled", false);
         config.put("url", "http://localhost:50001");
+        return config;
+    }
+
+    /**
+     * 创建默认记忆模型配置
+     */
+    public Map<String, Object> createDefaultMemoryModelConfig() {
+        Map<String, Object> config = new java.util.HashMap<>();
+        config.put("source", "");
+        config.put("model", "");
+        config.put("baseUrl", "");
+        config.put("apiKey", "");
+        return config;
+    }
+
+    /**
+     * 创建默认情感分析模型配置
+     * @deprecated 使用 createDefaultMemoryModelConfig() 代替
+     */
+    @Deprecated
+    public Map<String, Object> createDefaultSentimentConfig() {
+        return createDefaultMemoryModelConfig();
+    }
+
+    /**
+     * 更新记忆模型配置
+     */
+    public void setMemoryModelConfig(Map<String, Object> config) {
+        if (this.settings == null) {
+            this.settings = new java.util.HashMap<>();
+        }
+        this.settings.put("memoryModel", config);
+    }
+
+    /**
+     * 获取 TTS 配置
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getTtsConfig() {
+        if (settings == null) {
+            return createDefaultTtsConfig();
+        }
+        Object tts = settings.get("tts");
+        if (tts instanceof Map) {
+            return (Map<String, Object>) tts;
+        }
+        return createDefaultTtsConfig();
+    }
+
+    /**
+     * 更新 TTS 配置
+     */
+    public void setTtsConfig(Map<String, Object> config) {
+        if (this.settings == null) {
+            this.settings = new java.util.HashMap<>();
+        }
+        this.settings.put("tts", config);
+    }
+
+    /**
+     * 创建默认 TTS 配置
+     */
+    public Map<String, Object> createDefaultTtsConfig() {
+        Map<String, Object> config = new java.util.HashMap<>();
+        config.put("enabled", false);
+        config.put("baseUrl", "http://localhost:5050");
+        config.put("apiKey", "");
+        config.put("defaultVoice", "alloy");
+        config.put("defaultSpeed", 1.0);
+        config.put("defaultFormat", "mp3");
         return config;
     }
 }

@@ -9,10 +9,12 @@ import com.lingshu.ai.core.service.EmotionAwareFactExtractor;
 import com.lingshu.ai.core.dto.ExtractionResult;
 import com.lingshu.ai.core.dto.ConfidenceLevel;
 import com.lingshu.ai.core.dto.FactType;
+import com.lingshu.ai.core.model.DynamicMemoryModel;
 import com.lingshu.ai.infrastructure.entity.FactNode;
 import com.lingshu.ai.infrastructure.entity.UserNode;
 import com.lingshu.ai.infrastructure.repository.UserRepository;
 import com.lingshu.ai.infrastructure.repository.FactRepository;
+import com.lingshu.ai.infrastructure.repository.FactRelationProjection;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.store.embedding.filter.MetadataFilterBuilder;
@@ -64,12 +66,14 @@ public class MemoryServiceImpl implements MemoryService {
     private final FactRepository factRepository;
     private final com.lingshu.ai.core.service.SystemLogService systemLogService;
     private final ChatModel chatLanguageModel;
+    private final DynamicMemoryModel dynamicMemoryModel;
     private final com.lingshu.ai.core.service.SettingService settingService;
     private final ObjectMapper objectMapper;
     private FactExtractor factExtractor;
     private FactSemanticClassifier factSemanticClassifier;
     private com.lingshu.ai.core.service.FactRelationshipEvaluator factRelationshipEvaluator;
     private EmotionAwareFactExtractor emotionAwareFactExtractor;
+    private com.lingshu.ai.core.service.EntityExtractor entityExtractor;
     private volatile Map<String, Object> lastMaintenanceSummary = new LinkedHashMap<>();
     private final java.util.Queue<com.lingshu.ai.core.dto.MemoryRetrievalEvent> recentRetrievalEvents = new java.util.concurrent.ConcurrentLinkedQueue<>();
 
@@ -80,6 +84,7 @@ public class MemoryServiceImpl implements MemoryService {
                              com.lingshu.ai.core.service.SystemLogService systemLogService,
                              com.lingshu.ai.core.service.SettingService settingService,
                              ChatModel chatLanguageModel,
+                             DynamicMemoryModel dynamicMemoryModel,
                              ObjectMapper objectMapper) {
         this.userRepository = userRepository;
         this.embeddingModel = embeddingModel;
@@ -88,6 +93,7 @@ public class MemoryServiceImpl implements MemoryService {
         this.systemLogService = systemLogService;
         this.settingService = settingService;
         this.chatLanguageModel = chatLanguageModel;
+        this.dynamicMemoryModel = dynamicMemoryModel;
         this.objectMapper = objectMapper;
     }
 
@@ -103,7 +109,10 @@ public class MemoryServiceImpl implements MemoryService {
                 .chatModel(chatLanguageModel)
                 .build();
         this.emotionAwareFactExtractor = AiServices.builder(EmotionAwareFactExtractor.class)
-                .chatModel(chatLanguageModel)
+                .chatModel(dynamicMemoryModel)
+                .build();
+        this.entityExtractor = AiServices.builder(com.lingshu.ai.core.service.EntityExtractor.class)
+                .chatModel(dynamicMemoryModel)
                 .build();
 
         try {
@@ -497,6 +506,8 @@ public class MemoryServiceImpl implements MemoryService {
                 .semanticMatches(new ArrayList<>())
                 .finalRankedIds(new ArrayList<>());
 
+        List<String> entities = extractEntities(message);
+
         systemLogService.dbStart("neo4j_query", "User.facts", "MEMORY");
         userRepository.findByName(userId).ifPresentOrElse(user -> {
             log.info("Graph Retrieval: Found {} facts for user {}", user.getFacts() != null ? user.getFacts().size() : 0, userId);
@@ -504,7 +515,6 @@ public class MemoryServiceImpl implements MemoryService {
             systemLogService.info("图谱检索: 找到用户 " + userId + " 的 " + factCount + " 条既定事实", "MEMORY");
             
             if (user.getFacts() != null && !user.getFacts().isEmpty()) {
-                List<String> entities = extractEntities(message);
                 List<FactNode> relevantFacts;
                 
                 if (!entities.isEmpty()) {
@@ -544,7 +554,7 @@ public class MemoryServiceImpl implements MemoryService {
         });
         systemLogService.dbEnd("neo4j_query", "MEMORY");
 
-        if (!needsSemanticRetrieval(message, eventBuilder)) {
+        if (!needsSemanticRetrieval(message, entities, eventBuilder)) {
             recordRetrievalEvent(eventBuilder.build());
             return contextBuilder.toString();
         }
@@ -614,12 +624,11 @@ public class MemoryServiceImpl implements MemoryService {
         return contextBuilder.toString();
     }
 
-    private boolean needsSemanticRetrieval(String message, com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder) {
+    private boolean needsSemanticRetrieval(String message, List<String> entities, com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder) {
         if (message == null || message.trim().isEmpty()) {
             return false;
         }
 
-        List<String> entities = extractEntities(message);
         eventBuilder.extractedEntities(entities);
         if (entities.isEmpty()) {
             systemLogService.debug("GAM-RAG: 未提取到实体，增益=0，跳过语义检索", "MEMORY");
@@ -645,13 +654,37 @@ public class MemoryServiceImpl implements MemoryService {
     }
 
     private List<String> extractEntities(String message) {
-        List<String> entities = new java.util.ArrayList<>();
-        String[] words = message.replaceAll("[\\p{Punct}\\s+]", " ").split("\\s+");
+        if (message == null || message.trim().isEmpty()) {
+            return new java.util.ArrayList<>();
+        }
 
-        for (String word : words) {
-            // 放宽实体长度限制，支持单字识别（如 “我”、“书” 等核心意向）
-            if (word.length() >= 1 && !STOP_WORDS.contains(word.toLowerCase())) {
-                entities.add(word);
+        List<String> entities = new java.util.ArrayList<>();
+        try {
+            if (entityExtractor != null) {
+                systemLogService.llmStart("entity-extractor", "ollama", "MEMORY");
+                List<String> extracted = entityExtractor.extractEntities(message);
+                systemLogService.llmEnd(0, "MEMORY");
+                
+                if (extracted != null) {
+                    for (String word : extracted) {
+                        if (word != null && !word.trim().isEmpty() && !STOP_WORDS.contains(word.toLowerCase())) {
+                            entities.add(word.trim());
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("LLM entity extraction failed, falling back to regex split: {}", e.getMessage());
+            systemLogService.llmError(e.getMessage(), "MEMORY");
+        }
+
+        // Fallback to regex split if LLM extraction failed or returned empty
+        if (entities.isEmpty()) {
+            String[] words = message.replaceAll("[\\p{Punct}\\s+]", " ").split("\\s+");
+            for (String word : words) {
+                if (word.length() >= 1 && !STOP_WORDS.contains(word.toLowerCase())) {
+                    entities.add(word);
+                }
             }
         }
 
@@ -916,11 +949,11 @@ public class MemoryServiceImpl implements MemoryService {
         return factRepository.findFactRelationsByFactIds(factIds).stream()
                 .map(row -> {
                     Map<String, Object> link = new LinkedHashMap<>();
-                    link.put("source", "fact_" + castLong(row.get("sourceId")));
-                    link.put("target", "fact_" + castLong(row.get("targetId")));
-                    link.put("type", String.valueOf(row.get("type")));
-                    link.put("weight", row.get("weight"));
-                    link.put("lastActivatedAt", row.get("lastActivatedAt"));
+                    link.put("source", "fact_" + row.getSourceId());
+                    link.put("target", "fact_" + row.getTargetId());
+                    link.put("type", row.getType());
+                    link.put("weight", row.getWeight());
+                    link.put("lastActivatedAt", row.getLastActivatedAt());
                     return link;
                 })
                 .collect(Collectors.toList());

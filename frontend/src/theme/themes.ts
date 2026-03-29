@@ -27,10 +27,10 @@ export const polarLight: ThemeConfig = {
     '--color-bg-mesh-2': '#cbd5e1',
     '--color-bg-mesh-3': '#99f6e4',
     '--color-bg-mesh-4': '#f1f5f9',
-    // 气泡组件 - 增强视觉层次（调亮用户气泡）
+    // 气泡组件 - 增强视觉层次（毛玻璃效果）
     '--color-bubble-ai-bg': 'rgba(13, 148, 136, 0.08)', // 极淡
     '--color-bubble-ai-border': 'rgba(13, 148, 136, 0.18)', // 细边
-    '--color-bubble-user-bg': '#ffffffff', // 极浅蓝白色
+    '--color-bubble-user-bg': 'rgba(255, 255, 255, 0.75)', // 毛玻璃白
     '--color-bubble-user-border': '#e0f2fe', // 浅蓝边
     '--color-pulse-core': 'rgba(13, 148, 136, 0.2)',
     '--color-pulse-ring': '#0d9488',
@@ -79,10 +79,10 @@ export const cyberPurple: ThemeConfig = {
     '--color-bg-mesh-3': '#1e293b', // 深灰蓝
     '--color-bg-mesh-4': '#000000',
     
-    // 气泡组件 - 增强视觉层次（调亮用户气泡）
+    // 气泡组件 - 增强视觉层次（毛玻璃效果）
     '--color-bubble-ai-bg': 'rgba(226, 232, 240, 0.08)', // 更透明
     '--color-bubble-ai-border': 'rgba(226, 232, 240, 0.2)', // 细边
-    '--color-bubble-user-bg': 'rgba(226, 232, 240, 0.15)', // 银白光
+    '--color-bubble-user-bg': 'rgba(30, 30, 50, 0.65)', // 毛玻璃深空灰
     '--color-bubble-user-border': 'rgba(226, 232, 240, 0.3)', // 深边
     
     // 脉冲效果
@@ -136,10 +136,10 @@ export const deepTechFuturistic: ThemeConfig = {
     '--color-bg-mesh-3': '#024838', // 深绿色
     '--color-bg-mesh-4': '#031f1a',
     
-    // 气泡组件 - 增强视觉层次（调亮用户气泡）
+    // 气泡组件 - 增强视觉层次（毛玻璃效果）
     '--color-bubble-ai-bg': 'rgba(52, 211, 153, 0.12)', // 更透明
     '--color-bubble-ai-border': 'rgba(52, 211, 153, 0.28)', // 更细
-    '--color-bubble-user-bg': 'rgba(52, 211, 153, 0.25)', // 半透明绿色
+    '--color-bubble-user-bg': 'rgba(5, 45, 35, 0.70)', // 毛玻璃深绿
     '--color-bubble-user-border': 'rgba(52, 211, 153, 0.45)', // 半透明深边
     
     // 脉冲效果
@@ -193,11 +193,11 @@ export const midnightBlue: ThemeConfig = {
     '--color-bg-mesh-3': '#0f2744', // 暗蓝色
     '--color-bg-mesh-4': '#0a0f1c',
     
-    // 气泡组件 - 清晰层次（调亮用户气泡）
+    // 气泡组件 - 清晰层次（毛玻璃效果）
     '--color-bubble-ai-bg': 'rgba(56, 189, 248, 0.12)', // 更透明
     '--color-bubble-ai-border': 'rgba(56, 189, 248, 0.25)', // 细边
-    '--color-bubble-user-bg': '#38bdf8', // 调亮的天蓝色
-    '--color-bubble-user-border': '#0ea5e9', // 深边
+    '--color-bubble-user-bg': 'rgba(15, 30, 60, 0.70)', // 毛玻璃深蓝
+    '--color-bubble-user-border': 'rgba(56, 189, 248, 0.35)', // 柔光边
     
     // 脉冲效果
     '--color-pulse-core': 'rgba(56, 189, 248, 0.4)',

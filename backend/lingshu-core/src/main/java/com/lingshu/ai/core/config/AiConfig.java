@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.concurrent.Executor;
 import org.slf4j.Logger;
@@ -21,6 +22,11 @@ public class AiConfig {
     @Bean
     public RestTemplate restTemplate() {
         return new RestTemplate();
+    }
+
+    @Bean
+    public WebClient webClient() {
+        return WebClient.builder().build();
     }
 
     @Bean(name = "taskExecutor")
@@ -95,6 +101,19 @@ public class AiConfig {
                         lastUserPreview,
                         lastToolPreview
                 );
+
+                for (int i = 0; i < request.messages().size(); i++) {
+                    var message = request.messages().get(i);
+                    String content = compact(message.toString());
+                    int charLength = message.toString() != null ? message.toString().length() : 0;
+                    log.info(
+                            "LLM Request Message[{}] => type: {}, chars: {}, preview: {}",
+                            i,
+                            message.type(),
+                            charLength,
+                            content
+                    );
+                }
             }
 
             @Override
@@ -194,7 +213,7 @@ public class AiConfig {
             dev.langchain4j.store.memory.chat.ChatMemoryStore chatMemoryStore) {
         return sessionId -> dev.langchain4j.memory.chat.MessageWindowChatMemory.builder()
                 .id(sessionId)
-                .maxMessages(20)
+                .maxMessages(10)
                 .chatMemoryStore(chatMemoryStore)
                 .build();
     }
@@ -220,11 +239,25 @@ public class AiConfig {
     }
 
     @Bean
-    public com.lingshu.ai.core.service.EmotionAnalyzer emotionAnalyzer(
-            ChatModel chatLanguageModel) {
-        return dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.service.EmotionAnalyzer.class)
-                .chatModel(chatLanguageModel)
+    public StatelessStreamingAssistant statelessStreamingAssistant(
+            StreamingChatModel streamingChatLanguageModel) {
+        return dev.langchain4j.service.AiServices.builder(StatelessStreamingAssistant.class)
+                .streamingChatModel(streamingChatLanguageModel)
                 .build();
+    }
+
+    @Bean
+    public com.lingshu.ai.core.service.EmotionAnalyzer emotionAnalyzer(
+            com.lingshu.ai.core.model.DynamicMemoryModel dynamicMemoryModel) {
+        return dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.service.EmotionAnalyzer.class)
+                .chatModel(dynamicMemoryModel)
+                .build();
+    }
+
+    @Bean
+    public com.lingshu.ai.core.model.DynamicMemoryModel dynamicMemoryModel(
+            com.lingshu.ai.core.service.SettingService settingService) {
+        return new com.lingshu.ai.core.model.DynamicMemoryModel(settingService);
     }
 
     public interface Assistant {
@@ -241,9 +274,14 @@ public class AiConfig {
                 @dev.langchain4j.service.V("systemPrompt") String systemPrompt);
     }
 
-    public interface RawStreamingAssistant {
+
+    /**
+     * 无记忆的流式 Assistant 接口，用于一次性生成任务（如问候语生成）。
+     * 不需要 ChatMemoryProvider，因为不需要保持对话历史。
+     */
+    public interface StatelessStreamingAssistant {
         @dev.langchain4j.service.SystemMessage("{{systemPrompt}}")
-        dev.langchain4j.service.TokenStream chat(@dev.langchain4j.service.MemoryId Long sessionId,
+        dev.langchain4j.service.TokenStream chat(
                 @dev.langchain4j.service.UserMessage String message,
                 @dev.langchain4j.service.V("systemPrompt") String systemPrompt);
     }

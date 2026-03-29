@@ -17,11 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
@@ -149,7 +145,20 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
      */
     private String getContentForComparison(ChatMessage msg) {
         if (msg instanceof UserMessage) {
-            return ((UserMessage) msg).singleText();
+            UserMessage um = (UserMessage) msg;
+            if (um.hasSingleText()) {
+                return um.singleText();
+            } else {
+                StringBuilder sb = new StringBuilder();
+                for (dev.langchain4j.data.message.Content content : um.contents()) {
+                    if (content instanceof dev.langchain4j.data.message.TextContent) {
+                        sb.append(((dev.langchain4j.data.message.TextContent) content).text());
+                    } else if (content instanceof dev.langchain4j.data.message.ImageContent) {
+                        sb.append("[Image]");
+                    }
+                }
+                return sb.toString();
+            }
         } else if (msg instanceof AiMessage aiMessage) {
             String text = aiMessage.text();
             return text != null ? text : "";
@@ -181,7 +190,34 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
                         .createdAt(LocalDateTime.now());
 
         if (msg instanceof UserMessage userMsg) {
-            builder.content(userMsg.singleText());
+            if (userMsg.hasSingleText()) {
+                builder.content(userMsg.singleText());
+            } else {
+                // 序列化多模态内容
+                try {
+                    List<java.util.Map<String, String>> contents = new ArrayList<>();
+                    for (dev.langchain4j.data.message.Content content : userMsg.contents()) {
+                        java.util.Map<String, String> map = new java.util.HashMap<>();
+                        if (content instanceof dev.langchain4j.data.message.TextContent tc) {
+                            map.put("type", "text");
+                            map.put("text", tc.text());
+                        } else if (content instanceof dev.langchain4j.data.message.ImageContent ic) {
+                            map.put("type", "image");
+                            if (ic.image().base64Data() != null) {
+                                map.put("base64", ic.image().base64Data());
+                                map.put("mimeType", ic.image().mimeType());
+                            } else if (ic.image().url() != null) {
+                                map.put("url", ic.image().url().toString());
+                            }
+                        }
+                        contents.add(map);
+                    }
+                    builder.content(objectMapper.writeValueAsString(contents));
+                } catch (Exception e) {
+                    log.error("序列化多模态 UserMessage 失败", e);
+                    builder.content("[Multi-modal Content]");
+                }
+            }
         } else if (msg instanceof AiMessage aiMessage) {
             // AiMessage 可能包含 text 和/或 toolExecutionRequests
             builder.content(aiMessage.text() != null ? aiMessage.text() : "");
@@ -226,6 +262,28 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
         String content = dbMsg.getContent() != null ? dbMsg.getContent() : "";
 
         if ("user".equalsIgnoreCase(role)) {
+            if (content.trim().startsWith("[") && content.trim().endsWith("]")) {
+                try {
+                    List<Map<String, String>> parsedContents = objectMapper.readValue(content, new TypeReference<List<Map<String, String>>>() {});
+                    List<dev.langchain4j.data.message.Content> lcContents = new ArrayList<>();
+                    for (Map<String, String> map : parsedContents) {
+                        if ("text".equals(map.get("type"))) {
+                            lcContents.add(dev.langchain4j.data.message.TextContent.from(map.get("text")));
+                        } else if ("image".equals(map.get("type"))) {
+                            if (map.containsKey("base64")) {
+                                lcContents.add(dev.langchain4j.data.message.ImageContent.from(map.get("base64"), map.get("mimeType")));
+                            } else if (map.containsKey("url")) {
+                                lcContents.add(dev.langchain4j.data.message.ImageContent.from(map.get("url")));
+                            }
+                        }
+                    }
+                    if (!lcContents.isEmpty()) {
+                        return UserMessage.from(lcContents);
+                    }
+                } catch (Exception e) {
+                    log.warn("反序列化多模态 UserMessage 失败，回退为纯文本: {}", e.getMessage());
+                }
+            }
             return UserMessage.from(content);
         } else if ("assistant".equalsIgnoreCase(role)) {
             // 检查是否包含工具调用请求

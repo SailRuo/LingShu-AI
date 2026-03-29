@@ -32,11 +32,16 @@ public class SettingController {
      * 保存本地工具配置
      */
     @PostMapping("/local-tools")
-    public void saveLocalToolsSetting(@RequestBody Map<String, Object> settings) {
+    public Map<String, Object> saveLocalToolsSetting(@RequestBody Map<String, Object> settings) {
         SystemSetting setting = new SystemSetting();
         setting.setId("local_tools");
         setting.setSettings(settings);
         settingService.saveLocalToolsSetting(setting);
+        
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("message", "配置已保存");
+        return response;
     }
 
     /**
@@ -66,36 +71,45 @@ public class SettingController {
     public Map<String, Object> getSetting() {
         SystemSetting setting = settingService.getSetting();
         
-        // 将 JSON 配置扁平化，保持与前端接口的兼容性
         Map<String, Object> result = new HashMap<>();
         
-        // LLM 配置
         Map<String, Object> llmConfig = setting.getLlmConfig();
         result.put("source", llmConfig.get("source"));
         result.put("chatModel", llmConfig.get("model"));
         result.put("baseUrl", llmConfig.get("baseUrl"));
         result.put("apiKey", llmConfig.get("apiKey"));
         
-        // Embedding 配置
         Map<String, Object> embeddingConfig = setting.getEmbeddingConfig();
         result.put("embedSource", embeddingConfig.get("source"));
         result.put("embedModel", embeddingConfig.get("model"));
         result.put("embedBaseUrl", embeddingConfig.get("baseUrl"));
         result.put("embedApiKey", embeddingConfig.get("apiKey"));
         
-        // 主动问候配置
         Map<String, Object> proactiveConfig = setting.getProactiveConfig();
         result.put("proactiveEnabled", proactiveConfig.get("enabled"));
         result.put("inactiveThresholdMinutes", proactiveConfig.get("inactiveThresholdMinutes"));
         result.put("greetingCooldownSeconds", proactiveConfig.get("greetingCooldownSeconds"));
         result.put("inactiveCheckIntervalMs", proactiveConfig.get("inactiveCheckIntervalMs"));
         
+        Map<String, Object> memoryModelConfig = setting.getMemoryModelConfig();
+        result.put("memoryModelSource", memoryModelConfig.get("source"));
+        result.put("memoryModel", memoryModelConfig.get("model"));
+        result.put("memoryModelBaseUrl", memoryModelConfig.get("baseUrl"));
+        result.put("memoryModelApiKey", memoryModelConfig.get("apiKey"));
+        
+        Map<String, Object> ttsConfig = setting.getTtsConfig();
+        result.put("ttsBaseUrl", ttsConfig.get("baseUrl"));
+        result.put("ttsApiKey", ttsConfig.get("apiKey"));
+        result.put("ttsDefaultVoice", ttsConfig.get("defaultVoice"));
+        result.put("ttsDefaultSpeed", ttsConfig.get("defaultSpeed"));
+        result.put("ttsDefaultFormat", ttsConfig.get("defaultFormat"));
+        result.put("ttsEnabled", ttsConfig.get("enabled"));
+        
         return result;
     }
 
     /**
      * 保存并应用新的系统配置。
-     * 接收扁平化的配置数据，转换为 JSON 格式存储
      */
     @PostMapping
     public void saveSetting(@RequestBody SystemSettingDTO dto) {
@@ -121,6 +135,22 @@ public class SettingController {
         proactiveConfig.put("greetingCooldownSeconds", dto.getGreetingCooldownSeconds() != null ? dto.getGreetingCooldownSeconds() : 300);
         proactiveConfig.put("inactiveCheckIntervalMs", dto.getInactiveCheckIntervalMs() != null ? dto.getInactiveCheckIntervalMs() : 3600000L);
         setting.setProactiveConfig(proactiveConfig);
+        
+        Map<String, Object> memoryModelConfig = new HashMap<>();
+        memoryModelConfig.put("source", dto.getMemoryModelSource() != null ? dto.getMemoryModelSource() : "");
+        memoryModelConfig.put("model", dto.getMemoryModel() != null ? dto.getMemoryModel() : "");
+        memoryModelConfig.put("baseUrl", dto.getMemoryModelBaseUrl() != null ? dto.getMemoryModelBaseUrl() : "");
+        memoryModelConfig.put("apiKey", dto.getMemoryModelApiKey() != null ? dto.getMemoryModelApiKey() : "");
+        setting.setMemoryModelConfig(memoryModelConfig);
+
+        Map<String, Object> ttsConfig = setting.getTtsConfig();
+        ttsConfig.put("baseUrl", dto.getTtsBaseUrl() != null ? dto.getTtsBaseUrl() : "http://localhost:5050");
+        ttsConfig.put("apiKey", dto.getTtsApiKey() != null ? dto.getTtsApiKey() : "");
+        ttsConfig.put("defaultVoice", dto.getTtsDefaultVoice() != null ? dto.getTtsDefaultVoice() : "alloy");
+        ttsConfig.put("defaultSpeed", dto.getTtsDefaultSpeed() != null ? dto.getTtsDefaultSpeed() : 1.0);
+        ttsConfig.put("defaultFormat", dto.getTtsDefaultFormat() != null ? dto.getTtsDefaultFormat() : "mp3");
+        ttsConfig.put("enabled", dto.getTtsEnabled() != null ? dto.getTtsEnabled() : false);
+        setting.setTtsConfig(ttsConfig);
         
         settingService.saveSetting(setting);
     }

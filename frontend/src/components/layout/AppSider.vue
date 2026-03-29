@@ -1,16 +1,24 @@
 <script setup lang="ts">
 import { NMenu, NIcon } from 'naive-ui'
-import { Layers, Shield, FileText, Settings, Activity, Hexagon, Zap, Radio, DatabaseBackup } from 'lucide-vue-next'
+import { Layers, Activity as ActivityIcon, FileText, Settings, Activity, Hexagon, Zap, Radio, DatabaseBackup } from 'lucide-vue-next'
 import type { Component } from 'vue'
-import { h } from 'vue'
+import { h, computed } from 'vue'
 
-const props = defineProps<{ activeMenu: string }>()
-const emit = defineEmits<{ (e: 'update:activeMenu', key: string): void }>()
+const props = defineProps<{ 
+  activeMenu: string,
+  collapsed: boolean,
+  mobileVisible: boolean
+}>()
+const emit = defineEmits<{ 
+  (e: 'update:activeMenu', key: string): void,
+  (e: 'update:collapsed', value: boolean): void,
+  (e: 'update:mobileVisible', value: boolean): void
+}>()
 
 const renderIcon = (c: Component) => () => h(NIcon, null, { default: () => h(c) })
 
 const mainNav = [
-  { label: '意念共鸣', key: 'resonance', icon: renderIcon(Activity) },
+  { label: '灵墟之境', key: 'resonance', icon: renderIcon(Hexagon) },
   { label: '记忆图谱', key: 'insight', icon: renderIcon(Zap) },
   { label: '记忆流光', key: 'stream', icon: renderIcon(Radio) },
   { label: '记忆治理', key: 'governance', icon: renderIcon(DatabaseBackup) },
@@ -19,14 +27,21 @@ const mainNav = [
 
 const infraNav = [
   { label: '系统设置', key: 'settings', icon: renderIcon(Settings) },
-  { label: '安全保障', key: 'security', icon: renderIcon(Shield) },
+  { label: '系统状态', key: 'security', icon: renderIcon(ActivityIcon) },
   { label: '系统日志', key: 'logs', icon: renderIcon(FileText) },
 ]
 
 </script>
 
 <template>
-  <aside class="app-sider">
+  <!-- Mobile Overlay -->
+  <div 
+    v-if="mobileVisible" 
+    class="mobile-overlay"
+    @click="emit('update:mobileVisible', false)"
+  ></div>
+  
+  <aside class="app-sider" :class="{ collapsed, 'mobile-visible': mobileVisible }">
     <div class="sider-inner">
       <!-- Logo Area -->
       <div class="logo-section">
@@ -42,29 +57,37 @@ const infraNav = [
 
       <!-- Core Navigation -->
       <div class="core-nav">
-        <div class="section-header">
+        <div v-if="!collapsed" class="section-header">
           <span class="section-label">核心能力</span>
           <div class="section-line"></div>
         </div>
         <n-menu
           :value="activeMenu"
           :options="mainNav"
+          :collapsed="collapsed"
           class="nav-menu"
-          @update:value="(k: string) => emit('update:activeMenu', k)"
+          @update:value="(k: string) => {
+            emit('update:activeMenu', k)
+            if (mobileVisible) emit('update:mobileVisible', false)
+          }"
         />
       </div>
 
       <!-- Infrastructure - Fixed to Bottom -->
       <div class="infra-nav">
-        <div class="section-header">
+        <div v-if="!collapsed" class="section-header">
           <span class="section-label">基础设施</span>
           <div class="section-line"></div>
         </div>
         <n-menu
           :value="activeMenu"
           :options="infraNav"
+          :collapsed="collapsed"
           class="nav-menu infra-menu"
-          @update:value="(k: string) => emit('update:activeMenu', k)"
+          @update:value="(k: string) => {
+            emit('update:activeMenu', k)
+            if (mobileVisible) emit('update:mobileVisible', false)
+          }"
         />
       </div>
     </div>
@@ -76,10 +99,50 @@ const infraNav = [
   grid-area: sidebar;
   width: 260px;
   height: 100%;
-  background: var(--color-glass-bg) !important;
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  background: transparent !important; /* 改为透明以显示星空 */
   border-right: 1px solid var(--color-glass-border) !important;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+/* Desktop Collapsed State */
+.app-sider.collapsed {
+  width: 0;
+  border-right: none !important;
+  overflow: hidden;
+}
+
+/* Mobile Styles */
+@media (max-width: 767px) {
+  .app-sider {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 280px;
+    transform: translateX(-100%);
+    z-index: 999;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3);
+  }
+  
+  .app-sider.mobile-visible {
+    transform: translateX(0);
+  }
+  
+  .mobile-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 998;
+    opacity: 0;
+    animation: fadeIn 0.3s ease forwards;
+  }
+}
+
+@keyframes fadeIn {
+  to {
+    opacity: 1;
+  }
 }
 
 .sider-inner {
@@ -87,6 +150,7 @@ const infraNav = [
   display: flex;
   flex-direction: column;
   padding: 20px 12px;
+  width: 260px; /* 保持内部宽度不变，防止折叠时内容挤压 */
 }
 
 /* Logo Section */
@@ -98,6 +162,8 @@ const infraNav = [
   border-bottom: 1px solid var(--color-outline);
   margin-bottom: 20px;
   flex-shrink: 0;
+  overflow: hidden;
+  height: 64px;
 }
 
 .logo-mark {
@@ -172,6 +238,11 @@ const infraNav = [
   gap: 12px;
   padding: 0 12px;
   margin-bottom: 8px;
+  transition: opacity 0.2s ease;
+}
+
+.app-sider.collapsed .section-header {
+  display: none;
 }
 
 .section-label {
@@ -232,10 +303,6 @@ const infraNav = [
   background: linear-gradient(270deg, var(--color-primary-dim) 0%, transparent 80%);
 }
 
-:deep(.n-menu-item-content--selected) {
-  border-left: 3px solid var(--color-primary) !important;
-}
-
 :deep(.n-menu-item-content--selected .n-menu-item-content-header) {
   color: var(--color-primary) !important;
   font-weight: 600 !important;
@@ -252,6 +319,7 @@ const infraNav = [
   color: var(--color-text-dim) !important;
   position: relative;
   z-index: 1;
+  font-size: 20px !important;
 }
 
 :deep(.n-menu-item-content--selected .n-menu-icon) {
@@ -265,5 +333,16 @@ const infraNav = [
 .infra-menu :deep(.n-menu-item-content-header) {
   font-size: 13px !important;
   color: var(--color-text-dim) !important;
+}
+
+/* Fade Transition for Logo Text */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

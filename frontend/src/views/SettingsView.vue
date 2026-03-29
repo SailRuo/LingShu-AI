@@ -9,7 +9,7 @@ import {
 import { 
   RefreshCw, Settings, Cpu, Globe, Activity, Zap, Plus, 
   Trash2, Edit, Star, Users, Bell, Send, Brain, Wrench, Palette, Mic,
-  Bot, MessageCircle, Gem, Rocket, Sparkles
+  Bot, MessageCircle, Gem, Rocket, Sparkles, Heart, Volume2
 } from 'lucide-vue-next'
 import McpSettings from '@/components/McpSettings.vue'
 import ThemeModal from '@/components/common/ThemeModal.vue'
@@ -29,16 +29,27 @@ const settings = ref({
   embedModel: '',
   embedBaseUrl: 'http://localhost:11434',
   embedApiKey: '',
+  memoryModelSource: '',
+  memoryModel: '',
+  memoryModelBaseUrl: '',
+  memoryModelApiKey: '',
   proactiveEnabled: true,
   inactiveThresholdMinutes: 5,
   greetingCooldownSeconds: 300,
   inactiveCheckIntervalMs: 3600000,
+  ttsBaseUrl: 'http://localhost:5050',
+  ttsApiKey: '',
+  ttsDefaultVoice: 'alloy',
+  ttsDefaultSpeed: 1.0,
+  ttsDefaultFormat: 'mp3',
 })
 
 const chatModelOptions = ref<{label: string, value: string}[]>([])
 const embedModelOptions = ref<{label: string, value: string}[]>([])
+const memoryModelOptions = ref<{label: string, value: string}[]>([])
 const loadingChatModels = ref(false)
 const loadingEmbedModels = ref(false)
+const loadingMemoryModels = ref(false)
 
 interface Agent {
   id: number
@@ -96,6 +107,23 @@ const asrSettings = ref({
 })
 const savingAsr = ref(false)
 
+const voiceOptions = [
+  { label: 'Alloy (中性)', value: 'alloy' },
+  { label: 'Echo (男性)', value: 'echo' },
+  { label: 'Fable (英式)', value: 'fable' },
+  { label: 'Onyx (低沉)', value: 'onyx' },
+  { label: 'Nova (女性)', value: 'nova' },
+  { label: 'Shimmer (柔和)', value: 'shimmer' }
+]
+
+const formatOptions = [
+  { label: 'MP3', value: 'mp3' },
+  { label: 'OPUS', value: 'opus' },
+  { label: 'AAC', value: 'aac' },
+  { label: 'FLAC', value: 'flac' },
+  { label: 'WAV', value: 'wav' }
+]
+
 async function fetchChatModels(silent = false) {
   if (!settings.value.baseUrl || !settings.value.source) return
   loadingChatModels.value = true
@@ -146,6 +174,33 @@ async function fetchEmbedModels(silent = false) {
   }
 }
 
+async function fetchMemoryModels(silent = false) {
+  const baseUrl = settings.value.memoryModelBaseUrl || settings.value.baseUrl
+  const source = settings.value.memoryModelSource || settings.value.source
+  if (!baseUrl || !source) return
+  loadingMemoryModels.value = true
+  try {
+    const params = new URLSearchParams({
+      source: source,
+      baseUrl: baseUrl,
+      apiKey: settings.value.memoryModelApiKey || settings.value.apiKey,
+    })
+    const res = await fetch(`/api/chat/models?${params.toString()}`)
+    const models = await res.json()
+    memoryModelOptions.value = models.map((m: string) => ({ label: m, value: m }))
+    
+    if (memoryModelOptions.value.length > 0 && !memoryModelOptions.value.find(o => o.value === settings.value.memoryModel)) {
+      settings.value.memoryModel = memoryModelOptions.value[0].value
+    }
+    if (!silent) message.success('记忆模型列表已更新')
+  } catch (err) {
+    if (!silent) message.error('无法连接到记忆模型服务')
+    memoryModelOptions.value = []
+  } finally {
+    loadingMemoryModels.value = false
+  }
+}
+
 function handleSourceChange(newSource: string) {
   if (newSource === 'ollama') {
     settings.value.baseUrl = 'http://localhost:11434'
@@ -160,6 +215,12 @@ function handleEmbedSourceChange(newSource: string) {
   }
 }
 
+function handleMemoryModelSourceChange(newSource: string) {
+  if (newSource === 'ollama') {
+    settings.value.memoryModelBaseUrl = 'http://localhost:11434'
+  }
+}
+
 watch(
   [() => settings.value.source, () => settings.value.baseUrl, () => settings.value.apiKey],
   () => fetchChatModels(true)
@@ -168,6 +229,11 @@ watch(
 watch(
   [() => settings.value.embedSource, () => settings.value.embedBaseUrl, () => settings.value.embedApiKey],
   () => fetchEmbedModels(true)
+)
+
+watch(
+  [() => settings.value.memoryModelSource, () => settings.value.memoryModelBaseUrl, () => settings.value.memoryModelApiKey],
+  () => fetchMemoryModels(true)
 )
 
 async function fetchSettings() {
@@ -183,13 +249,23 @@ async function fetchSettings() {
       embedModel: data.embedModel || '',
       embedBaseUrl: data.embedBaseUrl || 'http://localhost:11434',
       embedApiKey: data.embedApiKey || '',
+      memoryModelSource: data.memoryModelSource || '',
+      memoryModel: data.memoryModel || '',
+      memoryModelBaseUrl: data.memoryModelBaseUrl || '',
+      memoryModelApiKey: data.memoryModelApiKey || '',
       proactiveEnabled: data.proactiveEnabled ?? true,
       inactiveThresholdMinutes: data.inactiveThresholdMinutes ?? 5,
       greetingCooldownSeconds: data.greetingCooldownSeconds ?? 300,
       inactiveCheckIntervalMs: data.inactiveCheckIntervalMs ?? 3600000,
+      ttsBaseUrl: data.ttsBaseUrl || 'http://localhost:5050',
+      ttsApiKey: data.ttsApiKey || '',
+      ttsDefaultVoice: data.ttsDefaultVoice || 'alloy',
+      ttsDefaultSpeed: data.ttsDefaultSpeed || 1.0,
+      ttsDefaultFormat: data.ttsDefaultFormat || 'mp3',
     }
     fetchChatModels(true)
     fetchEmbedModels(true)
+    fetchMemoryModels(true)
   } catch (err) {
     console.error('Failed to fetch settings', err)
   }
@@ -230,6 +306,24 @@ async function saveLocalTools() {
     message.success('本地工具配置已保存')
   } catch (err) {
     message.error('保存本地工具配置失败')
+  }
+}
+
+async function toggleTool(tool: LocalTool, enabled: boolean) {
+  // 先更新状态，让 UI 立即响应
+  tool.enabled = enabled
+  
+  try {
+    await fetch('/api/settings/local-tools', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tools: localTools.value })
+    })
+    message.success(`${tool.displayName}已${enabled ? '启用' : '禁用'}`)
+  } catch (err) {
+    // 失败时回滚状态
+    tool.enabled = !enabled
+    message.error('保存工具配置失败')
   }
 }
 
@@ -284,10 +378,19 @@ const handleSave = async () => {
         embedModel: settings.value.embedModel,
         embedBaseUrl: settings.value.embedBaseUrl,
         embedApiKey: settings.value.embedApiKey,
+        memoryModelSource: settings.value.memoryModelSource,
+        memoryModel: settings.value.memoryModel,
+        memoryModelBaseUrl: settings.value.memoryModelBaseUrl,
+        memoryModelApiKey: settings.value.memoryModelApiKey,
         proactiveEnabled: settings.value.proactiveEnabled,
         inactiveThresholdMinutes: settings.value.inactiveThresholdMinutes,
         greetingCooldownSeconds: settings.value.greetingCooldownSeconds,
         inactiveCheckIntervalMs: settings.value.inactiveCheckIntervalMs,
+        ttsBaseUrl: settings.value.ttsBaseUrl,
+        ttsApiKey: settings.value.ttsApiKey,
+        ttsDefaultVoice: settings.value.ttsDefaultVoice,
+        ttsDefaultSpeed: settings.value.ttsDefaultSpeed,
+        ttsDefaultFormat: settings.value.ttsDefaultFormat,
       })
     })
     message.success('内核配置已同步至系统中枢')
@@ -588,6 +691,136 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
                 </n-card>
               </section>
             </n-tab-pane>
+
+            <n-tab-pane name="memoryModel" tab="记忆模型 (Memory)">
+              <section class="settings-section pt-4">
+                <div class="section-header">
+                  <n-icon :component="Brain" />
+                  <h2>记忆模型源</h2>
+                </div>
+                
+                <n-card class="glass-card">
+                  <div class="source-selector">
+                      <n-radio-group v-model:value="settings.memoryModelSource" size="large" @update:value="handleMemoryModelSourceChange">
+                        <n-radio-button value="ollama">
+                          <div class="radio-content">
+                            <n-icon :component="Activity" />
+                            <span>Ollama (本地)</span>
+                          </div>
+                        </n-radio-button>
+                        <n-radio-button value="openai">
+                          <div class="radio-content">
+                            <n-icon :component="Globe" />
+                            <span>Custom / OpenAI</span>
+                          </div>
+                        </n-radio-button>
+                      </n-radio-group>
+                    </div>
+
+                    <div class="setting-item">
+                      <div class="item-label">
+                        <span class="label-text">记忆模型</span>
+                        <n-button quaternary circle size="small" @click="fetchMemoryModels(false)" :loading="loadingMemoryModels">
+                          <template #icon><n-icon :component="RefreshCw" /></template>
+                        </n-button>
+                      </div>
+                      <n-select
+                        v-model:value="settings.memoryModel"
+                        :options="memoryModelOptions"
+                        placeholder="选择记忆模型..."
+                        size="large"
+                        filterable
+                        tag
+                      />
+                    </div>
+
+                    <div class="dual-fields mt-4">
+                      <div class="setting-item flex-1">
+                        <div class="item-label">服务地址</div>
+                        <n-input v-model:value="settings.memoryModelBaseUrl" placeholder="默认使用对话模型地址..." size="large" />
+                      </div>
+                      <div v-if="settings.memoryModelSource === 'openai'" class="setting-item flex-1">
+                        <div class="item-label">API 密钥</div>
+                        <n-input v-model:value="settings.memoryModelApiKey" type="password" show-password-on="click" placeholder="默认使用对话模型密钥..." size="large" />
+                      </div>
+                    </div>
+                </n-card>
+              </section>
+            </n-tab-pane>
+
+            <n-tab-pane name="tts" tab="语音合成 (TTS)">
+              <section class="settings-section pt-4">
+                <div class="section-header">
+                  <n-icon :component="Volume2" />
+                  <h2>语音合成服务</h2>
+                </div>
+                
+                <n-card class="glass-card">
+                  <div class="setting-item">
+                    <div class="item-label">
+                      <span class="label-text">TTS 服务地址</span>
+                    </div>
+                    <n-input 
+                      v-model:value="settings.ttsBaseUrl" 
+                      placeholder="http://localhost:5050" 
+                      size="large"
+                    />
+                    <div class="item-hint">OpenAI 兼容的 TTS 服务地址，如 openai-edge-tts</div>
+                  </div>
+
+                  <div class="setting-item mt-4">
+                    <div class="item-label">
+                      <span class="label-text">API 密钥 (可选)</span>
+                    </div>
+                    <n-input 
+                      v-model:value="settings.ttsApiKey" 
+                      type="password" 
+                      show-password-on="click"
+                      placeholder="如果服务需要认证..." 
+                      size="large"
+                    />
+                  </div>
+
+                  <n-divider />
+
+                  <div class="setting-item">
+                    <div class="item-label">
+                      <span class="label-text">默认语音</span>
+                    </div>
+                    <n-select
+                      v-model:value="settings.ttsDefaultVoice"
+                      :options="voiceOptions"
+                      placeholder="选择默认语音..."
+                      size="large"
+                    />
+                    <div class="item-hint">OpenAI 兼容语音选项</div>
+                  </div>
+
+                  <div class="dual-fields mt-4">
+                    <div class="setting-item flex-1">
+                      <div class="item-label">语速</div>
+                      <n-input-number 
+                        v-model:value="settings.ttsDefaultSpeed" 
+                        :min="0.25" 
+                        :max="4.0" 
+                        :step="0.25"
+                        size="large"
+                      />
+                      <div class="item-hint">0.25x - 4.0x</div>
+                    </div>
+                    <div class="setting-item flex-1">
+                      <div class="item-label">输出格式</div>
+                      <n-select
+                        v-model:value="settings.ttsDefaultFormat"
+                        :options="formatOptions"
+                        placeholder="选择格式..."
+                        size="large"
+                      />
+                    </div>
+                  </div>
+                </n-card>
+              </section>
+            </n-tab-pane>
           </n-tabs>
 
           <div class="save-section">
@@ -615,7 +848,14 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
               <n-card v-for="agent in agents" :key="agent.id" class="glass-card agent-card">
                 <div class="agent-header">
                   <span class="agent-avatar" :style="{ background: agent.color || '#3b82f6' }">
-                    {{ agent.avatar || '🤖' }}
+                    <template v-if="agent.avatar === 'Bot'"><Bot :size="24" /></template>
+                    <template v-else-if="agent.avatar === 'Brain'"><Brain :size="24" /></template>
+                    <template v-else-if="agent.avatar === 'Sparkles'"><Sparkles :size="24" /></template>
+                    <template v-else-if="agent.avatar === 'Cpu'"><Cpu :size="24" /></template>
+                    <template v-else-if="agent.avatar === 'Gem'"><Gem :size="24" /></template>
+                    <template v-else-if="agent.avatar === 'Rocket'"><Rocket :size="24" /></template>
+                    <template v-else-if="agent.avatar === 'Zap'"><Zap :size="24" /></template>
+                    <template v-else>{{ agent.avatar || '🤖' }}</template>
                   </span>
                   <div class="agent-info">
                     <div class="agent-name">
@@ -742,7 +982,10 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
                     <div class="tool-name">{{ tool.displayName }}</div>
                     <div class="tool-id">@{{ tool.name }}</div>
                   </div>
-                  <n-switch v-model:value="tool.enabled" />
+                  <n-switch 
+                    :value="tool.enabled" 
+                    @update:value="(val: boolean) => toggleTool(tool, val)"
+                  />
                 </div>
                 <div class="tool-prompt">
                   <div class="item-label">工具提示词 (Prompt)</div>
@@ -1080,6 +1323,7 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
   align-items: center;
   justify-content: center;
   font-size: 24px;
+  color: white;
 }
 
 .agent-info {

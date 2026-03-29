@@ -4,9 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lingshu.ai.core.dto.EmotionAnalysis;
 import com.lingshu.ai.core.dto.EmotionContext;
 import com.lingshu.ai.core.dto.EmotionContextResult;
+import com.lingshu.ai.core.model.DynamicMemoryModel;
 import com.lingshu.ai.infrastructure.entity.ChatMessage;
 import com.lingshu.ai.infrastructure.repository.ChatMessageRepository;
-import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,19 +25,19 @@ public class EmotionPreAnalysisService {
 
     private final EmotionContextCache contextCache;
     private final ChatMessageRepository messageRepository;
-    private final ChatModel chatModel;
+    private final DynamicMemoryModel dynamicMemoryModel;
     private final SystemLogService systemLogService;
     private final ObjectMapper objectMapper;
     private EmotionContextAnalyzer emotionContextAnalyzer;
 
     public EmotionPreAnalysisService(EmotionContextCache contextCache,
                                      ChatMessageRepository messageRepository,
-                                     ChatModel chatModel,
+                                     DynamicMemoryModel dynamicMemoryModel,
                                      SystemLogService systemLogService,
                                      ObjectMapper objectMapper) {
         this.contextCache = contextCache;
         this.messageRepository = messageRepository;
-        this.chatModel = chatModel;
+        this.dynamicMemoryModel = dynamicMemoryModel;
         this.systemLogService = systemLogService;
         this.objectMapper = objectMapper;
     }
@@ -45,7 +45,7 @@ public class EmotionPreAnalysisService {
     private EmotionContextAnalyzer getAnalyzer() {
         if (emotionContextAnalyzer == null) {
             emotionContextAnalyzer = AiServices.builder(EmotionContextAnalyzer.class)
-                    .chatModel(chatModel)
+                    .chatModel(dynamicMemoryModel)
                     .build();
         }
         return emotionContextAnalyzer;
@@ -90,7 +90,7 @@ public class EmotionPreAnalysisService {
     public EmotionAnalysis analyzeSimple(String userId, String message) {
         try {
             EmotionAnalyzer simpleAnalyzer = AiServices.builder(EmotionAnalyzer.class)
-                    .chatModel(chatModel)
+                    .chatModel(dynamicMemoryModel)
                     .build();
             
             EmotionAnalysis result = simpleAnalyzer.analyze(message);
