@@ -3,6 +3,8 @@ package com.lingshu.ai.core.service.impl;
 import com.lingshu.ai.core.config.AiConfig;
 import com.lingshu.ai.core.service.*;
 import com.lingshu.ai.core.tool.LocalTools;
+import com.lingshu.ai.core.tool.SummarizingMcpToolProvider;
+import com.lingshu.ai.core.dto.EmotionContextResult;
 import com.lingshu.ai.infrastructure.entity.AgentConfig;
 import com.lingshu.ai.infrastructure.entity.ChatMessage;
 import com.lingshu.ai.infrastructure.entity.ChatSession;
@@ -10,7 +12,7 @@ import com.lingshu.ai.infrastructure.repository.ChatMessageRepository;
 import com.lingshu.ai.infrastructure.repository.ChatSessionRepository;
 import dev.langchain4j.http.client.jdk.JdkHttpClientBuilder;
 import dev.langchain4j.memory.chat.ChatMemoryProvider;
-import dev.langchain4j.mcp.McpToolProvider;
+
 import dev.langchain4j.mcp.client.McpClient;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -50,6 +52,8 @@ public class ChatServiceImpl implements ChatService {
     private final ChatModel chatLanguageModel;
     private final List<ChatModelListener> listeners;
     private final TurnPostProcessingServiceImpl turnPostProcessingService;
+    private final ToolResultSummarizer toolResultSummarizer;
+    private final EmotionPreAnalysisService emotionPreAnalysisService;
 
     @Value("${lingshu.ollama.base-url:http://localhost:11434}")
     private String baseUrl;
@@ -69,7 +73,9 @@ public class ChatServiceImpl implements ChatService {
                            McpService mcpService,
                            ChatModel chatLanguageModel,
                            List<ChatModelListener> listeners,
-                           TurnPostProcessingServiceImpl turnPostProcessingService) {
+                           TurnPostProcessingServiceImpl turnPostProcessingService,
+                           ToolResultSummarizer toolResultSummarizer,
+                           EmotionPreAnalysisService emotionPreAnalysisService) {
         this.memoryService = memoryService;
         this.agentConfigService = agentConfigService;
         this.sessionRepository = sessionRepository;
@@ -86,6 +92,8 @@ public class ChatServiceImpl implements ChatService {
         this.chatLanguageModel = chatLanguageModel;
         this.listeners = listeners;
         this.turnPostProcessingService = turnPostProcessingService;
+        this.toolResultSummarizer = toolResultSummarizer;
+        this.emotionPreAnalysisService = emotionPreAnalysisService;
     }
 
     private ChatSession getOrCreateSession() {
@@ -123,6 +131,13 @@ public class ChatServiceImpl implements ChatService {
 
         systemLogService.info("\n收到用户消息: " + (message.length() > 20 ? message.substring(0, 20) + "..." : message), "CHAT");
 
+        com.lingshu.ai.core.dto.EmotionContextResult emotionResult = emotionPreAnalysisService.analyzeBeforeResponse(userId, message, session.getId());
+        String emotionPrompt = "";
+        if (emotionResult != null) {
+            emotionPrompt = emotionPreAnalysisService.getEmotionPromptInjection(userId);
+            systemLogService.info("情感前置分析完成，已注入情感状态到 Prompt", "EMOTION");
+        }
+
         String longTermContext = memoryService.retrieveContext(userId, message);
         if (longTermContext != null && !longTermContext.isBlank()) {
             systemLogService.info("长期记忆检索完成，获取到相关事实。", "MEMORY");
@@ -131,6 +146,10 @@ public class ChatServiceImpl implements ChatService {
         String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
 
         String systemPrompt = promptBuilderService.buildMergedSystemPrompt(agent, relationshipPrompt, longTermContext);
+        
+        if (!emotionPrompt.isEmpty()) {
+            systemPrompt = systemPrompt + emotionPrompt;
+        }
 
         log.debug("Merged System Prompt generated for chat (first 100 chars): {}...", systemPrompt.substring(0, Math.min(100, systemPrompt.length())));
         systemLogService.debug("已加载 Agent Prompt (长度: " + systemPrompt.length() + ")", "CHAT");
@@ -154,7 +173,8 @@ public class ChatServiceImpl implements ChatService {
 
         List<McpClient> mcpClients = mcpService.getActiveClients();
         if (!mcpClients.isEmpty()) {
-            builder.toolProvider(McpToolProvider.builder().mcpClients(mcpClients).build());
+            builder.toolProvider(new SummarizingMcpToolProvider(
+                    mcpClients, toolResultSummarizer, () -> message));
         }
 
         AiConfig.Assistant dynamicAssistant = builder.build();
@@ -233,9 +253,20 @@ public class ChatServiceImpl implements ChatService {
         Sinks.Many<String> sink = Sinks.many().unicast().onBackpressureBuffer();
         StringBuilder assistantResponseStore = new StringBuilder();
 
+        com.lingshu.ai.core.dto.EmotionContextResult emotionResult = emotionPreAnalysisService.analyzeBeforeResponse(userId, message, session.getId());
+        String emotionPrompt = "";
+        if (emotionResult != null) {
+            emotionPrompt = emotionPreAnalysisService.getEmotionPromptInjection(userId);
+            systemLogService.info("情感前置分析完成，已注入情感状态到 Prompt", "EMOTION");
+        }
+
         String longTermContext = memoryService.retrieveContext(userId, message);
         String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
         String systemPrompt = promptBuilderService.buildMergedSystemPrompt(agent, relationshipPrompt, longTermContext);
+        
+        if (!emotionPrompt.isEmpty()) {
+            systemPrompt = systemPrompt + emotionPrompt;
+        }
 
         log.debug("Merged System Prompt generated for streamChat (first 100 chars): {}...", systemPrompt.substring(0, Math.min(100, systemPrompt.length())));
         systemLogService.debug("已加载 Agent Prompt (长度: " + systemPrompt.length() + ")", "CHAT");
@@ -303,7 +334,9 @@ public class ChatServiceImpl implements ChatService {
 
         List<McpClient> mcpClients = mcpService.getActiveClients();
         if (!mcpClients.isEmpty()) {
-            builder.toolProvider(McpToolProvider.builder().mcpClients(mcpClients).build());
+            String userIntent = message;
+            builder.toolProvider(new SummarizingMcpToolProvider(
+                    mcpClients, toolResultSummarizer, () -> userIntent));
         }
         assistantToUse = builder.build();
 
@@ -322,7 +355,7 @@ public class ChatServiceImpl implements ChatService {
                     toolEventListener.onToolStart(request.id(), request.name(), request.arguments());
                 })
                 .onPartialResponse(token -> {
-                    if (assistantResponseStore.length() == 0) {
+                    if (assistantResponseStore.isEmpty()) {
                         systemLogService.info("流式输出已开启，接收首个 token...", "LLM");
                     }
                     assistantResponseStore.append(token);
@@ -454,16 +487,14 @@ public class ChatServiceImpl implements ChatService {
                         List<String> models = list.stream()
                                 .map(m -> (String) ((java.util.Map<?, ?>) m).get("id"))
                                 .collect(java.util.stream.Collectors.toList());
-                        systemLogService.endTimer("get_models", "模型列表获取成功", "SYSTEM");
-                        systemLogService.info("获取到 " + models.size() + " 个OpenAI兼容模型", "SYSTEM");
+                        log.debug("获取到 " + models.size() + " 个OpenAI兼容模型");
                         return models;
                     }
                 } else if (responseObj instanceof java.util.List<?> list) {
                     List<String> models = list.stream()
                             .map(m -> (String) ((java.util.Map<?, ?>) m).get("id"))
                             .collect(java.util.stream.Collectors.toList());
-                    systemLogService.endTimer("get_models", "模型列表获取成功", "SYSTEM");
-                    systemLogService.info("获取到 " + models.size() + " 个OpenAI兼容模型", "SYSTEM");
+                    log.debug("获取到 " + models.size() + " 个OpenAI兼容模型");
                     return models;
                 }
 
@@ -484,7 +515,6 @@ public class ChatServiceImpl implements ChatService {
                 List<String> modelNames = models.stream()
                         .map(m -> (String) m.get("name"))
                         .collect(java.util.stream.Collectors.toList());
-                systemLogService.endTimer("get_models", "模型列表获取成功", "SYSTEM");
                 systemLogService.info("获取到 " + modelNames.size() + " 个Ollama模型", "SYSTEM");
                 return modelNames;
             }

@@ -43,7 +43,7 @@ public class AsrService {
         }
 
         String normalizedUrl = normalizeAsrUrl(asrUrl);
-        logger.debug("发送识别请求到: {}", normalizedUrl);
+        logger.debug("准备处理音频识别请求，目标地址: {}", normalizedUrl);
 
         byte[] wavData;
         if (mimeType != null && mimeType.contains("webm")) {

@@ -5,6 +5,7 @@ import com.lingshu.ai.core.service.AffinityService;
 import com.lingshu.ai.core.service.EmotionAnalyzer;
 import com.lingshu.ai.core.service.MemoryService;
 import com.lingshu.ai.core.service.SystemLogService;
+import com.lingshu.ai.core.service.EmotionalEpisodeService;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.SystemMessage;
@@ -23,17 +24,20 @@ public class TurnPostProcessingServiceImpl {
     private final AffinityService affinityService;
     private final SystemLogService systemLogService;
     private final ChatModel chatLanguageModel;
+    private final EmotionalEpisodeService emotionalEpisodeService;
 
     public TurnPostProcessingServiceImpl(EmotionAnalyzer emotionAnalyzer,
                                          MemoryService memoryService,
                                          AffinityService affinityService,
                                          SystemLogService systemLogService,
-                                         ChatModel chatLanguageModel) {
+                                         ChatModel chatLanguageModel,
+                                         EmotionalEpisodeService emotionalEpisodeService) {
         this.emotionAnalyzer = emotionAnalyzer;
         this.memoryService = memoryService;
         this.affinityService = affinityService;
         this.systemLogService = systemLogService;
         this.chatLanguageModel = chatLanguageModel;
+        this.emotionalEpisodeService = emotionalEpisodeService;
     }
 
     @Async("taskExecutor")
@@ -127,6 +131,9 @@ public class TurnPostProcessingServiceImpl {
             if (emotion.needsAttention()) {
                 systemLogService.info("检测到用户需要关注", "EMOTION");
             }
+            
+            emotionalEpisodeService.extractAndSaveEpisode(userId, userMessage, emotion);
+            
             return emotion;
         } catch (Exception e) {
             log.warn("情感分析失败: {}", e.getMessage(), e);

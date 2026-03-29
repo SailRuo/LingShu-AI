@@ -179,13 +179,13 @@ public class PromptBuilderServiceImpl implements PromptBuilderService {
     }
 
     @Override
-    public String buildGreetingUserPrompt(String relationshipPrompt, String memoryContext, String timeOfDay, String agentName) {
+    public String buildGreetingUserPrompt(String timeOfDay) {
         // 关键逻辑已移至 System Prompt，这里只保留触发词
         return String.format("当前时间是 %s。请给我一个自然的问候。", timeOfDay);
     }
 
     @Override
-    public String buildComfortUserPrompt(String relationshipPrompt, String emotion, double intensity, String agentName) {
+    public String buildComfortUserPrompt(String emotion, double intensity) {
         // 关键逻辑已移至 System Prompt
         return String.format("探测到我的情绪状态为 %s (强度 %.2f)，请安慰我。", emotion, intensity);
     }

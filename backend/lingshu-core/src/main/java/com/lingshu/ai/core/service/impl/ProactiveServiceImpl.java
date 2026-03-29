@@ -1,5 +1,6 @@
 package com.lingshu.ai.core.service.impl;
 
+import com.lingshu.ai.core.config.AiConfig;
 import com.lingshu.ai.core.dto.EmotionAnalysis;
 import com.lingshu.ai.core.event.ProactiveGreetingEvent;
 import com.lingshu.ai.core.service.*;
@@ -7,7 +8,7 @@ import com.lingshu.ai.infrastructure.entity.AgentConfig;
 import com.lingshu.ai.infrastructure.entity.SystemSetting;
 import com.lingshu.ai.infrastructure.entity.UserState;
 import com.lingshu.ai.infrastructure.repository.UserStateRepository;
-import com.lingshu.ai.core.config.AiConfig.RawStreamingAssistant;
+import com.lingshu.ai.core.config.AiConfig.StatelessStreamingAssistant;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -15,7 +16,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
+import reactor.core.scheduler.Schedulers;
 
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -36,6 +39,7 @@ public class ProactiveServiceImpl implements ProactiveService {
     private final SystemLogService systemLogService;
     private final ApplicationEventPublisher eventPublisher;
     private final PromptBuilderService promptBuilderService;
+    private final StatelessStreamingAssistant statelessStreamingAssistant;
 
     public ProactiveServiceImpl(UserStateRepository userStateRepository,
                                AffinityService affinityService,
@@ -44,7 +48,8 @@ public class ProactiveServiceImpl implements ProactiveService {
                                SettingService settingService,
                                SystemLogService systemLogService,
                                ApplicationEventPublisher eventPublisher,
-                               PromptBuilderService promptBuilderService) {
+                               PromptBuilderService promptBuilderService,
+                               StatelessStreamingAssistant statelessStreamingAssistant) {
         this.userStateRepository = userStateRepository;
         this.affinityService = affinityService;
         this.memoryService = memoryService;
@@ -53,11 +58,11 @@ public class ProactiveServiceImpl implements ProactiveService {
         this.systemLogService = systemLogService;
         this.eventPublisher = eventPublisher;
         this.promptBuilderService = promptBuilderService;
+        this.statelessStreamingAssistant = statelessStreamingAssistant;
     }
 
     @Override
     @Scheduled(fixedRate = 60000)
-    @Transactional("transactionManager")
     public void checkInactiveUsers() {
         SystemSetting setting = settingService.getSetting();
         if (setting.getProactiveEnabled() == null || !setting.getProactiveEnabled()) {
@@ -88,8 +93,6 @@ public class ProactiveServiceImpl implements ProactiveService {
                     systemLogService.info(String.format("用户 %s 不活跃 %d 分钟，标记需要问候", 
                             state.getUserId(), minutesInactive), "PROACTIVE");
                     
-                    // 使用 AI 生成个性化问候语（基于记忆和关系）
-                    String timeOfDay = getTimeOfDay();
                     generateGreeting(state.getUserId())
                         .collectList()
                         .subscribe(tokens -> {
@@ -121,7 +124,6 @@ public class ProactiveServiceImpl implements ProactiveService {
     @Scheduled(cron = "0 0 12 * * *")
     @Scheduled(cron = "0 0 18 * * *")
     @Scheduled(cron = "0 0 22 * * *")
-    @Transactional("transactionManager")
     public void scheduledGreeting() {
         SystemSetting setting = settingService.getSetting();
         if (setting.getProactiveEnabled() == null || !setting.getProactiveEnabled()) {
@@ -165,44 +167,53 @@ public class ProactiveServiceImpl implements ProactiveService {
 
     @Override
     public Flux<String> generateGreeting(String userId) {
-        systemLogService.info(String.format("为用户 %s 生成问候消息", userId), "PROACTIVE");
+        return Mono.fromCallable(() -> {
+            systemLogService.info(String.format("为用户 %s 生成问候消息", userId), "PROACTIVE");
 
-        UserState state = affinityService.getOrCreateUserState(userId);
-        String memoryContext = memoryService.retrieveContext(userId, "用户最近的状态和重要事件");
-        AgentConfig agent = agentConfigService.getDefaultAgent().orElse(null);
-        String agentName = agent != null ? agent.getDisplayName() : "灵枢";
+            String memoryContext = memoryService.retrieveContext(userId, "用户最近的状态和重要事件");
+            AgentConfig agent = agentConfigService.getDefaultAgent().orElse(null);
 
-        String timeOfDay = getTimeOfDay();
-        String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
-        // 使用合并后的 System Prompt (包含规则和上下文)
-        String systemPrompt = promptBuilderService.buildMergedSystemPrompt(agent, relationshipPrompt, memoryContext);
-        String userPrompt = promptBuilderService.buildGreetingUserPrompt(relationshipPrompt, memoryContext, timeOfDay, agentName);
+            String timeOfDay = getTimeOfDay();
+            String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
+            // 使用合并后的 System Prompt (包含规则和上下文)
+            String systemPrompt = promptBuilderService.buildMergedSystemPrompt(agent, relationshipPrompt, memoryContext);
+            String userPrompt = promptBuilderService.buildGreetingUserPrompt(timeOfDay);
 
-        systemLogService.debug(String.format("SystemPrompt: %s", systemPrompt), "PROACTIVE");
-        systemLogService.debug(String.format("UserPrompt: %s", userPrompt), "PROACTIVE");
-        systemLogService.debug(String.format("MemoryContext: %s", memoryContext), "PROACTIVE");
+            systemLogService.debug(String.format("SystemPrompt: %s", systemPrompt), "PROACTIVE");
+            systemLogService.debug(String.format("UserPrompt: %s", userPrompt), "PROACTIVE");
 
-        return executeStreamingChat(systemPrompt, userPrompt);
+            return new String[]{systemPrompt, userPrompt};
+        })
+        .subscribeOn(Schedulers.boundedElastic())
+        .flatMapMany(prompts -> executeStreamingChat(prompts[0], prompts[1]));
     }
 
     @Override
     public Flux<String> generateComfortMessage(String userId) {
-        systemLogService.info(String.format("为用户 %s 生成安慰消息", userId), "PROACTIVE");
+        return Mono.fromCallable(() -> {
+            systemLogService.info(String.format("为用户 %s 生成安慰消息", userId), "PROACTIVE");
 
-        UserState state = affinityService.getUserState(userId);
-        if (state == null) {
-            return Flux.just("我注意到你似乎有些不开心，有什么我可以帮你的吗？");
-        }
+            UserState state = affinityService.getUserState(userId);
+            if (state == null) {
+                return null;
+            }
 
-        AgentConfig agent = agentConfigService.getDefaultAgent().orElse(null);
-        String agentName = agent != null ? agent.getDisplayName() : "灵枢";
-        String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
+            AgentConfig agent = agentConfigService.getDefaultAgent().orElse(null);
+            String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
 
-        String systemPrompt = promptBuilderService.buildMergedSystemPrompt(agent, relationshipPrompt, null);
-        String userPrompt = promptBuilderService.buildComfortUserPrompt(relationshipPrompt, 
-                state.getLastEmotion(), state.getLastEmotionIntensity(), agentName);
-
-        return executeStreamingChat(systemPrompt, userPrompt);
+            String systemPrompt = promptBuilderService.buildMergedSystemPrompt(agent, relationshipPrompt, null);
+            String userPrompt = promptBuilderService.buildComfortUserPrompt(
+                    state.getLastEmotion(), state.getLastEmotionIntensity());
+            
+            return new String[]{systemPrompt, userPrompt};
+        })
+        .subscribeOn(Schedulers.boundedElastic())
+        .flatMapMany(prompts -> {
+            if (prompts == null) {
+                return Flux.just("我注意到你似乎有些不开心，有什么我可以帮你的吗？");
+            }
+            return executeStreamingChat(prompts[0], prompts[1]);
+        });
     }
 
     @Override
@@ -319,47 +330,14 @@ public class ProactiveServiceImpl implements ProactiveService {
         Sinks.Many<String> sink = Sinks.many().unicast().onBackpressureBuffer();
 
         try {
-            var setting = settingService.getSetting();
-            
-            if (setting == null || setting.getBaseUrl() == null || setting.getChatModel() == null) {
-                log.warn("系统设置未配置，使用默认问候语");
-                sink.tryEmitNext("你好，有什么我可以帮你的吗？");
-                sink.tryEmitComplete();
-                return sink.asFlux();
-            }
-            
-            StreamingChatModel model;
-
-            if ("ollama".equalsIgnoreCase(setting.getSource()) || 
-                (setting.getSource() == null && setting.getBaseUrl().contains("11434"))) {
-                model = dev.langchain4j.model.ollama.OllamaStreamingChatModel.builder()
-                        .baseUrl(setting.getBaseUrl())
-                        .modelName(setting.getChatModel())
-                        .timeout(java.time.Duration.ofMinutes(2))
-                        .build();
-            } else {
-                String url = setting.getBaseUrl();
-                model = dev.langchain4j.model.openai.OpenAiStreamingChatModel.builder()
-                        .baseUrl(url.endsWith("/v1") || url.endsWith("/v1/") ? url : url + (url.endsWith("/") ? "v1" : "/v1"))
-                        .apiKey(setting.getApiKey() != null && !setting.getApiKey().isBlank() ? setting.getApiKey() : "no-key")
-                        .modelName(setting.getChatModel())
-                        .timeout(java.time.Duration.ofMinutes(2))
-                        .build();
-            }
-
-            var assistant = dev.langchain4j.service.AiServices.builder(RawStreamingAssistant.class)
-                    .streamingChatModel(model)
-                    .build();
-
-            // Note: chat method with 3 parameters is defined in RawStreamingAssistant
-            assistant.chat(1L, userPrompt, systemPrompt)
+            statelessStreamingAssistant.chat(userPrompt, systemPrompt)
                     .onPartialThinking(thinking -> systemLogService.thinking(thinking.text(), "PROACTIVE"))
                     .onPartialResponse(sink::tryEmitNext)
                     .onCompleteResponse(response -> sink.tryEmitComplete())
                     .onError(sink::tryEmitError)
                     .start();
         } catch (Exception e) {
-            log.error("流式聊天执行失败: {}", e.getMessage());
+            log.error("流式聊天执行失败: {}", e.getMessage(), e);
             sink.tryEmitNext("你好，有什么我可以帮你的吗？");
             sink.tryEmitComplete();
         }

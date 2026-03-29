@@ -5,6 +5,10 @@ import com.lingshu.ai.core.dto.FactSemanticClassification;
 import com.lingshu.ai.core.service.FactExtractor;
 import com.lingshu.ai.core.service.FactSemanticClassifier;
 import com.lingshu.ai.core.service.MemoryService;
+import com.lingshu.ai.core.service.EmotionAwareFactExtractor;
+import com.lingshu.ai.core.dto.ExtractionResult;
+import com.lingshu.ai.core.dto.ConfidenceLevel;
+import com.lingshu.ai.core.dto.FactType;
 import com.lingshu.ai.infrastructure.entity.FactNode;
 import com.lingshu.ai.infrastructure.entity.UserNode;
 import com.lingshu.ai.infrastructure.repository.UserRepository;
@@ -65,6 +69,7 @@ public class MemoryServiceImpl implements MemoryService {
     private FactExtractor factExtractor;
     private FactSemanticClassifier factSemanticClassifier;
     private com.lingshu.ai.core.service.FactRelationshipEvaluator factRelationshipEvaluator;
+    private EmotionAwareFactExtractor emotionAwareFactExtractor;
     private volatile Map<String, Object> lastMaintenanceSummary = new LinkedHashMap<>();
     private final java.util.Queue<com.lingshu.ai.core.dto.MemoryRetrievalEvent> recentRetrievalEvents = new java.util.concurrent.ConcurrentLinkedQueue<>();
 
@@ -95,6 +100,9 @@ public class MemoryServiceImpl implements MemoryService {
                 .chatModel(chatLanguageModel)
                 .build();
         this.factSemanticClassifier = AiServices.builder(FactSemanticClassifier.class)
+                .chatModel(chatLanguageModel)
+                .build();
+        this.emotionAwareFactExtractor = AiServices.builder(EmotionAwareFactExtractor.class)
                 .chatModel(chatLanguageModel)
                 .build();
 
@@ -135,28 +143,139 @@ public class MemoryServiceImpl implements MemoryService {
             systemLogService.debug("用户无历史记忆，首次认知分析", "MEMORY");
         }
 
-        systemLogService.info("正在调用 LLM 进行事实提取与冲突检测...", "FACT");
-        systemLogService.llmStart("fact-extractor", "ollama", "FACT");
+        boolean useEmotionAwareExtraction = emotion != null && 
+            (emotion.getIntensity() == null || emotion.getIntensity() > 0.3 || 
+             Boolean.TRUE.equals(emotion.getNeedsComfort()));
 
-        com.lingshu.ai.core.dto.MemoryUpdate report = null;
-        try {
-            String rawJson = factExtractor.analyze(messageSnapshot, currentFactsBuilder.toString());
-            // 清理可能存在的 markdown 标签（防御性处理）
-            rawJson = rawJson.replaceAll("(?s)```(json)?", "").trim();
-            report = objectMapper.readValue(rawJson, com.lingshu.ai.core.dto.MemoryUpdate.class);
-            systemLogService.llmEnd(0, "FACT");
-        } catch (Exception e) {
-            log.error("Failed to parse cognitive report: {}", e.getMessage());
-            systemLogService.llmError(e.getMessage(), "FACT");
-            return;
+        ExtractionResult extractionResult = null;
+        com.lingshu.ai.core.dto.MemoryUpdate legacyReport = null;
+
+        if (useEmotionAwareExtraction && emotionAwareFactExtractor != null) {
+            systemLogService.info("使用情感感知事实提取器...", "FACT");
+            systemLogService.llmStart("emotion-aware-fact-extractor", "ollama", "FACT");
+            
+            try {
+                String triggerKeywords = emotion.getKeywords() != null ? 
+                    String.join(", ", emotion.getKeywords()) : "";
+                
+                extractionResult = emotionAwareFactExtractor.analyzeWithEmotion(
+                    messageSnapshot,
+                    currentFactsBuilder.toString(),
+                    emotion.getEmotion(),
+                    emotion.getIntensity(),
+                    "stable",
+                    triggerKeywords,
+                    emotion.getNeedsComfort()
+                );
+                systemLogService.llmEnd(0, "FACT");
+                
+                if (extractionResult != null) {
+                    systemLogService.info(String.format(
+                        "情感感知提取完成: 情感门控=%s, 新增事实=%d, 删除=%d",
+                        extractionResult.isEmotionGatePassed(),
+                        extractionResult.getNewFacts() != null ? extractionResult.getNewFacts().size() : 0,
+                        extractionResult.getDeletedFactIds() != null ? extractionResult.getDeletedFactIds().size() : 0
+                    ), "FACT");
+                }
+            } catch (Exception e) {
+                log.warn("情感感知事实提取失败，回退到标准提取: {}", e.getMessage());
+                systemLogService.llmError(e.getMessage(), "FACT");
+                extractionResult = null;
+            }
         }
 
-        if (report == null) {
+        if (extractionResult == null) {
+            systemLogService.info("正在调用 LLM 进行事实提取与冲突检测...", "FACT");
+            systemLogService.llmStart("fact-extractor", "ollama", "FACT");
+
+            try {
+                String rawJson = factExtractor.analyze(messageSnapshot, currentFactsBuilder.toString());
+                rawJson = rawJson.replaceAll("(?s)```(json)?", "").trim();
+                legacyReport = objectMapper.readValue(rawJson, com.lingshu.ai.core.dto.MemoryUpdate.class);
+                systemLogService.llmEnd(0, "FACT");
+            } catch (Exception e) {
+                log.error("Failed to parse cognitive report: {}", e.getMessage());
+                systemLogService.llmError(e.getMessage(), "FACT");
+                return;
+            }
+        }
+
+        if (extractionResult == null && legacyReport == null) {
             log.debug("Memory pulse: No cognitive updates required for this message.");
             systemLogService.info("没有检测到新的认知更新。", "FACT");
             return;
         }
 
+        if (extractionResult != null) {
+            processExtractionResult(userId, messageSnapshot, user, extractionResult, emotion);
+        } else if (legacyReport != null) {
+            processLegacyReport(userId, messageSnapshot, user, legacyReport, emotion);
+        }
+
+        systemLogService.endTimer("fact_extraction", "记忆脉冲处理完成", "MEMORY");
+    }
+
+    private void processExtractionResult(String userId, String messageSnapshot, UserNode user, 
+                                         ExtractionResult result, com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
+        log.debug("ExtractionResult received: {} new facts, {} deletions requested",
+                result.getNewFacts() != null ? result.getNewFacts().size() : 0,
+                result.getDeletedFactIds() != null ? result.getDeletedFactIds().size() : 0);
+
+        if (result.getDeletedFactIds() != null && !result.getDeletedFactIds().isEmpty()) {
+            for (Long id : result.getDeletedFactIds()) {
+                String factContent = "Unknown";
+                if (user != null && user.getFacts() != null) {
+                    factContent = user.getFacts().stream()
+                            .filter(f -> f.getId() != null && f.getId().equals(id))
+                            .map(f -> f.getContent())
+                            .findFirst()
+                            .orElse("Unknown");
+                    user.getFacts().removeIf(f -> f.getId() != null && f.getId().equals(id));
+                }
+                log.info("Memory corrected: Removing outdated fact [{}] (ID: {})", factContent, id);
+                systemLogService.info("记忆修正: 移除过时事实 [" + (factContent.length() > 30 ? factContent.substring(0, 30) + "..." : factContent) + "]", "MEMORY");
+                this.deleteFact(id);
+            }
+        }
+
+        if (result.getNewFacts() != null && !result.getNewFacts().isEmpty()) {
+            if (user == null) {
+                systemLogService.info("创建新用户节点: " + userId, "MEMORY");
+                user = UserNode.builder()
+                        .name(userId)
+                        .firstEncounter(LocalDateTime.now())
+                        .build();
+            }
+
+            for (ExtractionResult.ExtractedFact fact : result.getNewFacts()) {
+                if (fact.getContent() == null || fact.getContent().trim().isEmpty()) {
+                    continue;
+                }
+
+                log.info("Aha! New emotion-aware fact candidate: {} (type={}, confidence={})", 
+                    fact.getContent(), fact.getType(), fact.getConfidence());
+                
+                FactWriteResult writeResult = persistFactCandidateWithMetadata(
+                    user, fact, messageSnapshot, emotion);
+                user = writeResult.user;
+
+                if (!writeResult.createdNewFact || writeResult.savedFact == null) {
+                    continue;
+                }
+
+                storeFactEmbedding(writeResult.savedFact, messageSnapshot, emotion, fact);
+            }
+
+            user.setLastSeen(LocalDateTime.now());
+            systemLogService.dbStart("neo4j_update", "User.lastSeen", "MEMORY");
+            userRepository.save(user);
+            systemLogService.dbEnd("neo4j_update", "MEMORY");
+        }
+    }
+
+    private void processLegacyReport(String userId, String messageSnapshot, UserNode user,
+                                     com.lingshu.ai.core.dto.MemoryUpdate report, 
+                                     com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
         log.debug("Cognitive report received: {} new facts, {} deletions requested",
                 report.getNewFacts() != null ? report.getNewFacts().size() : 0,
                 report.getDeletedFactIds() != null ? report.getDeletedFactIds().size() : 0);
@@ -174,8 +293,6 @@ public class MemoryServiceImpl implements MemoryService {
                             .map(f -> f.getContent())
                             .findFirst()
                             .orElse("Unknown");
-
-                    // 必须从当前内存对象中移除，否则 save(user) 时可能重新创建关系
                     user.getFacts().removeIf(f -> f.getId() != null && f.getId().equals(id));
                 }
                 log.info("Memory corrected: Removing outdated fact [{}] (ID: {})", factContent, id);
@@ -244,8 +361,119 @@ public class MemoryServiceImpl implements MemoryService {
             userRepository.save(user);
             systemLogService.dbEnd("neo4j_update", "MEMORY");
         }
+    }
 
-        systemLogService.endTimer("fact_extraction", "记忆脉冲处理完成", "MEMORY");
+    private FactWriteResult persistFactCandidateWithMetadata(UserNode user, ExtractionResult.ExtractedFact extractedFact,
+                                                              String originalMessage, com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
+        LocalDateTime now = LocalDateTime.now();
+        String factText = extractedFact.getContent();
+        String normalized = normalizeSemanticText(factText);
+        SemanticProfile semanticProfile = classifyFactSemantics(factText, user);
+        String clusterKey = semanticProfile.topicKey;
+        String subType = semanticProfile.subType;
+
+        FactNode exactMatch = findExactFact(user, normalized);
+        if (exactMatch != null) {
+            refreshExistingFact(exactMatch, now);
+            factRepository.save(exactMatch);
+            synchronizeFactRelations(buildFactContextsForUser(user));
+            systemLogService.debug("事实命中精确去重，刷新活跃度: " + shortenLabel(factText, 24), "MEMORY");
+            return new FactWriteResult(user, exactMatch, false);
+        }
+
+        double confidence = extractedFact.getConfidence() != null ? 
+            extractedFact.getConfidence().getValue() : semanticProfile.confidence;
+        
+        FactNode factNode = buildNewFactNodeWithMetadata(
+            factText, normalized, clusterKey, subType, 
+            confidence, semanticProfile.source, now, originalMessage, emotion, extractedFact);
+        
+        return saveNewFact(user, factNode);
+    }
+
+    private FactNode buildNewFactNodeWithMetadata(String factText, String normalized, String clusterKey, String subType,
+                                                   double semanticConfidence, String source, LocalDateTime now,
+                                                   String originalMessage, com.lingshu.ai.core.dto.EmotionAnalysis emotion,
+                                                   ExtractionResult.ExtractedFact extractedFact) {
+        double baseImportance = 0.8;
+        if (emotion != null && emotion.getIntensity() != null) {
+            double intensityBoost = emotion.getIntensity() * 0.2;
+            baseImportance = Math.min(1.0, baseImportance + intensityBoost);
+        }
+        
+        String toneStr = "neutral";
+        if (emotion != null && emotion.getEmotion() != null) {
+            toneStr = emotion.getEmotion();
+        } else {
+            toneStr = inferEmotionalToneFromKeywords(originalMessage);
+        }
+
+        String factStatus = extractedFact.isVolatile() ? "volatile" : "active";
+        double confidence = extractedFact.getConfidence() != null ? 
+            extractedFact.getConfidence().getValue() : semanticConfidence;
+
+        return FactNode.builder()
+                .content(factText)
+                .category(clusterKey)
+                .normalizedContent(normalized)
+                .subType(subType)
+                .clusterKey(clusterKey)
+                .observedAt(now)
+                .lastActivatedAt(now)
+                .importance(baseImportance)
+                .confidence(round(Math.max(0.72, confidence)))
+                .classificationSource(source)
+                .activityScore(calculateActivityScore(now, now))
+                .status(factStatus)
+                .decayRate(0.015)
+                .ttlDays(180)
+                .version(1)
+                .originalMessage(originalMessage)
+                .emotionalTone(toneStr)
+                .involvedEntities(java.util.Optional.ofNullable(extractEntities(factText)).filter(l -> !l.isEmpty()).map(java.util.HashSet::new).orElse(null))
+                .build();
+    }
+
+    private void storeFactEmbedding(FactNode savedFact, String messageSnapshot, 
+                                    com.lingshu.ai.core.dto.EmotionAnalysis emotion,
+                                    ExtractionResult.ExtractedFact extractedFact) {
+        String emotionalToneStr;
+        if (emotion != null) {
+            emotionalToneStr = emotion.getEmotion();
+        } else {
+            emotionalToneStr = inferEmotionalToneFromKeywords(messageSnapshot);
+        }
+
+        java.util.Map<String, String> metadata = new java.util.HashMap<>();
+        if (savedFact.getId() != null) {
+            metadata.put("fact_id", savedFact.getId().toString());
+        }
+        metadata.put("emotional_tone", emotionalToneStr);
+        metadata.put("category", savedFact.getClusterKey() != null ? savedFact.getClusterKey() : "unknown");
+        metadata.put("timestamp", java.time.LocalDateTime.now().toString());
+        metadata.put("fact_type", extractedFact.getType() != null ? extractedFact.getType().name() : "UNKNOWN");
+        metadata.put("confidence", String.valueOf(extractedFact.getConfidence() != null ? extractedFact.getConfidence().getValue() : 0.7));
+        metadata.put("volatile", String.valueOf(extractedFact.isVolatile()));
+        
+        if (extractedFact.getTriggerKeywords() != null && !extractedFact.getTriggerKeywords().isEmpty()) {
+            metadata.put("trigger_keywords", String.join(",", extractedFact.getTriggerKeywords()));
+        }
+
+        String fullContext = String.format(
+                "用户记录原始消息：%s|||提取事实陈述：%s",
+                messageSnapshot != null ? messageSnapshot : "无记录",
+                savedFact.getContent()
+        );
+        TextSegment segment = TextSegment.from(fullContext, new dev.langchain4j.data.document.Metadata(metadata));
+
+        systemLogService.embeddingStart(savedFact.getContent().length(), "MEMORY");
+        try {
+            dev.langchain4j.data.embedding.Embedding embedding = embeddingModel.embed(segment).content();
+            embeddingStore.add(embedding, segment);
+            systemLogService.embeddingEnd("MEMORY");
+        } catch (Exception e) {
+            systemLogService.error("Embedding向量化失败: " + e.getMessage(), "MEMORY");
+        }
     }
 
     private String inferEmotionalToneFromKeywords(String message) {
@@ -274,12 +502,41 @@ public class MemoryServiceImpl implements MemoryService {
             log.info("Graph Retrieval: Found {} facts for user {}", user.getFacts() != null ? user.getFacts().size() : 0, userId);
             int factCount = user.getFacts() != null ? user.getFacts().size() : 0;
             systemLogService.info("图谱检索: 找到用户 " + userId + " 的 " + factCount + " 条既定事实", "MEMORY");
-            contextBuilder.append("关于用户的已知事实：\n");
-            if (user.getFacts() != null) {
-                user.getFacts().forEach(f -> {
-                    log.debug("  Fact: {}", f.getContent());
-                    contextBuilder.append("- ").append(f.getContent()).append("\n");
-                });
+            
+            if (user.getFacts() != null && !user.getFacts().isEmpty()) {
+                List<String> entities = extractEntities(message);
+                List<FactNode> relevantFacts;
+                
+                if (!entities.isEmpty()) {
+                    // 1. 关键词匹配：提取与当前消息实体相关的记忆
+                    relevantFacts = user.getFacts().stream()
+                        .filter(f -> entities.stream().anyMatch(e -> f.getContent().toLowerCase().contains(e.toLowerCase())))
+                        .sorted((f1, f2) -> Double.compare(f2.getImportance(), f1.getImportance()))
+                        .limit(8)
+                        .collect(Collectors.toList());
+                    
+                    log.debug("Found {} relevant facts by entities: {}", relevantFacts.size(), entities);
+                } else {
+                    relevantFacts = new ArrayList<>();
+                }
+
+                // 2. 核心记忆补充：如果是身份查询或相关记忆不足，补充高重要度事实
+                if (relevantFacts.size() < 3 || message.contains("我是谁") || message.contains("我的名字") || message.contains("叫什么")) {
+                    List<FactNode> coreFacts = user.getFacts().stream()
+                        .filter(f -> !relevantFacts.contains(f))
+                        .sorted((f1, f2) -> Double.compare(f2.getImportance(), f1.getImportance()))
+                        .limit(5 - relevantFacts.size() > 0 ? 5 - relevantFacts.size() : 2)
+                        .toList();
+                    relevantFacts.addAll(coreFacts);
+                }
+
+                if (!relevantFacts.isEmpty()) {
+                    contextBuilder.append("关于用户的已知事实：\n");
+                    relevantFacts.forEach(f -> {
+                        log.debug("  Fact: {}", f.getContent());
+                        contextBuilder.append("- ").append(f.getContent()).append("\n");
+                    });
+                }
             }
         }, () -> {
             log.warn("Graph Retrieval: User {} not found in Neo4j", userId);
@@ -288,12 +545,6 @@ public class MemoryServiceImpl implements MemoryService {
         systemLogService.dbEnd("neo4j_query", "MEMORY");
 
         if (!needsSemanticRetrieval(message, eventBuilder)) {
-            // 针对“我是谁”、“我的名字”等意图，即使没有提取到复杂实体，也尝试返回基本事实
-            if (message.contains("我是谁") || message.contains("我的名字") || message.contains("叫什么")) {
-                log.debug("Memory pulse: Detected identity query, returning basic facts anyway.");
-                recordRetrievalEvent(eventBuilder.build());
-                return contextBuilder.toString();
-            }
             recordRetrievalEvent(eventBuilder.build());
             return contextBuilder.toString();
         }

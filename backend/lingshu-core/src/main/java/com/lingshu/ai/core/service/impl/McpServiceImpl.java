@@ -107,7 +107,13 @@ public class McpServiceImpl implements McpService {
 
     @Override
     public List<McpServerConfig> getAllConfigs() {
-        return repository.findAll();
+        List<McpServerConfig> all = repository.findAll();
+        for (McpServerConfig config : all) {
+            if (Boolean.TRUE.equals(config.getIsActive())) {
+                config.setTools(getToolDetails(config.getId()));
+            }
+        }
+        return all;
     }
 
     @Override
@@ -168,12 +174,35 @@ public class McpServiceImpl implements McpService {
             java.util.List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
             for (var tool : tools) {
                 java.util.Map<String, Object> map = new java.util.HashMap<>();
+                String name = null;
+                String description = null;
+                
                 try {
-                    map.put("name", tool.getClass().getMethod("getName").invoke(tool));
-                    map.put("description", tool.getClass().getMethod("getDescription").invoke(tool));
-                } catch (Exception ex) {
-                    map.put("name", tool.toString());
+                    // Try name() (Standard for ToolSpecification)
+                    name = (String) tool.getClass().getMethod("name").invoke(tool);
+                    description = (String) tool.getClass().getMethod("description").invoke(tool);
+                } catch (Exception e1) {
+                    try {
+                        // Try getName() (Standard Bean)
+                        name = (String) tool.getClass().getMethod("getName").invoke(tool);
+                        description = (String) tool.getClass().getMethod("getDescription").invoke(tool);
+                    } catch (Exception e2) {
+                        // Fallback to string parsing if it's the ToolSpecification.toString() format
+                        String s = tool.toString();
+                        if (s.contains("name = \"")) {
+                            name = extractValue(s, "name = \"", "\"");
+                            description = extractValue(s, "description = \"", "\"");
+                        } else if (s.contains("name=\"")) {
+                            name = extractValue(s, "name=\"", "\"");
+                            description = extractValue(s, "description=\"", "\"");
+                        } else {
+                            name = s;
+                        }
+                    }
                 }
+                
+                map.put("name", name);
+                map.put("description", description);
                 result.add(map);
             }
             return result;
@@ -181,6 +210,15 @@ public class McpServiceImpl implements McpService {
             log.warn("MCP Check failed for id {}: {}", id, e.getMessage());
             return Collections.emptyList();
         }
+    }
+
+    private String extractValue(String source, String startToken, String endToken) {
+        int start = source.indexOf(startToken);
+        if (start == -1) return null;
+        start += startToken.length();
+        int end = source.indexOf(endToken, start);
+        if (end == -1) return source.substring(start);
+        return source.substring(start, end);
     }
 
     @Override

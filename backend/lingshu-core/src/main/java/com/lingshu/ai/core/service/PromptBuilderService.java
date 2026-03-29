@@ -16,7 +16,7 @@ public interface PromptBuilderService {
     
     String buildWelcomeUserPrompt(String relationshipPrompt, String agentName);
 
-    String buildGreetingUserPrompt(String relationshipPrompt, String memoryContext, String timeOfDay, String agentName);
+    String buildGreetingUserPrompt(String timeOfDay);
     
-    String buildComfortUserPrompt(String relationshipPrompt, String emotion, double intensity, String agentName);
+    String buildComfortUserPrompt(String emotion, double intensity);
 }
