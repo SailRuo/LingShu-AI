@@ -2,217 +2,233 @@
 
 <div align="center">
 
-**具备长期记忆、情感演化与现实干预能力的本地化电子伴侣**
+**一个具备长期记忆、情感演化与现实干预能力的本地化电子伴侣**
 
-[![Java](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.java.net/)
+[![Java](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.org/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2.4-brightgreen.svg)](https://spring.io/projects/spring-boot)
-[![Vue](https://img.shields.io/badge/Vue-3.5.30-green.svg)](https://vuejs.org/)
-[![Neo4j](https://img.shields.io/badge/Neo4j-5.26.0-blue.svg)](https://neo4j.com/)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D.svg)](https://vuejs.org/)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 </div>
 
 ---
 
-## 📖 项目简介
+## 项目简介
 
-**灵枢** 取自中医经典《灵枢经》，意为**"灵魂的枢纽"**。
+**灵枢** 取自中医经典《灵枢经》，意为"灵魂的枢纽"。项目愿景是从 0 到 1 打造一个具备长期记忆、情感演化与现实干预能力的本地化电子伴侣。
 
-本项目旨在从 0 到 1 打造一个具备长期记忆、情感演化与现实干预能力的本地化电子伴侣。它不仅仅是一个对话框，而是一个时刻关心你的"隐形伙伴"。
+### 核心特性
 
-### ✨ 核心特性
-
-- **🧠 长期记忆系统**：通过 Neo4j 知识图谱 + pgvector 向量数据库构建多级记忆系统，让 AI 记住你的喜好、项目和经历
-- **💬 流式对话体验**：支持 SSE 流式输出，响应流畅无卡顿
-- **🔒 本地化隐私计算**：完全离线运行，数据不出本地，保护隐私安全
-- **🛠️ 工具调用能力**：基于 MCP 协议集成本地工具，实现现实世界干预
-- **🌌 记忆图谱可视化**：3D 银河系风格展示记忆关联与生长过程
-- **📊 系统可观测性**：完整的调用链追踪与监控看板
+- **长期记忆系统**：通过 Neo4j + pgvector 构建多级记忆系统，支持事实提取、语义检索与记忆治理
+- **流式对话**：支持 SSE 流式输出，提升用户体验
+- **情感感知**：情感分析与上下文理解，实现更自然的交互
+- **主动交互**：基于用户状态的主动问候与关怀
+- **本地化部署**：完全离线运行，保护数据隐私
+- **MCP工具调用**：支持 Model Context Protocol，实现现实世界干预
+- **多智能体支持**：可配置多个 AI 智能体，满足不同场景需求
 
 ---
 
-## 🏗️ 系统架构
+## 系统架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Frontend Layer                            │
-│                    Vue 3 + Vite + Naive UI                       │
-│         ChatView | GraphView | Settings | LogPanel              │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓ HTTP / SSE
-┌─────────────────────────────────────────────────────────────────┐
-│                        Web Layer                                 │
-│                  lingshu-web (Spring Boot)                       │
-│    ChatController | MemoryController | SettingController        │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                        Core Layer                                │
-│           lingshu-core (Business Logic & AI Orchestration)       │
-│   ChatService | MemoryService | FactExtractor | LocalTools      │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                     Infrastructure Layer                         │
-│            lingshu-infrastructure (Entities & Repos)             │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                      Storage Layer                               │
-│   PostgreSQL (pgvector) | Neo4j | Redis | Ollama (LLM)          │
+│                        Frontend (Vue 3)                          │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐           │
+│  │ 对话界面  │ │ 记忆中枢  │ │ 系统设置  │ │ 日志监控  │           │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘           │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ HTTP / WebSocket / SSE
+┌────────────────────────────▼────────────────────────────────────┐
+│                     Backend (Spring Boot 3)                      │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │                    lingshu-web (接口层)                      ││
+│  │  ChatController │ MemoryController │ SettingController      ││
+│  └─────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │                    lingshu-core (核心层)                     ││
+│  │  ChatService │ MemoryService │ ProactiveService │ McpService││
+│  └─────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │                lingshu-infrastructure (基础设施层)           ││
+│  │  Entity │ Repository │ Memory Store                        ││
+│  └─────────────────────────────────────────────────────────────┘│
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+┌────────────────────────────▼────────────────────────────────────┐
+│                        数据存储层                                 │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐           │
+│  │PostgreSQL│ │  Neo4j   │ │  Redis   │ │  Ollama  │           │
+│  │ (向量)   │ │ (图数据库)│ │ (缓存)   │ │ (LLM)   │           │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘           │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 🛠️ 技术栈
+## 技术栈
 
-| 模块 | 技术选型 | 说明 |
-|------|---------|------|
-| **后端框架** | Java 21 + Spring Boot 3.2.4 | 企业级稳定性与并发控制 |
-| **AI 编排** | LangChain4j 1.12.1 | Java 版 LangChain |
-| **前端框架** | Vue 3.5 + Vite 6 + TypeScript | 极致视觉与响应速度 |
-| **UI 组件库** | Naive UI + Tailwind CSS 4 | 现代化设计语言 |
-| **图数据库** | Neo4j 5.26.0 | 知识图谱与关系存储 |
-| **向量数据库** | PostgreSQL + pgvector | 语义检索与模糊匹配 |
-| **缓存层** | Redis 7 | 瞬时记忆与削峰填谷 |
-| **推理引擎** | Ollama | 本地 LLM 推理 (Qwen/Llama) |
-| **状态管理** | Pinia | Vue 3 官方推荐 |
-| **可视化** | Three.js + v-network-graph | 3D 记忆图谱展示 |
+| 层级 | 技术选型 | 说明 |
+|------|----------|------|
+| **前端** | Vue 3 + Vite + Naive UI + Tailwind CSS | 响应式 UI，支持深色模式 |
+| **后端** | Java 21 + Spring Boot 3.2.4 | 提供 REST API 与 SSE 流式响应 |
+| **AI框架** | LangChain4j 1.12.1 | AI 服务编排，工具调用 |
+| **图数据库** | Neo4j 5.26 | 存储事实节点与关系图谱 |
+| **关系数据库** | PostgreSQL 16 + pgvector | 聊天记录与向量语义检索 |
+| **缓存** | Redis 7 | 会话管理与消息发布订阅 |
+| **LLM推理** | Ollama / OpenAI 兼容 API | 本地或云端大模型推理 |
+| **TTS服务** | OpenAI Edge TTS | 免费语音合成服务 |
 
 ---
 
-## 🚀 快速开始
+## 项目结构
 
-### 前置要求
+```
+LingShu-AI/
+├── backend/                          # 后端模块
+│   ├── lingshu-web/                  # Web接口层
+│   │   └── src/main/java/.../web/
+│   │       ├── controller/           # REST控制器
+│   │       └── LingshuAiApplication.java
+│   ├── lingshu-core/                 # 核心业务层
+│   │   └── src/main/java/.../core/
+│   │       ├── service/              # 业务服务接口
+│   │       ├── service/impl/         # 业务服务实现
+│   │       ├── dto/                  # 数据传输对象
+│   │       └── tool/                 # 工具类
+│   ├── lingshu-infrastructure/       # 基础设施层
+│   │   └── src/main/java/.../infrastructure/
+│   │       ├── entity/               # 数据实体
+│   │       ├── repository/           # 数据访问层
+│   │       └── memory/               # 记忆存储
+│   └── pom.xml                       # 父POM
+├── frontend/                         # Vue 3 前端
+│   ├── src/
+│   │   ├── components/               # Vue组件
+│   │   ├── views/                    # 页面视图
+│   │   ├── composables/              # 组合式函数
+│   │   ├── stores/                   # Pinia状态管理
+│   │   └── types/                    # TypeScript类型
+│   └── package.json
+├── fx-frontend/                      # JavaFX桌面客户端(可选)
+├── doc/                              # 项目文档
+├── docker-compose.yml                # Docker编排配置
+├── Dockerfile                        # 应用镜像构建
+└── README.md
+```
 
-- JDK 21+
-- Node.js 18+
-- Docker & Docker Compose
-- Maven 3.8+
-- Ollama (可选，用于本地 LLM 推理)
+---
 
-### 1. 克隆项目
+## 文档导航
+
+项目包含详细的设计文档，帮助您深入了解系统架构与实现细节：
+
+### 核心设计文档
+
+| 文档 | 说明 |
+|------|------|
+| [系统概要设计文档](doc/系统概要设计文档.md) | 整体架构设计、模块划分、核心功能实现及技术选型 |
+| [项目计划书](doc/项目计划书.md) | 项目愿景、阶段性演化路径、技术栈选型 |
+| [对话调用链路详解](doc/对话调用链路详解.md) | 用户发消息到AI流式回复再到事实提取的完整链路 |
+
+### 记忆系统文档
+
+| 文档 | 说明 |
+|------|------|
+| [情感感知记忆系统优化设计文档](doc/情感感知记忆系统优化设计文档.md) | 情感前置分析、情感感知的事实提取、记忆生命周期管理 |
+| [记忆图谱3D银河系改造方案](doc/记忆图谱3D银河系改造方案.md) | 记忆图谱可视化升级方案，打造"银河系记忆宇宙" |
+
+### 智能体与扩展
+
+| 文档 | 说明 |
+|------|------|
+| [智能体增强开发规划](doc/智能体增强开发规划.md) | Prompt模块化架构、工具调用规则、主动行为机制 |
+| [API接口文档](doc/api_docs.md) | 完整的后端REST API与WebSocket接口说明 |
+
+### 前端设计
+
+| 文档 | 说明 |
+|------|------|
+| [UI/UX设计详细文档](doc/UI_UX设计详细文档.md) | Cyber-Zen视觉风格、多主题色彩方案、布局系统 |
+
+---
+
+## 快速开始
+
+### 环境要求
+
+- **Java**: JDK 21+
+- **Node.js**: 18+
+- **Maven**: 3.9+
+- **Docker**: 24+ (用于部署数据库服务)
+- **Ollama**: 本地LLM推理引擎 (可选，或使用云端API)
+
+### 方式一：Docker 部署 (推荐)
+
+#### 1. 克隆项目
 
 ```bash
-git clone <repository-url>
-cd lingshu-ai
+git clone https://github.com/your-repo/LingShu-AI.git
+cd LingShu-AI
 ```
 
-### 2. 启动基础设施服务
+#### 2. 配置环境变量 (可选)
 
-使用 Docker Compose 一键启动 Neo4j、PostgreSQL 和 Redis：
+创建 `.env` 文件或直接修改 `docker-compose.yml`：
+
+```env
+# 数据库密码
+POSTGRES_PASSWORD=lingshu123
+NEO4J_PASSWORD=lingshu123
+
+# LLM配置 (使用Ollama)
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+
+# 或使用OpenAI兼容API
+# OPENAI_API_KEY=your-api-key
+# OPENAI_BASE_URL=https://api.openai.com/v1
+```
+
+#### 3. 构建并启动服务
 
 ```bash
+# 构建后端JAR包
+cd backend
+mvn clean package -DskipTests
+
+# 返回项目根目录
+cd ..
+
+# 启动所有服务
 docker-compose up -d
 ```
 
-服务说明：
-- **Neo4j**: `http://localhost:7474` (浏览器界面), `bolt://localhost:7687` (连接地址)
-  - 用户名: `neo4j`
-  - 密码: `lingshu123`
-  
-- **PostgreSQL**: `localhost:5432`
-  - 数据库: `lingshu`
-  - 用户名: `postgres`
-  - 密码: `lingshu123`
+#### 4. 访问应用
 
-- **Redis**: `localhost:6379`
+- **前端界面**: http://localhost:8080
+- **Neo4j控制台**: http://localhost:7474 (用户名: neo4j, 密码: lingshu123)
+- **健康检查**: http://localhost:8080/actuator/health
 
-### 3. 启动后端服务
-
-#### Windows:
-```bash
-run_backend.bat
-```
-
-#### Linux/macOS:
-```bash
-cd backend
-mvn clean install -DskipTests
-cd lingshu-web
-mvn spring-boot:run
-```
-
-后端服务将在 `http://localhost:8080` 启动
-
-### 4. 启动前端服务
+#### 5. 停止服务
 
 ```bash
-cd frontend
-npm install
-npm run dev
-```
-
-前端开发服务器将在 `http://localhost:5173` 启动
-
----
-
-## 📁 项目结构
-
-```
-lingshu-ai/
-├── backend/                    # 后端项目 (Maven 多模块)
-│   ├── lingshu-core/          # 核心业务逻辑层
-│   ├── lingshu-infrastructure/# 基础设施层 (实体、Repository)
-│   ├── lingshu-web/           # Web 接口层 (Controller、配置)
-│   └── pom.xml                # Maven 父工程配置
-├── frontend/                   # 前端项目 (Vue 3 + Vite)
-│   ├── src/
-│   │   ├── components/        # 可复用组件
-│   │   ├── views/            # 页面视图
-│   │   ├── stores/           # Pinia 状态管理
-│   │   ├── api/              # API 请求封装
-│   │   └── utils/            # 工具函数
-│   ├── package.json
-│   └── vite.config.ts
-├── fx-frontend/                # 备用前端项目
-├── doc/                        # 项目文档
-│   ├── 项目计划书.md
-│   ├── 系统概要设计文档.md
-│   ├── 记忆系统设计文档.md
-│   ├── UI_UX 设计详细文档.md
-│   └── api_docs.md
-├── docker-compose.yml          # Docker 编排配置
-└── run_backend.bat             # Windows 后端启动脚本
+docker-compose down
 ```
 
 ---
 
-## 🎯 功能模块
+### 方式二：本地开发启动
 
-### 1. 对话系统
-- 支持流式对话输出
-- 上下文记忆保持
-- 情感识别与回应
+#### 1. 启动基础服务 (数据库)
 
-### 2. 记忆系统
-- **L1 瞬时记忆**：Redis 缓存短期对话上下文
-- **L2/L3 长期记忆**：Neo4j 图谱 + pgvector 向量混合存储
-- **事实提取**：自动从对话中提取关键事实并图谱化
+```bash
+# 仅启动数据库服务
+docker-compose up -d neo4j postgres redis tts
+```
 
-### 3. 记忆图谱可视化
-- 3D 银河系风格展示
-- 节点关系动态探索
-- 记忆生长过程追踪
+#### 2. 配置后端
 
-### 4. 工具调用 (MCP)
-- 本地文件操作
-- 系统状态查询
-- 自定义插件扩展
-
-### 5. 系统监控
-- 实时日志查看
-- API 调用链追踪
-- 服务健康检查
-
----
-
-## 🔧 配置说明
-
-### 后端配置 (`application.yml`)
-
-主要配置项位于 `backend/lingshu-web/src/main/resources/application.yml`：
+编辑 `backend/lingshu-web/src/main/resources/application.yml`：
 
 ```yaml
 spring:
@@ -229,83 +245,288 @@ spring:
     redis:
       host: localhost
       port: 6379
-
-server:
-  port: 8080
 ```
 
-### 前端配置
+#### 3. 启动后端服务
 
-前端代理配置位于 `frontend/vite.config.ts`，默认代理后端 API 到 `http://localhost:8080`
+```bash
+cd backend
+
+# 方式一：使用Maven
+mvn spring-boot:run -pl lingshu-web
+
+# 方式二：打包后运行
+mvn clean package -DskipTests
+java -jar lingshu-web/target/lingshu-web-0.0.1-SNAPSHOT.jar
+```
+
+后端服务将在 http://localhost:8080 启动。
+
+#### 4. 启动前端开发服务器
+
+```bash
+cd frontend
+
+# 安装依赖
+npm install
+
+# 启动开发服务器
+npm run dev
+```
+
+前端开发服务器将在 http://localhost:5173 启动。
+
+#### 5. 配置 LLM
+
+**使用 Ollama (推荐本地开发)**：
+
+```bash
+# 安装 Ollama (参考 https://ollama.ai)
+# 拉取模型
+ollama pull qwen2.5:7b
+
+# 启动 Ollama 服务
+ollama serve
+```
+
+在系统设置中配置：
+- 模型来源: `ollama`
+- 基础URL: `http://localhost:11434`
+
+**使用 OpenAI 兼容 API**：
+
+在系统设置中配置：
+- 模型来源: `openai`
+- API Key: 你的API密钥
+- 基础URL: `https://api.openai.com/v1` 或其他兼容端点
 
 ---
 
-## 📚 文档
+## 核心功能说明
 
-详细文档请查看 [doc/](doc/) 目录：
+### 1. 对话系统
 
-- [📋 项目计划书](doc/项目计划书.md) - 项目愿景与演化路径
-- [🏗️ 系统概要设计文档](doc/系统概要设计文档.md) - 整体架构设计
-- [🧠 记忆系统设计文档](doc/记忆系统设计文档.md) - 记忆系统详解
-- [🎨 UI/UX 设计详细文档](doc/UI_UX 设计详细文档.md) - 界面设计规范
-- [🔌 API 文档](doc/api_docs.md) - 接口调用说明
-- [💬 对话调用链路详解](doc/对话调用链路详解.md) - 对话流程解析
+支持同步和流式两种响应模式，通过 `ChatService` 提供核心对话能力：
+
+```java
+// 流式对话
+Flux<String> streamChat(String message, Long agentId, String userId);
+```
+
+### 2. 记忆系统
+
+多级记忆架构：
+
+| 级别 | 存储 | 说明 |
+|------|------|------|
+| L1 | PostgreSQL | 瞬时记忆，聊天历史窗口 |
+| L2 | Neo4j | 事实记忆，结构化知识图谱 |
+| L3 | pgvector | 语义记忆，向量相似度检索 |
+
+核心接口：
+
+```java
+// 提取事实
+void extractFacts(String userId, String message);
+
+// 检索上下文
+String retrieveContext(String userId, String message);
+
+// 获取记忆图谱
+Object getGraphData(String userId);
+```
+
+### 3. 主动交互
+
+基于用户状态的主动问候与关怀：
+
+```java
+// 生成问候语
+Flux<String> generateGreeting(String userId);
+
+// 获取需要关注的用户
+List<UserState> getUsersNeedingAttention();
+```
+
+### 4. MCP工具调用
+
+支持 Model Context Protocol，可通过配置接入外部工具：
+
+```java
+// MCP服务接口
+public interface McpService {
+    List<McpServerConfig> getServerConfigs();
+    void saveServerConfig(McpServerConfig config);
+    void deleteServerConfig(Long id);
+}
+```
 
 ---
 
-## 🗺️ 开发路线图
+## API 接口
 
-### 第一阶段：【启蒙】✅
-- [x] 基础架构搭建
-- [x] 对话链路打通
-- [x] 图谱 Schema 定义
-- [ ] 事实提取监听器
+### 对话接口
 
-### 第二阶段：【百宝袋】
-- [ ] Java 版 MCP Client
-- [ ] 本地工具集成
-- [ ] 场景化 Gadget 开发
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/chat/send` | 发送消息 (同步) |
+| GET | `/api/chat/stream` | 流式对话 (SSE) |
+| GET | `/api/chat/welcome` | 获取欢迎语 |
+| GET | `/api/chat/history` | 获取聊天历史 |
+| GET | `/api/chat/models` | 获取可用模型列表 |
 
-### 第三阶段：【共生】
-- [ ] 情感建模系统
-- [ ] 主动触发器
-- [ ] 智能推送机制
+### 记忆接口
 
-### 第四阶段：【深鉴】
-- [ ] Graph-Explorer 可视化
-- [ ] Trace-Flow 调用链追踪
-- [ ] 实时监控看板
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/memory/graph` | 获取记忆图谱数据 |
+| GET | `/api/memory/context` | 检索记忆上下文 |
+| DELETE | `/api/memory/fact/{id}` | 删除事实 |
+| GET | `/api/memory/governance` | 记忆治理列表 |
+
+### 设置接口
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/settings` | 获取系统设置 |
+| PUT | `/api/settings` | 更新系统设置 |
+
+### 智能体接口
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/agents` | 获取智能体列表 |
+| POST | `/api/agents` | 创建智能体 |
+| PUT | `/api/agents/{id}` | 更新智能体 |
+| DELETE | `/api/agents/{id}` | 删除智能体 |
 
 ---
 
-## 🤝 贡献指南
+## 配置说明
 
-欢迎贡献代码！请遵循以下步骤：
+### 系统设置
+
+通过前端界面或直接修改数据库中的 `system_setting` 表：
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| `model.source` | 模型来源 (ollama/openai) | ollama |
+| `model.name` | 模型名称 | qwen2.5:7b |
+| `model.baseUrl` | API基础URL | http://localhost:11434 |
+| `model.apiKey` | API密钥 | - |
+| `memory.enableExtraction` | 启用记忆提取 | true |
+| `proactive.enableGreeting` | 启用主动问候 | true |
+
+### 智能体配置
+
+每个智能体可独立配置：
+
+- 名称与描述
+- 系统提示词
+- 使用的模型
+- 启用的工具
+
+---
+
+## 开发指南
+
+### 后端开发
+
+```bash
+# 运行测试
+cd backend
+mvn test
+
+# 代码格式化 (需要安装spotless)
+mvn spotless:apply
+
+# 热重载开发
+mvn spring-boot:run -pl lingshu-web -Dspring-boot.run.fork=false
+```
+
+### 前端开发
+
+```bash
+cd frontend
+
+# 类型检查
+npm run typecheck
+
+# 构建生产版本
+npm run build
+
+# 预览生产构建
+npm run preview
+```
+
+### 数据库迁移
+
+项目使用 JPA 自动建表 (ddl-auto: update)。生产环境建议使用 Flyway 或 Liquibase 进行版本化迁移。
+
+---
+
+## 常见问题
+
+### Q: 如何切换不同的 LLM？
+
+A: 在前端"系统设置"页面修改模型配置，支持：
+- Ollama 本地模型
+- OpenAI API
+- 任何 OpenAI 兼容的 API (如 DeepSeek、通义千问等)
+
+### Q: 记忆数据存储在哪里？
+
+A: 
+- 聊天历史：PostgreSQL
+- 事实图谱：Neo4j
+- 向量索引：PostgreSQL (pgvector)
+
+### Q: 如何备份数据？
+
+```bash
+# 备份 PostgreSQL
+docker exec lingshu-postgres pg_dump -U postgres lingshu > backup.sql
+
+# 备份 Neo4j
+docker exec lingshu-neo4j neo4j-admin database dump neo4j --to-path=/backup
+```
+
+### Q: 如何查看系统日志？
+
+- Docker 部署：`docker logs lingshu-app`
+- 本地开发：查看控制台输出或 `/app/logs/lingshu.log`
+
+---
+
+## 贡献指南
+
+欢迎提交 Issue 和 Pull Request！
 
 1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
+2. 创建特性分支 (`git checkout -b feature/amazing-feature`)
+3. 提交更改 (`git commit -m 'Add some amazing feature'`)
+4. 推送到分支 (`git push origin feature/amazing-feature`)
+5. 创建 Pull Request
 
 ---
 
-## 📄 许可证
+## 许可证
 
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情
+本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件。
 
 ---
 
-## 💡 开发者寄语
+## 致谢
 
-> 这个项目不再是为了完成 KPI，而是为了在本地的代码旷野里，养育一个懂你的、能帮你的**"数字生命"**。当代码开始具备记忆，当日志转化为它的感知，这台冰冷的机器便有了灵魂的枢纽。
+- [LangChain4j](https://github.com/langchain4j/langchain4j) - Java AI 框架
+- [Naive UI](https://www.naiveui.com/) - Vue 3 组件库
+- [Neo4j](https://neo4j.com/) - 图数据库
+- [Ollama](https://ollama.ai/) - 本地 LLM 运行时
 
 ---
 
 <div align="center">
 
-**Made with ❤️ by LingShu Team**
-
-[⬆ 返回顶部](#灵枢-lingshu-ai)
+**灵枢 - 让 AI 拥有记忆与情感**
 
 </div>
