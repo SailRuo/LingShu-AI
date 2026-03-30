@@ -4,10 +4,13 @@
 
 **一个具备长期记忆、情感演化与现实干预能力的本地化陪伴/协作智能体**
 
-[![Java](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.org/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2.4-brightgreen.svg)](https://spring.io/projects/spring-boot)
-[![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D.svg)](https://vuejs.org/)
-[![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Java](https://img.shields.io/badge/Java-21-orange.svg?style=flat-square)](https://openjdk.org/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2.4-brightgreen.svg?style=flat-square)](https://spring.io/projects/spring-boot)
+[![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D.svg?style=flat-square)](https://vuejs.org/)
+[![MCP](https://img.shields.io/badge/Protocol-MCP-blue.svg?style=flat-square)](https://modelcontextprotocol.io/)
+[![License](https://img.shields.io/badge/License-GPLv3-blue.svg?style=flat-square)](LICENSE)
+
+[**✨ 愿景**](#项目简介) | [**🚀 快速开始**](#快速开始) | [**📖 文档库**](#文档导航) | [**🗺️ 路线图**](#项目路线图)
 
 </div>
 
@@ -15,17 +18,19 @@
 
 ## 项目简介
 
-**灵枢** 意为"灵魂的枢纽"。项目愿景是从 0 到 1 打造一个具备长期记忆、情感演化与现实干预能力的本地化陪伴/协作智能体。
+**灵**：象征智能、情感感知与主动交互，承载长期记忆，懂你所思、记你所好，时刻陪伴。
+
+**枢**：意为智能体调度中枢，代表开放、兼容、可无限扩展的统御能力。它支持用户自由配置 MCP 工具扩展，兼容 OpenAI 标准 TTS、ASR 等协议，实现本地任务执行、外部工具接入与多智能体协同，是掌控数字世界的核心与入口。
 
 ### 核心特性
 
-- **长期记忆系统**：通过 Neo4j + pgvector 构建多级记忆系统，支持事实提取、语义检索与记忆治理
-- **流式对话**：支持 SSE 流式输出，提升用户体验
-- **情感感知**：情感分析与上下文理解，实现更自然的交互
-- **主动交互**：基于用户状态的主动问候与关怀
-- **本地化部署**：完全离线运行，保护数据隐私
-- **MCP工具调用**：支持 Model Context Protocol，实现现实世界干预
-- **多智能体支持**：可配置多个 AI 智能体，满足不同场景需求
+- **🧠 长期记忆系统 (LTM)**：通过 **Neo4j + pgvector** 构建的多级记忆架构，支持事实提取、层级压缩与语义检索。
+- **🌌 银河记忆图谱**：基于 3D 渲染的交互式知识图谱，让 AI 的记忆以“银河系”形式可视化呈现。
+- **⚙️ MCP 协议驱动**：支持 **Model Context Protocol**，具备极强的开放性。可一键挂载 MySQL, Postgres, Web Search 等各种符合 MCP 协议的外部工具，赋予 AI 跨平台的现实干预能力。
+- **🎭 情感演化引擎**：内置情感分析模型，AI 的回复会根据上下文情感状态产生动态波动。
+- **⚡ 流式交互体验**：基于 SSE 的极速流式响应，配合多级缓存机制。
+- **🏠 完全本地化**：支持 Ollama 本地部署，不经云端，彻底保护个人数据隐私。
+- **🤖 多智能体协作**：支持配置不同性格与专业领域的 AI 智能体共同服务。
 
 ---
 
@@ -136,7 +141,7 @@ LingShu-AI/
 
 | 文档 | 说明 |
 |------|------|
-| [系统概要设计文档](doc/系统概要设计文档.md) | 整体架构设计、模块划分、核心功能实现及技术选型 |
+| [系统架构设计文档](doc/系统架构设计文档.md) | 整体架构设计、模块划分、核心功能实现及技术选型 |
 | [项目计划书](doc/项目计划书.md) | 项目愿景、阶段性演化路径、技术栈选型 |
 | [对话调用链路详解](doc/对话调用链路详解.md) | 用户发消息到AI流式回复再到事实提取的完整链路 |
 
@@ -152,7 +157,6 @@ LingShu-AI/
 | 文档 | 说明 |
 |------|------|
 | [智能体增强开发规划](doc/智能体增强开发规划.md) | Prompt模块化架构、工具调用规则、主动行为机制 |
-| [API接口文档](doc/api_docs.md) | 完整的后端REST API与WebSocket接口说明 |
 
 ### 前端设计
 
@@ -190,38 +194,30 @@ LingShu-AI/
 #### 1. 克隆项目
 
 ```bash
-git clone https://github.com/your-repo/LingShu-AI.git
+git clone https://github.com/SailRuo/LingShu-AI.git
 cd LingShu-AI
 ```
 
-#### 2. 配置环境变量 (可选)
+#### 2. Windows 一键构建 (推荐)
 
-创建 `.env` 文件或直接修改 `docker-compose.yml`：
-
-```env
-# 数据库密码
-POSTGRES_PASSWORD=lingshu123
-NEO4J_PASSWORD=lingshu123
-
-# LLM配置 (使用Ollama)
-OLLAMA_BASE_URL=http://host.docker.internal:11434
-
-# 或使用OpenAI兼容API
-# OPENAI_API_KEY=your-api-key
-# OPENAI_BASE_URL=https://api.openai.com/v1
-```
-
-#### 3. 构建并启动服务
+项目提供了专为 Windows 环境优化的批处理脚本，可自动完成编译、前端构建、镜像封装及启动：
 
 ```bash
-# 构建后端JAR包
+# 执行此脚本将完成：Maven 编译 + 前端打包 + Docker 镜像构建 + Compose 启动
+.\build-docker.bat
+```
+
+#### 3. 手动 Docker 启动 (多步骤)
+
+如果你想逐步控制过程：
+
+```bash
+# 构建后端
 cd backend
 mvn clean package -DskipTests
-
-# 返回项目根目录
 cd ..
 
-# 启动所有服务
+# 启动 (需先配置好 .env)
 docker-compose up -d
 ```
 
@@ -269,17 +265,19 @@ spring:
       port: 6379
 ```
 
-#### 3. 启动后端服务
+#### 3. 启动后端服务 (Windows 用户推荐脚本)
+
+```bash
+# 直接运行脚本 (已内置 UTF-8 编码处理、JVM 内存优化及僵尸进程清理)
+.\run_backend.bat
+```
+
+**手动启动命令行方式：**
 
 ```bash
 cd backend
-
-# 方式一：使用Maven
+mvn clean install -DskipTests
 mvn spring-boot:run -pl lingshu-web
-
-# 方式二：打包后运行
-mvn clean package -DskipTests
-java -jar lingshu-web/target/lingshu-web-0.0.1-SNAPSHOT.jar
 ```
 
 后端服务将在 http://localhost:8080 启动。
@@ -522,20 +520,24 @@ docker exec lingshu-neo4j neo4j-admin database dump neo4j --to-path=/backup
 
 ## 故障排查 (Troubleshooting)
 
-### 1. 数据库连接失败
-- 确保 Docker 容器已正常启动：`docker ps`
-- 检查端口是否被占用（5432, 7474, 7687, 6379）
-- 验证 `application.yml` 中的用户名和密码是否与 `docker-compose.yml` 一致
+### 1. Windows 控制台中文乱码
+- **现象**: 启动脚本或 Maven 编译时输出为乱码。
+- **方案**:
+  - 后端已在 `run_backend.bat` 内部通过 `chcp 65001` 强制指定 UTF-8 编码。
+  - 手动运行时请设置环境变量：`set JAVA_TOOL_OPTIONS=-Dfile.encoding=UTF-8`。
 
-### 2. LLM 响应缓慢或报错
-- 检查 Ollama 是否已启动并加载了对应模型
-- 验证 API Key 和 Base URL 是否配置正确
-- 检查网络连接（如果使用云端 API）
+### 2. Maven 编译时内存溢出 (OOM)
+- **现象**: 执行 `mvn package` 过程中报 `Native memory allocation` 失败。
+- **方案**: 调大 Maven 的 JVM 堆内存限制。
+  - `set MAVEN_OPTS=-Xmx1024m -Xms512m` (建议值)。
 
-### 3. 前端无法连接后端
-- 检查后端服务是否在 8080 端口运行
-- 检查浏览器控制台是否有跨域 (CORS) 错误
-- 确保 WebSocket 连接地址正确
+### 3. 数据库连接失败
+- 确保相关端口未被占用：`5432` (Postgres), `7474/7687` (Neo4j), `6379` (Redis)。
+- Docker 环境下，检查 `networks` 配置，确保 app 容器能解析 `postgres` / `neo4j` 域名。
+
+### 4. LLM 响应缓慢或报错
+- 检查 Ollama 服务监听地址，默认应为 `http://127.0.0.1:11434`。
+- 如果在 Docker 内部访问宿主机的 Ollama，Base URL 需设为 `http://host.docker.internal:11434`。
 
 ---
 
