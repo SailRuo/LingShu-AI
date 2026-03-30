@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { getFullUrl } from '@/utils/request'
 
 export interface SystemSettings {
   source: string
@@ -42,7 +43,7 @@ const isLoaded = ref(false)
 
 async function fetchSettings() {
   try {
-    const res = await fetch('/api/settings')
+    const res = await fetch(getFullUrl('/api/settings'))
     if (res.ok) {
       const data = await res.json()
       settings.value = {
@@ -66,7 +67,7 @@ async function fetchSettings() {
 
 async function fetchAsrSettings() {
   try {
-    const res = await fetch('/api/settings/asr')
+    const res = await fetch(getFullUrl('/api/settings/asr'))
     if (res.ok) {
       const data = await res.json()
       asrSettings.value = {
@@ -82,7 +83,7 @@ async function fetchAsrSettings() {
 
 async function saveSettings() {
   try {
-    await fetch('/api/settings', {
+    await fetch(getFullUrl('/api/settings'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

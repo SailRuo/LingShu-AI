@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { useSettings } from '@/stores/settingsStore'
+import { getFullUrl } from '@/utils/request'
 
 export function useTts() {
   const { settings } = useSettings()
@@ -14,7 +15,7 @@ export function useTts() {
     isPlaying.value = true
 
     try {
-      const response = await fetch('/api/tts/speak', {
+      const response = await fetch(getFullUrl('/api/tts/speak'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

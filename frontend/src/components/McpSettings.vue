@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, h, computed } from 'vue'
+import { getFullUrl } from '@/utils/request'
 import {
   NButton, NIcon, NTag, NSwitch, NPopconfirm, NModal,
   NForm, NFormItem, NInput, NSelect, useMessage, NSpace, NEmpty,
@@ -158,7 +159,7 @@ const transportOptions = [
 async function fetchServers() {
   loading.value = true
   try {
-    const res = await fetch('/api/mcp')
+    const res = await fetch(getFullUrl('/api/mcp'))
     if (res.ok) {
       servers.value = await res.json()
     } else {
@@ -238,7 +239,7 @@ async function saveServer() {
     isActive: formModel.value.isActive
   }
 
-  const url = editingServer.value ? `/api/mcp/${editingServer.value.id}` : '/api/mcp'
+  const url = editingServer.value ? getFullUrl(`/api/mcp/${editingServer.value.id}`) : getFullUrl('/api/mcp')
   const method = editingServer.value ? 'PUT' : 'POST'
   
   try {
@@ -265,7 +266,7 @@ async function toggleActive(server: any) {
   togglingServer.value[serverId] = true
   
   try {
-    const res = await fetch(`/api/mcp/${serverId}/toggle`, { method: 'POST' })
+    const res = await fetch(getFullUrl(`/api/mcp/${serverId}/toggle`), { method: 'POST' })
     if (res.ok) {
       server.isActive = !server.isActive
       message.success(server.isActive ? '服务已启用' : '服务已停用')
@@ -281,7 +282,7 @@ async function toggleActive(server: any) {
 
 async function deleteServer(id: number) {
   try {
-    const res = await fetch(`/api/mcp/${id}`, { method: 'DELETE' })
+    const res = await fetch(getFullUrl(`/api/mcp/${id}`), { method: 'DELETE' })
     if (res.ok) {
       message.success('已删除')
       fetchServers()
@@ -334,7 +335,7 @@ async function handleImport() {
     return
   }
   try {
-    const res = await fetch('/api/mcp/import', {
+    const res = await fetch(getFullUrl('/api/mcp/import'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: importJsonText.value

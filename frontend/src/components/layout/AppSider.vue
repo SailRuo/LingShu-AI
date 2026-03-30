@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { NMenu, NIcon } from 'naive-ui'
-import { Layers, Activity as ActivityIcon, FileText, Settings, Activity, Hexagon, Zap, Radio, DatabaseBackup } from 'lucide-vue-next'
+import { Layers, Activity as ActivityIcon, FileText, Settings, Hexagon, Zap, Radio, DatabaseBackup } from 'lucide-vue-next'
 import type { Component } from 'vue'
-import { h, computed } from 'vue'
+import { h } from 'vue'
 
 const props = defineProps<{ 
   activeMenu: string,

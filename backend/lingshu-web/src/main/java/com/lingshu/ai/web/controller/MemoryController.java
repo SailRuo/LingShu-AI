@@ -7,7 +7,6 @@ import org.springframework.web.bind.annotation.*;
 @Slf4j
 @RestController
 @RequestMapping("/api/memory")
-@CrossOrigin(origins = "*")
 public class MemoryController {
 
     private final MemoryService memoryService;

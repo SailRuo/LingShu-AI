@@ -17,7 +17,6 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequestMapping("/api/system")
-@CrossOrigin(origins = "*")
 public class SystemStatusController {
 
     private final SettingService settingService;

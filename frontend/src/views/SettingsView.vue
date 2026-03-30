@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
+import { getFullUrl } from '@/utils/request'
 import { 
   NInput, NSelect, NButton, NIcon, NRadioGroup, NRadioButton, 
   NCard, NGrid, NGridItem, useMessage, NTabs, NTabPane,
@@ -9,7 +10,7 @@ import {
 import { 
   RefreshCw, Settings, Cpu, Globe, Activity, Zap, Plus, 
   Trash2, Edit, Star, Users, Bell, Send, Brain, Wrench, Palette, Mic,
-  Bot, MessageCircle, Gem, Rocket, Sparkles, Heart, Volume2
+  Bot, Gem, Rocket, Sparkles, Volume2
 } from 'lucide-vue-next'
 import McpSettings from '@/components/McpSettings.vue'
 import ThemeModal from '@/components/common/ThemeModal.vue'
@@ -158,7 +159,7 @@ async function fetchEmbedModels(silent = false) {
       baseUrl: settings.value.embedBaseUrl,
       apiKey: settings.value.embedApiKey,
     })
-    const res = await fetch(`/api/chat/models?${params.toString()}`)
+    const res = await fetch(getFullUrl(`/api/chat/models?${params.toString()}`))
     const models = await res.json()
     embedModelOptions.value = models.map((m: string) => ({ label: m, value: m }))
     
@@ -185,7 +186,7 @@ async function fetchMemoryModels(silent = false) {
       baseUrl: baseUrl,
       apiKey: settings.value.memoryModelApiKey || settings.value.apiKey,
     })
-    const res = await fetch(`/api/chat/models?${params.toString()}`)
+    const res = await fetch(getFullUrl(`/api/chat/models?${params.toString()}`))
     const models = await res.json()
     memoryModelOptions.value = models.map((m: string) => ({ label: m, value: m }))
     
@@ -238,7 +239,7 @@ watch(
 
 async function fetchSettings() {
   try {
-    const res = await fetch('/api/settings')
+    const res = await fetch(getFullUrl('/api/settings'))
     const data = await res.json()
     settings.value = {
       source: data.source || 'ollama',
@@ -273,7 +274,7 @@ async function fetchSettings() {
 
 async function fetchAgents() {
   try {
-    const res = await fetch('/api/agents')
+    const res = await fetch(getFullUrl('/api/agents'))
     agents.value = await res.json()
   } catch (err) {
     console.error('Failed to fetch agents', err)
@@ -283,7 +284,7 @@ async function fetchAgents() {
 async function fetchLocalTools() {
   loadingLocalTools.value = true
   try {
-    const res = await fetch('/api/settings/local-tools')
+    const res = await fetch(getFullUrl('/api/settings/local-tools'))
     const data = await res.json()
     if (data && data.tools) {
       localTools.value = data.tools
@@ -298,7 +299,7 @@ async function fetchLocalTools() {
 
 async function saveLocalTools() {
   try {
-    await fetch('/api/settings/local-tools', {
+    await fetch(getFullUrl('/api/settings/local-tools'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tools: localTools.value })
@@ -314,7 +315,7 @@ async function toggleTool(tool: LocalTool, enabled: boolean) {
   tool.enabled = enabled
   
   try {
-    await fetch('/api/settings/local-tools', {
+    await fetch(getFullUrl('/api/settings/local-tools'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tools: localTools.value })
@@ -329,7 +330,7 @@ async function toggleTool(tool: LocalTool, enabled: boolean) {
 
 async function fetchAsrSettings() {
   try {
-    const res = await fetch('/api/settings/asr')
+    const res = await fetch(getFullUrl('/api/settings/asr'))
     const data = await res.json()
     asrSettings.value = {
       enabled: data.enabled ?? false,
@@ -344,7 +345,7 @@ async function fetchAsrSettings() {
 async function saveAsrSettings() {
   savingAsr.value = true
   try {
-    await fetch('/api/settings/asr', {
+    await fetch(getFullUrl('/api/settings/asr'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(asrSettings.value)
@@ -366,7 +367,7 @@ onMounted(() => {
 
 const handleSave = async () => {
   try {
-    await fetch('/api/settings', {
+    await fetch(getFullUrl('/api/settings'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -406,7 +407,7 @@ async function testProactiveGreeting() {
   testingGreeting.value = true
   testGreetingResult.value = ''
   try {
-    const res = await fetch('/api/chat/proactive/test-greeting')
+    const res = await fetch(getFullUrl('/api/chat/proactive/test-greeting'))
     const reader = res.body?.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
@@ -442,7 +443,7 @@ async function testProactiveGreeting() {
 async function openCreateAgent() {
   editingAgent.value = null
   try {
-    const res = await fetch('/api/agents/defaults')
+    const res = await fetch(getFullUrl('/api/agents/defaults'))
     const defaults = await res.json()
     agentForm.value = {
       name: '',
@@ -487,7 +488,7 @@ function openEditAgent(agent: Agent) {
 
 async function saveAgent() {
   try {
-    const url = editingAgent.value ? `/api/agents/${editingAgent.value.id}` : '/api/agents'
+    const url = editingAgent.value ? getFullUrl(`/api/agents/${editingAgent.value.id}`) : getFullUrl('/api/agents')
     const method = editingAgent.value ? 'PUT' : 'POST'
     
     await fetch(url, {
@@ -506,7 +507,7 @@ async function saveAgent() {
 
 async function deleteAgent(id: number) {
   try {
-    await fetch(`/api/agents/${id}`, { method: 'DELETE' })
+    await fetch(getFullUrl(`/api/agents/${id}`), { method: 'DELETE' })
     message.success('智能体已删除')
     fetchAgents()
   } catch (err) {
@@ -516,7 +517,7 @@ async function deleteAgent(id: number) {
 
 async function setDefaultAgent(id: number) {
   try {
-    await fetch(`/api/agents/${id}/set-default`, { method: 'POST' })
+    await fetch(getFullUrl(`/api/agents/${id}/set-default`), { method: 'POST' })
     message.success('已设为默认智能体')
     fetchAgents()
   } catch (err) {

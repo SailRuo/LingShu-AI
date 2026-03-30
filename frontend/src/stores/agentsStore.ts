@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { getFullUrl } from '@/utils/request'
 
 export interface Agent {
   id: number
@@ -30,7 +31,7 @@ async function fetchAgents(force = false) {
   
   isLoading.value = true
   try {
-    const res = await fetch('/api/agents')
+    const res = await fetch(getFullUrl('/api/agents'))
     if (res.ok) {
       agents.value = await res.json()
       isLoaded.value = true
@@ -43,7 +44,7 @@ async function fetchAgents(force = false) {
 }
 
 async function createAgent(agentData: Partial<Agent>) {
-  const res = await fetch('/api/agents', {
+  const res = await fetch(getFullUrl('/api/agents'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(agentData)
@@ -55,7 +56,7 @@ async function createAgent(agentData: Partial<Agent>) {
 }
 
 async function updateAgent(id: number, agentData: Partial<Agent>) {
-  const res = await fetch(`/api/agents/${id}`, {
+  const res = await fetch(getFullUrl(`/api/agents/${id}`), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(agentData)
@@ -67,7 +68,7 @@ async function updateAgent(id: number, agentData: Partial<Agent>) {
 }
 
 async function deleteAgent(id: number) {
-  const res = await fetch(`/api/agents/${id}`, { method: 'DELETE' })
+  const res = await fetch(getFullUrl(`/api/agents/${id}`), { method: 'DELETE' })
   if (res.ok) {
     await fetchAgents(true)
   }
@@ -75,7 +76,7 @@ async function deleteAgent(id: number) {
 }
 
 async function setDefaultAgent(id: number) {
-  const res = await fetch(`/api/agents/${id}/set-default`, { method: 'POST' })
+  const res = await fetch(getFullUrl(`/api/agents/${id}/set-default`), { method: 'POST' })
   if (res.ok) {
     await fetchAgents(true)
   }
@@ -83,7 +84,7 @@ async function setDefaultAgent(id: number) {
 }
 
 async function getAgentDefaults() {
-  const res = await fetch('/api/agents/defaults')
+  const res = await fetch(getFullUrl('/api/agents/defaults'))
   return res
 }
 

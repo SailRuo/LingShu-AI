@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import MarkdownIt from 'markdown-it'
-import { FileText, Brain, Loader2 } from 'lucide-vue-next'
-import type { ChatMessage, ChatMessageSegment, ChatToolSegment, ChatReasoningSegment } from '@/types'
+import { FileText, Brain } from 'lucide-vue-next'
+import type { ChatMessage, ChatMessageSegment, ChatToolSegment } from '@/types'
 
 const props = defineProps<{
   message: ChatMessage
@@ -147,7 +147,7 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
           </div>
 
           <div
-            v-else-if="segment.content"
+            v-else-if="segment.type === 'text' && segment.content"
             class="message-content"
             v-html="renderContent(segment.content)"
           ></div>

@@ -19,7 +19,6 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequestMapping("/api/tts")
-@CrossOrigin(origins = "*")
 public class TtsController {
 
     private final SettingService settingService;

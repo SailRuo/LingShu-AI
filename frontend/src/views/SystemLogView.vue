@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
+import { getFullUrl } from '@/utils/request'
 import { NInput, NButton, NTag, useMessage } from 'naive-ui'
 import { Search, Trash2, Download } from 'lucide-vue-next'
 
@@ -43,7 +44,7 @@ const connectLogs = () => {
   
   logs.value = []
   
-  logEventSource = new EventSource('/api/logs/stream')
+  logEventSource = new EventSource(getFullUrl('/api/logs/stream'))
   
   logEventSource.onmessage = (event) => {
     try {
@@ -90,7 +91,7 @@ const connectLogs = () => {
 
 const clearLogs = async () => {
   try {
-    await fetch('/api/logs', { method: 'DELETE' })
+    await fetch(getFullUrl('/api/logs'), { method: 'DELETE' })
     logs.value = []
     message.success('日志已清空（包括历史记录）')
   } catch (e) {

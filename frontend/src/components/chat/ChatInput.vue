@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue'
-import { Send, ArrowUp, Sparkles, Mic, MicOff, Loader2, Brain, X } from 'lucide-vue-next'
+import { ArrowUp, Mic, MicOff, Loader2, Brain, X } from 'lucide-vue-next'
 
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 

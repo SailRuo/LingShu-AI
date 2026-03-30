@@ -1,4 +1,5 @@
 import { ref, computed, onUnmounted } from 'vue'
+import { getFullUrl } from '@/utils/request'
 
 export interface AsrConfig {
   enabled: boolean
@@ -52,7 +53,7 @@ export function useAsr() {
 
   async function loadConfig(): Promise<AsrConfig> {
     try {
-      const res = await fetch('/api/settings/asr')
+      const res = await fetch(getFullUrl('/api/settings/asr'))
       if (res.ok) {
         const data = await res.json()
         config.value = {
@@ -69,7 +70,7 @@ export function useAsr() {
 
   async function saveConfig(newConfig: Partial<AsrConfig>): Promise<void> {
     try {
-      const res = await fetch('/api/settings/asr', {
+      const res = await fetch(getFullUrl('/api/settings/asr'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...config.value, ...newConfig })

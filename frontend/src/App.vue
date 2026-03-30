@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { NConfigProvider, NMessageProvider, NDialogProvider, NNotificationProvider, NLoadingBarProvider, darkTheme } from 'naive-ui'
-import { computed, onMounted, markRaw, h, watch, ref, onUnmounted } from 'vue'
+import { computed, onMounted, markRaw, h, watch, ref } from 'vue'
 import { useThemeStore } from '@/stores/themeStore'
 import { useLocalStorage } from '@vueuse/core'
 import { Menu, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
 import AppSider from '@/components/layout/AppSider.vue'
-import SystemStatusBar from '@/components/layout/SystemStatusBar.vue'
 import ResonanceView from '@/views/ResonanceView.vue'
 import InsightView from '@/views/InsightView.vue'
 import SettingsView from '@/views/SettingsView.vue'

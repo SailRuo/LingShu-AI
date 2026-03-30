@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { getApiBaseUrl } from '@/utils/request'
 
 export interface WebSocketMessage {
   type: string
@@ -62,6 +63,11 @@ export function useWebSocket() {
   }
 
   function getDefaultWsUrl(): string {
+    const baseUrl = getApiBaseUrl()
+    if (baseUrl) {
+      const wsBase = baseUrl.replace(/^http/, 'ws')
+      return `${wsBase}/ws/chat`
+    }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host.replace(':5173', ':8080')
     return `${protocol}//${host}/ws/chat`

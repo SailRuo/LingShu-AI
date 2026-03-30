@@ -37,7 +37,7 @@
 ## 界面预览 (Screenshots)
 
 <div align="center">
-  <p><i>(此处建议添加实际运行截图或 GIF 演示)</i></p>
+  <p><i></i></p>
   <img src="doc/png/lingshu_ai_ui_mockup_1773996576105.png" width="800" alt="UI Mockup">
 </div>
 

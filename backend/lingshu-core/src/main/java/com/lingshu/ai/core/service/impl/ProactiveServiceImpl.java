@@ -76,7 +76,9 @@ public class ProactiveServiceImpl implements ProactiveService {
 
         LocalDateTime threshold = LocalDateTime.now().minusMinutes(inactiveThresholdMinutes);
         List<UserState> inactiveUsers = userStateRepository.findInactiveUsers(threshold);
-
+        if (inactiveUsers.isEmpty()) {
+            return;
+        }
         log.info("检查不活跃用户，阈值: {} 分钟，用户数: {}", inactiveThresholdMinutes, inactiveUsers.size());
 
         for (UserState state : inactiveUsers) {

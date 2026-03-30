@@ -1,4 +1,5 @@
 import { ref } from "vue";
+import { getFullUrl } from "@/utils/request";
 import type {
   ChatMessage,
   ChatMessageSegment,
@@ -202,12 +203,37 @@ function mergeSegments(
       return;
     }
 
-    const key = getToolStepKey(segment, index);
+    if (segment.type === "reasoning") {
+      const content = segment.content ?? "";
+      const last = merged[merged.length - 1];
+      if (last?.type === "reasoning") {
+        merged[merged.length - 1] = {
+          ...last,
+          content: `${last.content}${content}`,
+          timestamp: segment.timestamp ?? last.timestamp,
+        };
+      } else {
+        merged.push({
+          type: "reasoning",
+          content,
+          timestamp: segment.timestamp,
+        });
+      }
+      return;
+    }
+
+    if (segment.type === "image") {
+      merged.push(segment);
+      return;
+    }
+
+    const toolSegment = segment as ChatToolSegment;
+    const key = getToolStepKey(toolSegment, index);
     const existingIndex = toolSegments.get(key);
     if (existingIndex == null) {
       toolSegments.set(key, merged.length);
       merged.push({
-        ...segment,
+        ...toolSegment,
         type: "tool",
       });
       return;
@@ -216,19 +242,19 @@ function mergeSegments(
     const previous = merged[existingIndex] as ChatToolSegment;
     merged[existingIndex] = {
       ...previous,
-      ...segment,
+      ...toolSegment,
       type: "tool",
-      id: segment.id ?? previous.id,
-      toolCallId: segment.toolCallId ?? previous.toolCallId,
-      toolName: segment.toolName ?? previous.toolName,
-      arguments: segment.arguments ?? previous.arguments,
-      command: segment.command ?? previous.command,
-      input: segment.input ?? previous.input,
-      result: segment.result ?? previous.result,
-      output: segment.output ?? previous.output,
-      isError: segment.isError ?? previous.isError ?? false,
-      status: segment.status ?? previous.status,
-      timestamp: segment.timestamp ?? previous.timestamp,
+      id: toolSegment.id ?? previous.id,
+      toolCallId: toolSegment.toolCallId ?? previous.toolCallId,
+      toolName: toolSegment.toolName ?? previous.toolName,
+      arguments: toolSegment.arguments ?? previous.arguments,
+      command: toolSegment.command ?? previous.command,
+      input: toolSegment.input ?? previous.input,
+      result: toolSegment.result ?? previous.result,
+      output: toolSegment.output ?? previous.output,
+      isError: toolSegment.isError ?? previous.isError ?? false,
+      status: toolSegment.status ?? previous.status,
+      timestamp: toolSegment.timestamp ?? previous.timestamp,
     };
   });
 
@@ -655,7 +681,7 @@ export function useChat() {
 
   async function syncLatestAssistantMessage() {
     try {
-      const res = await fetch("/api/chat/history?size=6");
+      const res = await fetch(getFullUrl("/api/chat/history?size=6"));
       if (!res.ok) {
         throw new Error("History sync failed");
       }
@@ -705,7 +731,7 @@ export function useChat() {
         params.append("beforeId", oldestMessageId.value.toString());
       }
 
-      const res = await fetch(`/api/chat/history?${params}`);
+      const res = await fetch(getFullUrl(`/api/chat/history?${params}`));
       if (!res.ok) throw new Error("History fetch failed");
 
       const historyMessages: HistoryMessage[] = await res.json();
@@ -739,7 +765,7 @@ export function useChat() {
 
   async function initWelcome() {
     try {
-      const res = await fetch("/api/chat/welcome");
+      const res = await fetch(getFullUrl("/api/chat/welcome"));
       if (!res.ok) throw new Error("Welcome stream failed");
 
       const reader = res.body?.getReader();
@@ -805,7 +831,7 @@ export function useChat() {
         payload.images = currentImages;
       }
       
-      const res = await fetch("/api/chat/stream", {
+      const res = await fetch(getFullUrl("/api/chat/stream"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -868,7 +894,7 @@ export function useChat() {
 
   async function clearHistory() {
     try {
-      const res = await fetch("/api/chat/history", {
+      const res = await fetch(getFullUrl("/api/chat/history"), {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Clear history failed");

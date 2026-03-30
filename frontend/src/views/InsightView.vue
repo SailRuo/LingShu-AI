@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { getFullUrl } from '@/utils/request'
 import { NButton, NDropdown, NIcon, NInput, NProgress, NScrollbar, NSlider, NTag, useMessage } from 'naive-ui'
 import { Clock3, Eye, Play, RefreshCcw, Search, Sparkles, Target, Trash2, ZoomIn, ZoomOut } from 'lucide-vue-next'
 
@@ -229,7 +230,7 @@ async function fetchGraph() {
   showDropdown.value = false
   try {
     const previousIds = new Set(graph.value.nodes.map((n) => n.id))
-    const response = await fetch('/api/memory/graph')
+    const response = await fetch(getFullUrl('/api/memory/graph'))
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const payload = await response.json() as GraphPayload
     graph.value = payload
@@ -254,7 +255,7 @@ async function fetchGraph() {
 async function handleDeleteFact() {
   if (!rightClickedNode.value || rightClickedNode.value.type !== 'Fact') return
   try {
-    const response = await fetch(`/api/memory/fact/${rightClickedNode.value.id.replace('fact_', '')}`, { method: 'DELETE' })
+    const response = await fetch(getFullUrl(`/api/memory/fact/${rightClickedNode.value.id.replace('fact_', '')}`), { method: 'DELETE' })
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     message.success('记忆节点已移除')
     if (selectedNode.value?.id === rightClickedNode.value.id) selectedNode.value = null

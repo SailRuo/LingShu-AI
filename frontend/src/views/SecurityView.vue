@@ -7,7 +7,6 @@ import {
   Cpu, 
   Activity, 
   Zap, 
-  Shield, 
   CheckCircle, 
   AlertTriangle, 
   XCircle,
