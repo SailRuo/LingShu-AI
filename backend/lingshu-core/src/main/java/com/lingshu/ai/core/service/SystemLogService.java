@@ -56,25 +56,29 @@ public class SystemLogService {
     }
 
     public long endTimer(String key, String description, String section) {
+        return endTimer(key, description, section, "debug");
+    }
+
+    public long endTimer(String key, String description, String section, String level) {
         Long start = timers.remove(key);
         if (start == null) {
             debug("Timer not found: " + key, section);
             return -1;
         }
         long duration = System.currentTimeMillis() - start;
-        info(String.format("%s - 耗时: %dms", description, duration), section);
+        log(String.format("%s - 耗时: %dms", description, duration), level, section);
         return duration;
     }
 
     public void llmStart(String model, String endpoint, String section) {
-        info(String.format("LLM调用开始 | 模型: %s | 端点: %s", model, endpoint), section);
+        debug(String.format("LLM调用开始 | 模型: %s | 端点: %s", model, endpoint), section);
         startTimer("llm_" + section);
     }
 
     public void llmEnd(int tokenCount, String section) {
-        long duration = endTimer("llm_" + section, "LLM调用完成", section);
+        long duration = endTimer("llm_" + section, "LLM调用完成", section, "debug");
         if (tokenCount > 0 && duration > 0) {
-            info(String.format("Token统计: ~%d tokens | 速度: %.1f tokens/s", 
+            debug(String.format("Token统计: ~%d tokens | 速度: %.1f tokens/s", 
                 tokenCount, tokenCount * 1000.0 / duration), section);
         }
     }
@@ -85,12 +89,12 @@ public class SystemLogService {
     }
 
     public void embeddingStart(int textLength, String section) {
-        info(String.format("Embedding向量化开始 | 文本长度: %d字符", textLength), section);
+        debug(String.format("Embedding向量化开始 | 文本长度: %d字符", textLength), section);
         startTimer("embedding_" + section);
     }
 
     public void embeddingEnd(String section) {
-        endTimer("embedding_" + section, "Embedding向量化完成", section);
+        endTimer("embedding_" + section, "Embedding向量化完成", section, "debug");
     }
 
     public void dbStart(String operation, String target, String section) {

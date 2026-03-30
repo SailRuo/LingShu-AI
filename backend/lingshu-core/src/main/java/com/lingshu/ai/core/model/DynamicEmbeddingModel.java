@@ -48,7 +48,7 @@ public class DynamicEmbeddingModel implements EmbeddingModel {
                         delegate = OllamaEmbeddingModel.builder()
                                 .baseUrl(baseUrl)
                                 .modelName(modelName)
-                                .timeout(Duration.ofMinutes(2))
+                                .timeout(Duration.ofMinutes(5))
                                 .build();
                     } else {
                         String effectiveUrl = baseUrl;
@@ -60,7 +60,7 @@ public class DynamicEmbeddingModel implements EmbeddingModel {
                                 .baseUrl(effectiveUrl)
                                 .apiKey(apiKey != null && !apiKey.isBlank() ? apiKey : "no-key")
                                 .modelName(modelName)
-                                .timeout(Duration.ofMinutes(2))
+                                .timeout(Duration.ofMinutes(5))
                                 .build();
                     }
 

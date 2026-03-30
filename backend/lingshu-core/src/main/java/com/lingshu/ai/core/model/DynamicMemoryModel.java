@@ -49,7 +49,7 @@ public class DynamicMemoryModel implements ChatModel {
                         delegate = OllamaChatModel.builder()
                                 .baseUrl(baseUrl)
                                 .modelName(modelName)
-                                .timeout(Duration.ofMinutes(2))
+                                .timeout(Duration.ofMinutes(5))
                                 .listeners(Collections.emptyList())
                                 .build();
                     } else {
@@ -61,14 +61,14 @@ public class DynamicMemoryModel implements ChatModel {
                         JdkHttpClientBuilder httpClientBuilder = dev.langchain4j.http.client.jdk.JdkHttpClient.builder()
                                 .httpClientBuilder(HttpClient.newBuilder()
                                         .version(HttpClient.Version.HTTP_1_1)
-                                        .connectTimeout(Duration.ofSeconds(30))
+                                        .connectTimeout(Duration.ofSeconds(60))
                                         .executor(Executors.newCachedThreadPool()));
                         
                         delegate = OpenAiChatModel.builder()
                                 .baseUrl(effectiveUrl)
                                 .apiKey(apiKey != null && !apiKey.isBlank() ? apiKey : "no-key")
                                 .modelName(modelName)
-                                .timeout(Duration.ofMinutes(2))
+                                .timeout(Duration.ofMinutes(5))
                                 .listeners(Collections.emptyList())
                                 .httpClientBuilder(httpClientBuilder)
                                 .build();
@@ -107,5 +107,10 @@ public class DynamicMemoryModel implements ChatModel {
     public dev.langchain4j.model.chat.request.ChatRequestParameters defaultRequestParameters() {
         ensureDelegate();
         return delegate.defaultRequestParameters();
+    }
+
+    public String getModelName() {
+        SystemSetting setting = settingService.getSetting();
+        return setting.getMemoryModel() != null ? setting.getMemoryModel() : "default";
     }
 }

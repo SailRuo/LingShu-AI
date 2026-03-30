@@ -20,7 +20,6 @@ import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.ChatMemoryProvider;
 
 import dev.langchain4j.mcp.client.McpClient;
-import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.listener.ChatModelListener;
 import dev.langchain4j.model.chat.request.ChatRequest;
@@ -60,7 +59,6 @@ public class ChatServiceImpl implements ChatService {
     private final ChatMemoryProvider chatMemoryProvider;
     private final LocalTools localTools;
     private final McpService mcpService;
-    private final ChatModel chatLanguageModel;
     private final List<ChatModelListener> listeners;
     private final TurnPostProcessingServiceImpl turnPostProcessingService;
     private final ToolResultSummarizer toolResultSummarizer;
@@ -82,7 +80,6 @@ public class ChatServiceImpl implements ChatService {
                            ChatMemoryProvider chatMemoryProvider,
                            LocalTools localTools,
                            McpService mcpService,
-                           ChatModel chatLanguageModel,
                            List<ChatModelListener> listeners,
                            TurnPostProcessingServiceImpl turnPostProcessingService,
                            ToolResultSummarizer toolResultSummarizer,
@@ -100,7 +97,6 @@ public class ChatServiceImpl implements ChatService {
         this.chatMemoryProvider = chatMemoryProvider;
         this.localTools = localTools;
         this.mcpService = mcpService;
-        this.chatLanguageModel = chatLanguageModel;
         this.listeners = listeners;
         this.turnPostProcessingService = turnPostProcessingService;
         this.toolResultSummarizer = toolResultSummarizer;
@@ -125,87 +121,14 @@ public class ChatServiceImpl implements ChatService {
         return agentConfigService.getDefaultAgent().orElse(null);
     }
 
-    @Override
-    public String chat(String message) {
-        return chat(message, null, "User");
-    }
-
-    @Override
-    public String chat(String message, Long agentId) {
-        return chat(message, agentId, "User");
-    }
-
-    @Override
-    public String chat(String message, Long agentId, String userId) {
-        ChatSession session = getOrCreateSession();
-        AgentConfig agent = getAgent(agentId);
-
-        systemLogService.info("\n收到用户消息: " + (message.length() > 20 ? message.substring(0, 20) + "..." : message), "CHAT");
-
-        com.lingshu.ai.core.dto.EmotionContextResult emotionResult = emotionPreAnalysisService.analyzeBeforeResponse(userId, message, session.getId());
-        String emotionPrompt = "";
-        if (emotionResult != null) {
-            emotionPrompt = emotionPreAnalysisService.getEmotionPromptInjection(userId);
-            systemLogService.info("情感前置分析完成，已注入情感状态到 Prompt", "EMOTION");
-        }
-
-        String longTermContext = memoryService.retrieveContext(userId, message);
-        if (longTermContext != null && !longTermContext.isBlank()) {
-            systemLogService.info("长期记忆检索完成，获取到相关事实。", "MEMORY");
-        }
-
-        String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
-
-        String systemPrompt = promptBuilderService.buildMergedSystemPrompt(agent, relationshipPrompt, longTermContext);
-        
-        if (!emotionPrompt.isEmpty()) {
-            systemPrompt = systemPrompt + emotionPrompt;
-        }
-
-        log.debug("Merged System Prompt generated for chat (first 100 chars): {}...", systemPrompt.substring(0, Math.min(100, systemPrompt.length())));
-        systemLogService.debug("已加载 Agent Prompt (长度: " + systemPrompt.length() + ")", "CHAT");
-
-        com.lingshu.ai.infrastructure.entity.SystemSetting sysSetting = settingService.getSetting();
-        String actualModel = sysSetting.getChatModel() != null ? sysSetting.getChatModel() : "default-model";
-        String actualSource = sysSetting.getSource() != null ? sysSetting.getSource() : "ollama";
-        systemLogService.llmStart(actualModel, actualSource, "LLM");
-
-        AiServices<AiConfig.Assistant> builder =
-                AiServices.builder(AiConfig.Assistant.class)
-                        .chatModel(chatLanguageModel)
-                        .chatMemoryProvider(chatMemoryProvider)
-                        .toolArgumentsErrorHandler(this::handleToolArgumentsError)
-                        .maxSequentialToolsInvocations(15);
-
-        java.util.List<Object> enabledLocalTools = localTools.getEnabledTools(settingService.getLocalToolsSetting());
-        if (!enabledLocalTools.isEmpty()) {
-            builder.tools(enabledLocalTools.toArray());
-        }
-
-        List<McpClient> mcpClients = mcpService.getActiveClients();
-        if (!mcpClients.isEmpty()) {
-            builder.toolProvider(new SummarizingMcpToolProvider(
-                    mcpClients, toolResultSummarizer, () -> message));
-        }
-
-        AiConfig.Assistant dynamicAssistant = builder.build();
-
-        systemLogService.debug("准备发送对话请求，SystemPrompt 长度: " + systemPrompt.length(), "CHAT");
-
-        String response = dynamicAssistant.chat(session.getId(), message, systemPrompt);
-        systemLogService.llmEnd(response != null ? response.length() / 4 : 0, "LLM");
-
-        postProcessAfterResponse(userId, message, response);
-
-        return response;
-    }
-
-    private void postProcessAfterResponse(String userId, String userMessage, String assistantResponse) {
+    private void postProcessAfterResponse(String userId, String userMessage, String assistantResponse,
+                                          com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion) {
         try {
             turnPostProcessingService.processCompletedTurn(
                     userId,
                     userMessage,
-                    assistantResponse != null ? assistantResponse : ""
+                    assistantResponse != null ? assistantResponse : "",
+                    preAnalyzedEmotion
             );
         } catch (Exception e) {
             log.warn("提交回合后处理任务失败: {}", e.getMessage(), e);
@@ -273,10 +196,12 @@ public class ChatServiceImpl implements ChatService {
         StringBuilder assistantResponseStore = new StringBuilder();
 
         com.lingshu.ai.core.dto.EmotionContextResult emotionResult = emotionPreAnalysisService.analyzeBeforeResponse(userId, safeMessage, session.getId());
+        com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion = emotionResult != null ? emotionResult.toEmotionAnalysis() : null;
         String emotionPrompt = "";
         if (emotionResult != null) {
             emotionPrompt = emotionPreAnalysisService.getEmotionPromptInjection(userId);
-            systemLogService.info("情感前置分析完成，已注入情感状态到 Prompt", "EMOTION");
+            String abbreviated = emotionPrompt.length() > 100 ? emotionPrompt.substring(0, 100) + "..." : emotionPrompt;
+            systemLogService.info("情感前置分析完成，已注入情感状态到 Prompt: " + abbreviated, "EMOTION");
         }
 
         String longTermContext = memoryService.retrieveContext(userId, safeMessage);
@@ -290,7 +215,10 @@ public class ChatServiceImpl implements ChatService {
         log.debug("Merged System Prompt generated for streamChat (first 100 chars): {}...", systemPrompt.substring(0, Math.min(100, systemPrompt.length())));
         systemLogService.debug("已加载 Agent Prompt (长度: " + systemPrompt.length() + ")", "CHAT");
 
-        systemLogService.startTimer("llm_LLM");
+        com.lingshu.ai.infrastructure.entity.SystemSetting sysSetting = settingService.getSetting();
+        String actualModel = sysSetting.getChatModel() != null ? sysSetting.getChatModel() : "default-model";
+        String actualSource = sysSetting.getSource() != null ? sysSetting.getSource() : "ollama";
+        systemLogService.llmStart(actualModel, actualSource, "LLM");
 
         StreamingChatModel streamingModelToUse = streamingChatLanguageModel;
 
@@ -357,7 +285,7 @@ public class ChatServiceImpl implements ChatService {
 
         if (images != null && !images.isEmpty()) {
             streamMultimodalRequest(streamingModelToUse, session.getId(), systemPrompt, userMessageObj,
-                    userId, safeMessage, assistantResponseStore, sink);
+                    userId, safeMessage, assistantResponseStore, sink, preAnalyzedEmotion);
             return sink.asFlux();
         }
 
@@ -417,7 +345,7 @@ public class ChatServiceImpl implements ChatService {
                 systemLogService.llmEnd(tokenCount, "LLM");
                 systemLogService.success("对话完成，回复长度: " + assistantResponseStore.length() + " 字符", "CHAT");
                 sink.tryEmitComplete();
-                postProcessAfterResponse(userId, safeMessage, assistantResponseStore.toString());
+                postProcessAfterResponse(userId, safeMessage, assistantResponseStore.toString(), preAnalyzedEmotion);
             })
             .onError(error -> {
                 log.error("流式对话发生错误: {}", error.getMessage(), error);
@@ -445,7 +373,8 @@ public class ChatServiceImpl implements ChatService {
                                          String userId,
                                          String safeMessage,
                                          StringBuilder assistantResponseStore,
-                                         Sinks.Many<String> sink) {
+                                         Sinks.Many<String> sink,
+                                         com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion) {
         ChatMemory chatMemory = chatMemoryProvider.get(sessionId);
         chatMemory.add(SystemMessage.from(systemPrompt));
         chatMemory.add(userMessage);
@@ -471,7 +400,7 @@ public class ChatServiceImpl implements ChatService {
                 if (response != null && response.aiMessage() != null) {
                     chatMemory.add(response.aiMessage());
                 }
-                completeStreamingResponse(userId, safeMessage, assistantResponseStore, sink);
+                completeStreamingResponse(userId, safeMessage, assistantResponseStore, sink, preAnalyzedEmotion);
             }
 
             @Override
@@ -494,12 +423,13 @@ public class ChatServiceImpl implements ChatService {
     private void completeStreamingResponse(String userId,
                                            String safeMessage,
                                            StringBuilder assistantResponseStore,
-                                           Sinks.Many<String> sink) {
+                                           Sinks.Many<String> sink,
+                                           com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion) {
         int tokenCount = assistantResponseStore.length() / 4;
         systemLogService.llmEnd(tokenCount, "LLM");
         systemLogService.success("瀵硅瘽瀹屾垚锛屽洖澶嶉暱搴? " + assistantResponseStore.length() + " 瀛楃", "CHAT");
         sink.tryEmitComplete();
-        postProcessAfterResponse(userId, safeMessage, assistantResponseStore.toString());
+        postProcessAfterResponse(userId, safeMessage, assistantResponseStore.toString(), preAnalyzedEmotion);
     }
 
     private void handleStreamingError(Throwable error, Sinks.Many<String> sink) {
@@ -590,7 +520,6 @@ public class ChatServiceImpl implements ChatService {
             effectiveUrl = effectiveUrl.substring(0, effectiveUrl.length() - 1);
         }
 
-        systemLogService.info(String.format("获取模型列表 | 来源: %s | 端点: %s", source, effectiveUrl), "SYSTEM");
         systemLogService.startTimer("get_models");
 
         try {

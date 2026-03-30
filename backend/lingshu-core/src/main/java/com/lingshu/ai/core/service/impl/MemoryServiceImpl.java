@@ -1,8 +1,6 @@
 package com.lingshu.ai.core.service.impl;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lingshu.ai.core.dto.FactSemanticClassification;
-import com.lingshu.ai.core.service.FactExtractor;
 import com.lingshu.ai.core.service.FactSemanticClassifier;
 import com.lingshu.ai.core.service.MemoryService;
 import com.lingshu.ai.core.service.EmotionAwareFactExtractor;
@@ -28,6 +26,8 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -38,6 +38,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.HashMap;
 import java.util.ArrayList;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 @Service
@@ -46,19 +49,23 @@ public class MemoryServiceImpl implements MemoryService {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(MemoryServiceImpl.class);
 
     private static final double GAIN_THRESHOLD = 0.3;
-    private static final Set<String> TOPIC_KEYS = Set.of("interest", "growth", "goal", "emotion", "relationship", "event", "timeline", "memory");
+    private static final Set<String> TOPIC_KEYS = Set.of("interest", "growth", "goal", "emotion", "relationship",
+            "event", "timeline", "memory");
     private static final Set<String> GENERIC_TOPIC_KEYS = Set.of("memory", "timeline");
-    private static final Set<String> SUB_TYPES = Set.of("Preference", "EmotionState", "Person", "Project", "Goal", "Event", "TimeAnchor", "Memory");
+    private static final Set<String> SUB_TYPES = Set.of("Preference", "EmotionState", "Person", "Project", "Goal",
+            "Event", "TimeAnchor", "Memory");
     private static final Set<String> GENERIC_SUB_TYPES = Set.of("Memory", "TimeAnchor");
+    private static final long SEMANTIC_CLASSIFY_TIMEOUT_SECONDS = 8;
+    private static final long HISTORY_EMBED_TIMEOUT_SECONDS = 6;
+    private static final long HISTORY_SEARCH_TIMEOUT_SECONDS = 4;
     private static final java.util.Set<String> STOP_WORDS = java.util.Set.of(
-        "的", "了", "是", "在", "我", "你", "他", "她", "它", "们",
-        "这", "那", "有", "和", "与", "或", "但", "如果", "因为",
-        "所以", "但是", "然后", "就", "都", "也", "还", "又", "很",
-        "什么", "怎么", "为什么", "哪", "谁", "几", "多少", "怎样",
-        "吗", "呢", "吧", "啊", "呀", "哦", "嗯", "哈", "嘿",
-        "一个", "一些", "这个", "那个", "不是", "没有", "可以", "会",
-        "能", "要", "想", "去", "来", "说", "看", "做", "给", "让"
-    );
+            "的", "了", "是", "在", "我", "你", "他", "她", "它", "们",
+            "这", "那", "有", "和", "与", "或", "但", "如果", "因为",
+            "所以", "但是", "然后", "就", "都", "也", "还", "又", "很",
+            "什么", "怎么", "为什么", "哪", "谁", "几", "多少", "怎样",
+            "吗", "呢", "吧", "啊", "呀", "哦", "嗯", "哈", "嘿",
+            "一个", "一些", "这个", "那个", "不是", "没有", "可以", "会",
+            "能", "要", "想", "去", "来", "说", "看", "做", "给", "让");
 
     private final UserRepository userRepository;
     private final dev.langchain4j.model.embedding.EmbeddingModel embeddingModel;
@@ -68,8 +75,6 @@ public class MemoryServiceImpl implements MemoryService {
     private final ChatModel chatLanguageModel;
     private final DynamicMemoryModel dynamicMemoryModel;
     private final com.lingshu.ai.core.service.SettingService settingService;
-    private final ObjectMapper objectMapper;
-    private FactExtractor factExtractor;
     private FactSemanticClassifier factSemanticClassifier;
     private com.lingshu.ai.core.service.FactRelationshipEvaluator factRelationshipEvaluator;
     private EmotionAwareFactExtractor emotionAwareFactExtractor;
@@ -84,8 +89,7 @@ public class MemoryServiceImpl implements MemoryService {
                              com.lingshu.ai.core.service.SystemLogService systemLogService,
                              com.lingshu.ai.core.service.SettingService settingService,
                              ChatModel chatLanguageModel,
-                             DynamicMemoryModel dynamicMemoryModel,
-                             ObjectMapper objectMapper) {
+                             DynamicMemoryModel dynamicMemoryModel) {
         this.userRepository = userRepository;
         this.embeddingModel = embeddingModel;
         this.embeddingStore = embeddingStore;
@@ -94,19 +98,15 @@ public class MemoryServiceImpl implements MemoryService {
         this.settingService = settingService;
         this.chatLanguageModel = chatLanguageModel;
         this.dynamicMemoryModel = dynamicMemoryModel;
-        this.objectMapper = objectMapper;
     }
 
     @PostConstruct
     public void initAiServices() {
-        this.factExtractor = AiServices.builder(FactExtractor.class)
-                .chatModel(chatLanguageModel)
-                .build();
         this.factRelationshipEvaluator = AiServices.builder(com.lingshu.ai.core.service.FactRelationshipEvaluator.class)
-                .chatModel(chatLanguageModel)
+                .chatModel(dynamicMemoryModel)
                 .build();
         this.factSemanticClassifier = AiServices.builder(FactSemanticClassifier.class)
-                .chatModel(chatLanguageModel)
+                .chatModel(dynamicMemoryModel)
                 .build();
         this.emotionAwareFactExtractor = AiServices.builder(EmotionAwareFactExtractor.class)
                 .chatModel(dynamicMemoryModel)
@@ -124,7 +124,6 @@ public class MemoryServiceImpl implements MemoryService {
         }
     }
 
-
     @Override
     public void extractFacts(String userId, String message) {
         extractFacts(userId, message, null);
@@ -135,98 +134,61 @@ public class MemoryServiceImpl implements MemoryService {
     public void extractFacts(String userId, String message, com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
         final String messageSnapshot = message;
         log.debug("Memory pulse: Analyzing input for cognitive facts: {}", messageSnapshot);
-        systemLogService.info("记忆脉冲: 启动认知事实分析...", "MEMORY");
-        systemLogService.startTimer("fact_extraction");
+        systemLogService.info("事实提取: 开始分析用户消息...", "FACT");
 
-        systemLogService.dbStart("neo4j_query", "User", "MEMORY");
         UserNode user = userRepository.findByName(userId).orElse(null);
-        systemLogService.dbEnd("neo4j_query", "MEMORY");
 
         StringBuilder currentFactsBuilder = new StringBuilder();
         if (user != null && user.getFacts() != null) {
-            systemLogService.debug("用户已有 " + user.getFacts().size() + " 条记忆事实", "MEMORY");
-            user.getFacts().forEach(f ->
-                currentFactsBuilder.append(String.format("[%d] %s; ", f.getId(), f.getContent()))
-            );
-        } else {
-            systemLogService.debug("用户无历史记忆，首次认知分析", "MEMORY");
+            user.getFacts()
+                    .forEach(f -> currentFactsBuilder.append(String.format("[%d] %s; ", f.getId(), f.getContent())));
         }
 
-        boolean useEmotionAwareExtraction = emotion != null && 
-            (emotion.getIntensity() == null || emotion.getIntensity() > 0.3 || 
-             Boolean.TRUE.equals(emotion.getNeedsComfort()));
-
         ExtractionResult extractionResult = null;
-        com.lingshu.ai.core.dto.MemoryUpdate legacyReport = null;
 
-        if (useEmotionAwareExtraction && emotionAwareFactExtractor != null) {
-            systemLogService.info("使用情感感知事实提取器...", "FACT");
-            systemLogService.llmStart("emotion-aware-fact-extractor", "ollama", "FACT");
-            
+        if (emotionAwareFactExtractor != null) {
+            String modelName = dynamicMemoryModel.getModelName();
+            systemLogService.info(String.format("使用情感感知事实提取器 (模型: %s)...", modelName), "FACT");
+            systemLogService.llmStart("emotion-aware-fact-extractor", modelName, "FACT");
+
             try {
-                String triggerKeywords = emotion.getKeywords() != null ? 
-                    String.join(", ", emotion.getKeywords()) : "";
-                
+                String emotionType = (emotion != null && emotion.getEmotion() != null) ? emotion.getEmotion() : "neutral";
+                Double emotionIntensity = (emotion != null && emotion.getIntensity() != null) ? emotion.getIntensity() : 0.0;
+                String triggerKeywords = (emotion != null && emotion.getKeywords() != null) ? String.join(", ", emotion.getKeywords()) : "";
+                Boolean needsComfort = emotion != null ? emotion.getNeedsComfort() : Boolean.FALSE;
+
                 extractionResult = emotionAwareFactExtractor.analyzeWithEmotion(
-                    messageSnapshot,
-                    currentFactsBuilder.toString(),
-                    emotion.getEmotion(),
-                    emotion.getIntensity(),
-                    "stable",
-                    triggerKeywords,
-                    emotion.getNeedsComfort()
-                );
+                        messageSnapshot,
+                        currentFactsBuilder.toString(),
+                        emotionType,
+                        emotionIntensity,
+                        "stable",
+                        triggerKeywords,
+                        needsComfort);
                 systemLogService.llmEnd(0, "FACT");
-                
+
                 if (extractionResult != null) {
-                    systemLogService.info(String.format(
-                        "情感感知提取完成: 情感门控=%s, 新增事实=%d, 删除=%d",
-                        extractionResult.isEmotionGatePassed(),
-                        extractionResult.getNewFacts() != null ? extractionResult.getNewFacts().size() : 0,
-                        extractionResult.getDeletedFactIds() != null ? extractionResult.getDeletedFactIds().size() : 0
-                    ), "FACT");
+                    systemLogService.info("情感感知提取完成: " + extractionResult, "FACT");
                 }
             } catch (Exception e) {
                 log.warn("情感感知事实提取失败，回退到标准提取: {}", e.getMessage());
                 systemLogService.llmError(e.getMessage(), "FACT");
-                extractionResult = null;
             }
         }
 
         if (extractionResult == null) {
-            systemLogService.info("正在调用 LLM 进行事实提取与冲突检测...", "FACT");
-            systemLogService.llmStart("fact-extractor", "ollama", "FACT");
-
-            try {
-                String rawJson = factExtractor.analyze(messageSnapshot, currentFactsBuilder.toString());
-                rawJson = rawJson.replaceAll("(?s)```(json)?", "").trim();
-                legacyReport = objectMapper.readValue(rawJson, com.lingshu.ai.core.dto.MemoryUpdate.class);
-                systemLogService.llmEnd(0, "FACT");
-            } catch (Exception e) {
-                log.error("Failed to parse cognitive report: {}", e.getMessage());
-                systemLogService.llmError(e.getMessage(), "FACT");
-                return;
-            }
-        }
-
-        if (extractionResult == null && legacyReport == null) {
             log.debug("Memory pulse: No cognitive updates required for this message.");
-            systemLogService.info("没有检测到新的认知更新。", "FACT");
+            systemLogService.info("浜嬪疄鎻愬彇瀹屾垚: 鏃犻渶鏇存柊璁板繂", "FACT");
             return;
         }
 
-        if (extractionResult != null) {
-            processExtractionResult(userId, messageSnapshot, user, extractionResult, emotion);
-        } else if (legacyReport != null) {
-            processLegacyReport(userId, messageSnapshot, user, legacyReport, emotion);
-        }
+        processExtractionResult(userId, messageSnapshot, user, extractionResult, emotion);
 
-        systemLogService.endTimer("fact_extraction", "记忆脉冲处理完成", "MEMORY");
     }
 
-    private void processExtractionResult(String userId, String messageSnapshot, UserNode user, 
+    private void processExtractionResult(String userId, String messageSnapshot, UserNode user,
                                          ExtractionResult result, com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
-        log.debug("ExtractionResult received: {} new facts, {} deletions requested",
+        log.debug("提取结果已收到: {} 新事实, {} 请求删除",
                 result.getNewFacts() != null ? result.getNewFacts().size() : 0,
                 result.getDeletedFactIds() != null ? result.getDeletedFactIds().size() : 0);
 
@@ -241,15 +203,15 @@ public class MemoryServiceImpl implements MemoryService {
                             .orElse("Unknown");
                     user.getFacts().removeIf(f -> f.getId() != null && f.getId().equals(id));
                 }
-                log.info("Memory corrected: Removing outdated fact [{}] (ID: {})", factContent, id);
-                systemLogService.info("记忆修正: 移除过时事实 [" + (factContent.length() > 30 ? factContent.substring(0, 30) + "..." : factContent) + "]", "MEMORY");
+                log.info("记忆修正：删除过时事实 [{}] (ID: {})", factContent, id);
+                systemLogService.info("删除过时事实: " + factContent, "FACT");
                 this.deleteFact(id);
             }
         }
 
         if (result.getNewFacts() != null && !result.getNewFacts().isEmpty()) {
             if (user == null) {
-                systemLogService.info("创建新用户节点: " + userId, "MEMORY");
+                systemLogService.info("创建新用户节点: " + userId, "FACT");
                 user = UserNode.builder()
                         .name(userId)
                         .firstEncounter(LocalDateTime.now())
@@ -258,122 +220,37 @@ public class MemoryServiceImpl implements MemoryService {
 
             for (ExtractionResult.ExtractedFact fact : result.getNewFacts()) {
                 if (fact.getContent() == null || fact.getContent().trim().isEmpty()) {
+                    log.error("新事实为空，跳过 {}", fact);
                     continue;
                 }
 
-                log.info("Aha! New emotion-aware fact candidate: {} (type={}, confidence={})", 
-                    fact.getContent(), fact.getType(), fact.getConfidence());
-                
-                FactWriteResult writeResult = persistFactCandidateWithMetadata(
-                    user, fact, messageSnapshot, emotion);
+                log.info("新的情绪感知事实候选: {} (type={}, confidence={})",
+                        fact.getContent(), fact.getType(), fact.getConfidence());
+
+                FactWriteResult writeResult = persistFactCandidateWithMetadata(user, fact, messageSnapshot, emotion);
                 user = writeResult.user;
 
                 if (!writeResult.createdNewFact || writeResult.savedFact == null) {
+                    systemLogService.info("事实去重: 已存在相似事实，跳过 ["
+                            + (fact.getContent().length() > 30 ? fact.getContent().substring(0, 30) + "..."
+                            : fact.getContent())
+                            + "]", "FACT");
                     continue;
                 }
 
+                systemLogService.success("新增事实: " + writeResult.savedFact.getContent(), "FACT");
                 storeFactEmbedding(writeResult.savedFact, messageSnapshot, emotion, fact);
             }
 
             user.setLastSeen(LocalDateTime.now());
-            systemLogService.dbStart("neo4j_update", "User.lastSeen", "MEMORY");
             userRepository.save(user);
-            systemLogService.dbEnd("neo4j_update", "MEMORY");
         }
     }
 
-    private void processLegacyReport(String userId, String messageSnapshot, UserNode user,
-                                     com.lingshu.ai.core.dto.MemoryUpdate report, 
-                                     com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
-        log.debug("Cognitive report received: {} new facts, {} deletions requested",
-                report.getNewFacts() != null ? report.getNewFacts().size() : 0,
-                report.getDeletedFactIds() != null ? report.getDeletedFactIds().size() : 0);
 
-        systemLogService.info(String.format("事实提取分析完成: 新增 %d, 删除 %d",
-                report.getNewFacts() != null ? report.getNewFacts().size() : 0,
-                report.getDeletedFactIds() != null ? report.getDeletedFactIds().size() : 0), "FACT");
-
-        if (report.getDeletedFactIds() != null && !report.getDeletedFactIds().isEmpty()) {
-            for (Long id : report.getDeletedFactIds()) {
-                String factContent = "Unknown";
-                if (user != null && user.getFacts() != null) {
-                    factContent = user.getFacts().stream()
-                            .filter(f -> f.getId() != null && f.getId().equals(id))
-                            .map(f -> f.getContent())
-                            .findFirst()
-                            .orElse("Unknown");
-                    user.getFacts().removeIf(f -> f.getId() != null && f.getId().equals(id));
-                }
-                log.info("Memory corrected: Removing outdated fact [{}] (ID: {})", factContent, id);
-                systemLogService.info("记忆修正: 移除过时事实 [" + (factContent.length() > 30 ? factContent.substring(0, 30) + "..." : factContent) + "]", "MEMORY");
-                this.deleteFact(id);
-            }
-        }
-
-        if (report.getNewFacts() != null && !report.getNewFacts().isEmpty()) {
-            if (user == null) {
-                systemLogService.info("创建新用户节点: " + userId, "MEMORY");
-                user = UserNode.builder()
-                        .name(userId)
-                        .firstEncounter(LocalDateTime.now())
-                        .build();
-            }
-
-            for (String fact : report.getNewFacts()) {
-                if (fact == null || fact.trim().isEmpty() || fact.equals("[]")) {
-                    log.debug("Memory pulse: Skipping invalid or empty fact candidate.");
-                    continue;
-                }
-
-                log.info("Aha! New persistent fact candidate: {}", fact);
-                FactWriteResult writeResult = persistFactCandidate(user, fact.trim(), messageSnapshot, emotion);
-                user = writeResult.user;
-
-                if (!writeResult.createdNewFact || writeResult.savedFact == null) {
-                    continue;
-                }
-
-                String emotionalToneStr;
-                if (emotion != null) {
-                    emotionalToneStr = emotion.getEmotion();
-                } else {
-                    emotionalToneStr = inferEmotionalToneFromKeywords(messageSnapshot);
-                }
-
-                java.util.Map<String, String> metadata = new java.util.HashMap<>();
-                if (writeResult.savedFact.getId() != null) {
-                    metadata.put("fact_id", writeResult.savedFact.getId().toString());
-                }
-                metadata.put("emotional_tone", emotionalToneStr);
-                metadata.put("category", writeResult.savedFact.getClusterKey() != null ? writeResult.savedFact.getClusterKey() : "unknown");
-                metadata.put("timestamp", java.time.LocalDateTime.now().toString());
-
-                String fullContext = String.format(
-                        "用户记录原始消息：%s|||提取事实陈述：%s",
-                        messageSnapshot != null ? messageSnapshot : "无记录",
-                        writeResult.savedFact.getContent()
-                );
-                TextSegment segment = TextSegment.from(fullContext, new dev.langchain4j.data.document.Metadata(metadata));
-
-                systemLogService.embeddingStart(writeResult.savedFact.getContent().length(), "MEMORY");
-                try {
-                    dev.langchain4j.data.embedding.Embedding embedding = embeddingModel.embed(segment).content();
-                    embeddingStore.add(embedding, segment);
-                    systemLogService.embeddingEnd("MEMORY");
-                } catch (Exception e) {
-                    systemLogService.error("Embedding向量化失败: " + e.getMessage(), "MEMORY");
-                }
-            }
-
-            user.setLastSeen(LocalDateTime.now());
-            systemLogService.dbStart("neo4j_update", "User.lastSeen", "MEMORY");
-            userRepository.save(user);
-            systemLogService.dbEnd("neo4j_update", "MEMORY");
-        }
-    }
-
-    private FactWriteResult persistFactCandidateWithMetadata(UserNode user, ExtractionResult.ExtractedFact extractedFact,
-                                                              String originalMessage, com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
+    private FactWriteResult persistFactCandidateWithMetadata(UserNode user,
+                                                             ExtractionResult.ExtractedFact extractedFact,
+                                                             String originalMessage, com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
         LocalDateTime now = LocalDateTime.now();
         String factText = extractedFact.getContent();
         String normalized = normalizeSemanticText(factText);
@@ -390,26 +267,26 @@ public class MemoryServiceImpl implements MemoryService {
             return new FactWriteResult(user, exactMatch, false);
         }
 
-        double confidence = extractedFact.getConfidence() != null ? 
-            extractedFact.getConfidence().getValue() : semanticProfile.confidence;
-        
+        double confidence = extractedFact.getConfidence() != null ? extractedFact.getConfidence().getValue()
+                : semanticProfile.confidence;
+
         FactNode factNode = buildNewFactNodeWithMetadata(
-            factText, normalized, clusterKey, subType, 
-            confidence, semanticProfile.source, now, originalMessage, emotion, extractedFact);
-        
+                factText, normalized, clusterKey, subType,
+                confidence, semanticProfile.source, now, originalMessage, emotion, extractedFact);
+
         return saveNewFact(user, factNode);
     }
 
     private FactNode buildNewFactNodeWithMetadata(String factText, String normalized, String clusterKey, String subType,
-                                                   double semanticConfidence, String source, LocalDateTime now,
-                                                   String originalMessage, com.lingshu.ai.core.dto.EmotionAnalysis emotion,
-                                                   ExtractionResult.ExtractedFact extractedFact) {
+                                                  double semanticConfidence, String source, LocalDateTime now,
+                                                  String originalMessage, com.lingshu.ai.core.dto.EmotionAnalysis emotion,
+                                                  ExtractionResult.ExtractedFact extractedFact) {
         double baseImportance = 0.8;
         if (emotion != null && emotion.getIntensity() != null) {
             double intensityBoost = emotion.getIntensity() * 0.2;
             baseImportance = Math.min(1.0, baseImportance + intensityBoost);
         }
-        
+
         String toneStr = "neutral";
         if (emotion != null && emotion.getEmotion() != null) {
             toneStr = emotion.getEmotion();
@@ -418,8 +295,8 @@ public class MemoryServiceImpl implements MemoryService {
         }
 
         String factStatus = extractedFact.isVolatile() ? "volatile" : "active";
-        double confidence = extractedFact.getConfidence() != null ? 
-            extractedFact.getConfidence().getValue() : semanticConfidence;
+        double confidence = extractedFact.getConfidence() != null ? extractedFact.getConfidence().getValue()
+                : semanticConfidence;
 
         return FactNode.builder()
                 .content(factText)
@@ -439,11 +316,12 @@ public class MemoryServiceImpl implements MemoryService {
                 .version(1)
                 .originalMessage(originalMessage)
                 .emotionalTone(toneStr)
-                .involvedEntities(java.util.Optional.ofNullable(extractEntities(factText)).filter(l -> !l.isEmpty()).map(java.util.HashSet::new).orElse(null))
+                .involvedEntities(java.util.Optional.ofNullable(extractEntities(factText)).filter(l -> !l.isEmpty())
+                        .map(java.util.HashSet::new).orElse(null))
                 .build();
     }
 
-    private void storeFactEmbedding(FactNode savedFact, String messageSnapshot, 
+    private void storeFactEmbedding(FactNode savedFact, String messageSnapshot,
                                     com.lingshu.ai.core.dto.EmotionAnalysis emotion,
                                     ExtractionResult.ExtractedFact extractedFact) {
         String emotionalToneStr;
@@ -461,9 +339,10 @@ public class MemoryServiceImpl implements MemoryService {
         metadata.put("category", savedFact.getClusterKey() != null ? savedFact.getClusterKey() : "unknown");
         metadata.put("timestamp", java.time.LocalDateTime.now().toString());
         metadata.put("fact_type", extractedFact.getType() != null ? extractedFact.getType().name() : "UNKNOWN");
-        metadata.put("confidence", String.valueOf(extractedFact.getConfidence() != null ? extractedFact.getConfidence().getValue() : 0.7));
+        metadata.put("confidence",
+                String.valueOf(extractedFact.getConfidence() != null ? extractedFact.getConfidence().getValue() : 0.7));
         metadata.put("volatile", String.valueOf(extractedFact.isVolatile()));
-        
+
         if (extractedFact.getTriggerKeywords() != null && !extractedFact.getTriggerKeywords().isEmpty()) {
             metadata.put("trigger_keywords", String.join(",", extractedFact.getTriggerKeywords()));
         }
@@ -471,8 +350,7 @@ public class MemoryServiceImpl implements MemoryService {
         String fullContext = String.format(
                 "用户记录原始消息：%s|||提取事实陈述：%s",
                 messageSnapshot != null ? messageSnapshot : "无记录",
-                savedFact.getContent()
-        );
+                savedFact.getContent());
         TextSegment segment = TextSegment.from(fullContext, new dev.langchain4j.data.document.Metadata(metadata));
 
         systemLogService.embeddingStart(savedFact.getContent().length(), "MEMORY");
@@ -486,7 +364,8 @@ public class MemoryServiceImpl implements MemoryService {
     }
 
     private String inferEmotionalToneFromKeywords(String message) {
-        if (message == null) return "neutral";
+        if (message == null)
+            return "neutral";
         String lower = message.toLowerCase();
         if (lower.matches(".*(开心|高兴|喜欢|爱|棒|good|happy|love).*"))
             return "positive";
@@ -498,7 +377,8 @@ public class MemoryServiceImpl implements MemoryService {
     @Override
     public String retrieveContext(String userId, String message) {
         StringBuilder contextBuilder = new StringBuilder();
-        com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder = com.lingshu.ai.core.dto.MemoryRetrievalEvent.builder()
+        com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder = com.lingshu.ai.core.dto.MemoryRetrievalEvent
+                .builder()
                 .query(message)
                 .timestamp(LocalDateTime.now())
                 .extractedEntities(new ArrayList<>())
@@ -508,51 +388,58 @@ public class MemoryServiceImpl implements MemoryService {
 
         List<String> entities = extractEntities(message);
 
-        systemLogService.dbStart("neo4j_query", "User.facts", "MEMORY");
         userRepository.findByName(userId).ifPresentOrElse(user -> {
-            log.info("Graph Retrieval: Found {} facts for user {}", user.getFacts() != null ? user.getFacts().size() : 0, userId);
-            int factCount = user.getFacts() != null ? user.getFacts().size() : 0;
-            systemLogService.info("图谱检索: 找到用户 " + userId + " 的 " + factCount + " 条既定事实", "MEMORY");
-            
+            log.info("Graph Retrieval: Found {} facts for user {}",
+                    user.getFacts() != null ? user.getFacts().size() : 0, userId);
+            systemLogService.debug(String.format("图谱检索: 找到用户 %s 的 %d 条事实", userId,
+                    user.getFacts() != null ? user.getFacts().size() : 0), "MEMORY");
+
             if (user.getFacts() != null && !user.getFacts().isEmpty()) {
                 List<FactNode> relevantFacts;
-                
+
                 if (!entities.isEmpty()) {
-                    // 1. 关键词匹配：提取与当前消息实体相关的记忆
                     relevantFacts = user.getFacts().stream()
-                        .filter(f -> entities.stream().anyMatch(e -> f.getContent().toLowerCase().contains(e.toLowerCase())))
-                        .sorted((f1, f2) -> Double.compare(f2.getImportance(), f1.getImportance()))
-                        .limit(8)
-                        .collect(Collectors.toList());
-                    
+                            .filter(f -> entities.stream()
+                                    .anyMatch(e -> f.getContent().toLowerCase().contains(e.toLowerCase())))
+                            .sorted((f1, f2) -> Double.compare(f2.getImportance(), f1.getImportance()))
+                            .limit(8)
+                            .collect(Collectors.toList());
+
                     log.debug("Found {} relevant facts by entities: {}", relevantFacts.size(), entities);
+                    systemLogService.debug(String.format("图谱检索: 根据实体 %s 匹配到 %d 条相关事实", entities, relevantFacts.size()),
+                            "MEMORY");
                 } else {
                     relevantFacts = new ArrayList<>();
                 }
 
-                // 2. 核心记忆补充：如果是身份查询或相关记忆不足，补充高重要度事实
-                if (relevantFacts.size() < 3 || message.contains("我是谁") || message.contains("我的名字") || message.contains("叫什么")) {
+                if (relevantFacts.size() < 3 || message.contains("我是谁") || message.contains("我的名字")
+                        || message.contains("叫什么")) {
                     List<FactNode> coreFacts = user.getFacts().stream()
-                        .filter(f -> !relevantFacts.contains(f))
-                        .sorted((f1, f2) -> Double.compare(f2.getImportance(), f1.getImportance()))
-                        .limit(5 - relevantFacts.size() > 0 ? 5 - relevantFacts.size() : 2)
-                        .toList();
+                            .filter(f -> !relevantFacts.contains(f))
+                            .sorted((f1, f2) -> Double.compare(f2.getImportance(), f1.getImportance()))
+                            .limit(5 - relevantFacts.size() > 0 ? 5 - relevantFacts.size() : 2)
+                            .toList();
                     relevantFacts.addAll(coreFacts);
+                    systemLogService.debug(String.format("图谱检索: 补充了 %d 条核心事实", coreFacts.size()), "MEMORY");
                 }
 
                 if (!relevantFacts.isEmpty()) {
                     contextBuilder.append("关于用户的已知事实：\n");
+                    systemLogService.info(String.format("图谱检索完成，共获取到 %d 条相关事实:", relevantFacts.size()), "MEMORY");
                     relevantFacts.forEach(f -> {
                         log.debug("  Fact: {}", f.getContent());
                         contextBuilder.append("- ").append(f.getContent()).append("\n");
+                        systemLogService.info(String.format("  - %s (重要度: %.2f)", f.getContent(), f.getImportance()),
+                                "MEMORY");
                     });
+                } else {
+                    systemLogService.debug("图谱检索: 未找到与当前对话相关的事实", "MEMORY");
                 }
             }
         }, () -> {
             log.warn("Graph Retrieval: User {} not found in Neo4j", userId);
-            systemLogService.warn("图谱检索: 未在 Neo4j 中找到用户 " + userId + " 的节点", "MEMORY");
+            systemLogService.warn(String.format("图谱检索: 未找到用户 %s 的节点", userId), "MEMORY");
         });
-        systemLogService.dbEnd("neo4j_query", "MEMORY");
 
         if (!needsSemanticRetrieval(message, entities, eventBuilder)) {
             recordRetrievalEvent(eventBuilder.build());
@@ -560,11 +447,8 @@ public class MemoryServiceImpl implements MemoryService {
         }
 
         log.debug("Semantic Retrieval: Querying vector store for: {}", message);
-        systemLogService.embeddingStart(message.length(), "MEMORY");
+        systemLogService.debug(String.format("语义检索: 开始在向量库中查询 '%s'", message), "MEMORY");
         dev.langchain4j.data.embedding.Embedding queryEmbedding = embeddingModel.embed(message).content();
-        systemLogService.embeddingEnd("MEMORY");
-
-        systemLogService.dbStart("pgvector_query", "embeddingStore", "MEMORY");
 
         EmbeddingSearchRequest searchRequest = EmbeddingSearchRequest.builder()
                 .queryEmbedding(queryEmbedding)
@@ -573,8 +457,6 @@ public class MemoryServiceImpl implements MemoryService {
                 .build();
         EmbeddingSearchResult<TextSegment> searchResult = embeddingStore.search(searchRequest);
         List<EmbeddingMatch<TextSegment>> matches = searchResult.matches();
-
-        systemLogService.dbEnd("pgvector_query", "MEMORY");
 
         List<com.lingshu.ai.core.dto.MemoryRetrievalEvent.SemanticMatch> semanticMatches = new ArrayList<>();
         List<Long> finalRankedIds = new ArrayList<>();
@@ -598,7 +480,7 @@ public class MemoryServiceImpl implements MemoryService {
 
                 log.trace("Match text: {} (score: {})", matchText, score);
                 contextBuilder.append(matchText).append(" (relevant); ");
-                String abbreviated = displayText.length() > 40 ? displayText.substring(0, 40) + "..." : displayText;
+                String abbreviated = displayText.length() > 50 ? displayText.substring(0, 50) + "..." : displayText;
                 systemLogService.info(String.format("  [%d] 相似度: %.3f | 内容: %s", i + 1, score, abbreviated), "MEMORY");
 
                 Long factId = null;
@@ -610,7 +492,8 @@ public class MemoryServiceImpl implements MemoryService {
                         // ignore
                     }
                 }
-                semanticMatches.add(new com.lingshu.ai.core.dto.MemoryRetrievalEvent.SemanticMatch(factId, score, displayText));
+                semanticMatches.add(
+                        new com.lingshu.ai.core.dto.MemoryRetrievalEvent.SemanticMatch(factId, score, displayText));
             }
         } else {
             log.debug("Semantic Retrieval: No relevant segments above threshold.");
@@ -624,7 +507,8 @@ public class MemoryServiceImpl implements MemoryService {
         return contextBuilder.toString();
     }
 
-    private boolean needsSemanticRetrieval(String message, List<String> entities, com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder) {
+    private boolean needsSemanticRetrieval(String message, List<String> entities,
+                                           com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder) {
         if (message == null || message.trim().isEmpty()) {
             return false;
         }
@@ -635,9 +519,7 @@ public class MemoryServiceImpl implements MemoryService {
             return false;
         }
 
-        systemLogService.dbStart("neo4j_query", "Fact.activation", "MEMORY");
         List<FactNode> activatedFacts = factRepository.findFactsByKeywords(entities);
-        systemLogService.dbEnd("neo4j_query", "MEMORY");
 
         eventBuilder.graphMatchedIds(activatedFacts.stream().map(FactNode::getId).collect(Collectors.toList()));
 
@@ -648,7 +530,7 @@ public class MemoryServiceImpl implements MemoryService {
 
         double gain = calculateGain(entities, activatedFacts);
         systemLogService.info(String.format("GAM-RAG: 激活 %d 个实体，命中 %d 条事实，增益=%.2f",
-            entities.size(), activatedFacts.size(), gain), "MEMORY");
+                entities.size(), activatedFacts.size(), gain), "MEMORY");
 
         return gain >= GAIN_THRESHOLD;
     }
@@ -661,10 +543,11 @@ public class MemoryServiceImpl implements MemoryService {
         List<String> entities = new java.util.ArrayList<>();
         try {
             if (entityExtractor != null) {
-                systemLogService.llmStart("entity-extractor", "ollama", "MEMORY");
+                String modelName = dynamicMemoryModel.getModelName();
+                systemLogService.llmStart("entity-extractor", modelName, "MEMORY");
                 List<String> extracted = entityExtractor.extractEntities(message);
                 systemLogService.llmEnd(0, "MEMORY");
-                
+
                 if (extracted != null) {
                     for (String word : extracted) {
                         if (word != null && !word.trim().isEmpty() && !STOP_WORDS.contains(word.toLowerCase())) {
@@ -753,7 +636,8 @@ public class MemoryServiceImpl implements MemoryService {
                 }
 
                 String topicKey = deriveTopicKey(fact);
-                TopicAggregate topic = topics.computeIfAbsent(topicKey, key -> new TopicAggregate(key, displayTopicName(key)));
+                TopicAggregate topic = topics.computeIfAbsent(topicKey,
+                        key -> new TopicAggregate(key, displayTopicName(key)));
                 topic.include(fact, activityScore);
                 topic.userIds.add(userNodeId);
                 factContexts.add(new FactContext(userNodeId, topicKey, fact));
@@ -777,9 +661,11 @@ public class MemoryServiceImpl implements MemoryService {
                 TopicAggregate topic = topics.get(topicKey);
                 nodes.add(buildFactNode(fact, topicKey, topic != null ? topic.orbitLevel : 2, now));
                 if (topic != null) {
-                    links.add(buildLink(topic.id, "fact_" + fact.getId(), "BELONGS_TO_TOPIC", fact.getImportance(), fact.getObservedAt()));
+                    links.add(buildLink(topic.id, "fact_" + fact.getId(), "BELONGS_TO_TOPIC", fact.getImportance(),
+                            fact.getObservedAt()));
                 } else {
-                    links.add(buildLink("user_" + user.getName(), "fact_" + fact.getId(), "HAS_FACT", fact.getImportance(), fact.getObservedAt()));
+                    links.add(buildLink("user_" + user.getName(), "fact_" + fact.getId(), "HAS_FACT",
+                            fact.getImportance(), fact.getObservedAt()));
                 }
             }
         }
@@ -814,7 +700,8 @@ public class MemoryServiceImpl implements MemoryService {
     private Map<String, Object> buildUserNode(UserNode user, String nodeId, LocalDateTime now) {
         Map<String, Object> node = new LinkedHashMap<>();
         node.put("id", nodeId);
-        node.put("label", user.getNickname() != null && !user.getNickname().isBlank() ? user.getNickname() : user.getName());
+        node.put("label",
+                user.getNickname() != null && !user.getNickname().isBlank() ? user.getNickname() : user.getName());
         node.put("shortLabel", user.getName());
         node.put("type", "User");
         node.put("subType", "Core");
@@ -849,28 +736,36 @@ public class MemoryServiceImpl implements MemoryService {
     }
 
     private Map<String, Object> buildFactNode(FactNode fact, String topicKey, int orbitLevel, LocalDateTime now) {
-        double activityScore = fact.getActivityScore() > 0 ? fact.getActivityScore() : calculateActivityScore(fact.getLastActivatedAt() != null ? fact.getLastActivatedAt() : fact.getObservedAt(), now);
+        double activityScore = fact.getActivityScore() > 0 ? fact.getActivityScore()
+                : calculateActivityScore(
+                fact.getLastActivatedAt() != null ? fact.getLastActivatedAt() : fact.getObservedAt(), now);
         Map<String, Object> node = new LinkedHashMap<>();
         node.put("id", "fact_" + fact.getId());
         node.put("label", fact.getContent());
         node.put("shortLabel", shortenLabel(fact.getContent(), 18));
         node.put("type", "Fact");
-        node.put("subType", fact.getSubType() != null && !fact.getSubType().isBlank() ? fact.getSubType() : inferFactSubType(fact));
+        node.put("subType",
+                fact.getSubType() != null && !fact.getSubType().isBlank() ? fact.getSubType() : inferFactSubType(fact));
         node.put("importance", round(fact.getImportance()));
-        node.put("confidence", round(fact.getConfidence() > 0 ? fact.getConfidence() : Math.min(0.95, Math.max(0.55, fact.getImportance() + 0.08))));
+        node.put("confidence", round(fact.getConfidence() > 0 ? fact.getConfidence()
+                : Math.min(0.95, Math.max(0.55, fact.getImportance() + 0.08))));
         node.put("activityScore", round(activityScore));
-        node.put("cluster", fact.getClusterKey() != null && !fact.getClusterKey().isBlank() ? fact.getClusterKey() : topicKey);
+        node.put("cluster",
+                fact.getClusterKey() != null && !fact.getClusterKey().isBlank() ? fact.getClusterKey() : topicKey);
         node.put("orbitLevel", orbitLevel > 0 ? orbitLevel : calculateOrbitLevel(fact.getImportance(), activityScore));
         node.put("createdAt", formatDateTime(fact.getObservedAt()));
-        node.put("lastActivatedAt", formatDateTime(fact.getLastActivatedAt() != null ? fact.getLastActivatedAt() : fact.getObservedAt()));
-        node.put("status", fact.getStatus() != null && !fact.getStatus().isBlank() ? fact.getStatus() : (activityScore >= 0.75 ? "active" : activityScore >= 0.38 ? "stable" : "cool"));
+        node.put("lastActivatedAt",
+                formatDateTime(fact.getLastActivatedAt() != null ? fact.getLastActivatedAt() : fact.getObservedAt()));
+        node.put("status", fact.getStatus() != null && !fact.getStatus().isBlank() ? fact.getStatus()
+                : (activityScore >= 0.75 ? "active" : activityScore >= 0.38 ? "stable" : "cool"));
         node.put("version", fact.getVersion());
         node.put("supersedesFactId", fact.getSupersedesFactId());
         node.put("contradictsFactId", fact.getContradictsFactId());
         return node;
     }
 
-    private Map<String, Object> buildLink(String source, String target, String type, double weight, LocalDateTime lastActivatedAt) {
+    private Map<String, Object> buildLink(String source, String target, String type, double weight,
+                                          LocalDateTime lastActivatedAt) {
         Map<String, Object> link = new LinkedHashMap<>();
         link.put("source", source);
         link.put("target", target);
@@ -883,10 +778,12 @@ public class MemoryServiceImpl implements MemoryService {
     private List<Map<String, Object>> buildInferredFactLinks(List<FactContext> factContexts) {
         List<Map<String, Object>> links = new ArrayList<>();
         Map<String, List<FactContext>> grouped = factContexts.stream()
-                .collect(Collectors.groupingBy(ctx -> ctx.userNodeId + "::" + ctx.topicKey, LinkedHashMap::new, Collectors.toList()));
+                .collect(Collectors.groupingBy(ctx -> ctx.userNodeId + "::" + ctx.topicKey, LinkedHashMap::new,
+                        Collectors.toList()));
 
         for (List<FactContext> group : grouped.values()) {
-            group.sort(Comparator.comparing(ctx -> ctx.fact.getObservedAt(), Comparator.nullsLast(Comparator.naturalOrder())));
+            group.sort(Comparator.comparing(ctx -> ctx.fact.getObservedAt(),
+                    Comparator.nullsLast(Comparator.naturalOrder())));
             for (int i = 0; i < group.size(); i++) {
                 for (int j = i + 1; j < Math.min(group.size(), i + 4); j++) {
                     FactContext older = group.get(i);
@@ -895,9 +792,12 @@ public class MemoryServiceImpl implements MemoryService {
                     if (guess == null) {
                         continue;
                     }
-                    String source = guess.type.equals("SUPERSEDES") ? "fact_" + newer.fact.getId() : "fact_" + older.fact.getId();
-                    String target = guess.type.equals("SUPERSEDES") ? "fact_" + older.fact.getId() : "fact_" + newer.fact.getId();
-                    LocalDateTime activatedAt = newer.fact.getObservedAt() != null ? newer.fact.getObservedAt() : older.fact.getObservedAt();
+                    String source = guess.type.equals("SUPERSEDES") ? "fact_" + newer.fact.getId()
+                            : "fact_" + older.fact.getId();
+                    String target = guess.type.equals("SUPERSEDES") ? "fact_" + older.fact.getId()
+                            : "fact_" + newer.fact.getId();
+                    LocalDateTime activatedAt = newer.fact.getObservedAt() != null ? newer.fact.getObservedAt()
+                            : older.fact.getObservedAt();
                     links.add(buildLink(source, target, guess.type, guess.weight, activatedAt));
                 }
             }
@@ -920,9 +820,12 @@ public class MemoryServiceImpl implements MemoryService {
         List<Map<String, Object>> inferred = buildInferredFactLinks(factContexts);
         factRepository.deleteFactRelationsByFactIds(factIds);
 
-        List<Map<String, Object>> related = inferred.stream().filter(link -> "RELATED_TO".equals(link.get("type"))).collect(Collectors.toList());
-        List<Map<String, Object>> supersedes = inferred.stream().filter(link -> "SUPERSEDES".equals(link.get("type"))).collect(Collectors.toList());
-        List<Map<String, Object>> contradicts = inferred.stream().filter(link -> "CONTRADICTS".equals(link.get("type"))).collect(Collectors.toList());
+        List<Map<String, Object>> related = inferred.stream().filter(link -> "RELATED_TO".equals(link.get("type")))
+                .collect(Collectors.toList());
+        List<Map<String, Object>> supersedes = inferred.stream().filter(link -> "SUPERSEDES".equals(link.get("type")))
+                .collect(Collectors.toList());
+        List<Map<String, Object>> contradicts = inferred.stream().filter(link -> "CONTRADICTS".equals(link.get("type")))
+                .collect(Collectors.toList());
 
         if (!related.isEmpty()) {
             factRepository.saveRelatedRelations(prepareRelationRows(related));
@@ -951,9 +854,9 @@ public class MemoryServiceImpl implements MemoryService {
                     Map<String, Object> link = new LinkedHashMap<>();
                     link.put("source", "fact_" + row.getSourceId());
                     link.put("target", "fact_" + row.getTargetId());
-                    link.put("type", row.getType());
-                    link.put("weight", row.getWeight());
-                    link.put("lastActivatedAt", row.getLastActivatedAt());
+                    link.put("type", row.getRelationType());
+                    link.put("weight", row.getWeight() != null ? row.getWeight() : 0.5d);
+                    link.put("lastActivatedAt", formatDateTime(castLocalDateTime(row.getLastActivatedAt())));
                     return link;
                 })
                 .collect(Collectors.toList());
@@ -965,7 +868,7 @@ public class MemoryServiceImpl implements MemoryService {
             row.put("sourceId", castLong(String.valueOf(link.get("source")).replace("fact_", "")));
             row.put("targetId", castLong(String.valueOf(link.get("target")).replace("fact_", "")));
             row.put("weight", link.get("weight"));
-            row.put("lastActivatedAt", link.get("lastActivatedAt"));
+            row.put("lastActivatedAt", castLocalDateTime(link.get("lastActivatedAt")));
             return row;
         }).collect(Collectors.toList());
     }
@@ -986,6 +889,33 @@ public class MemoryServiceImpl implements MemoryService {
         return Long.parseLong(String.valueOf(value));
     }
 
+    private LocalDateTime castLocalDateTime(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof LocalDateTime localDateTime) {
+            return localDateTime;
+        }
+        String raw = String.valueOf(value).trim();
+        if (raw.isEmpty() || "null".equalsIgnoreCase(raw)) {
+            return null;
+        }
+        try {
+            return LocalDateTime.parse(raw);
+        } catch (Exception ignored) {
+        }
+        try {
+            return OffsetDateTime.parse(raw).toLocalDateTime();
+        } catch (Exception ignored) {
+        }
+        try {
+            return ZonedDateTime.parse(raw).toLocalDateTime();
+        } catch (Exception ignored) {
+        }
+        log.warn("Skipping invalid relation timestamp: {}", raw);
+        return null;
+    }
+
     private RelationshipGuess guessFactRelationship(FactNode left, FactNode right) {
         String leftContent = left.getContent() == null ? "" : left.getContent().trim();
         String rightContent = right.getContent() == null ? "" : right.getContent().trim();
@@ -996,11 +926,13 @@ public class MemoryServiceImpl implements MemoryService {
         if (factRelationshipEvaluator != null) {
             try {
                 systemLogService.llmStart("fact-relationship-evaluator-guess", "ollama", "FACT");
-                com.lingshu.ai.core.dto.FactRelationshipResult relResult = factRelationshipEvaluator.evaluate(leftContent, rightContent);
+                com.lingshu.ai.core.dto.FactRelationshipResult relResult = factRelationshipEvaluator
+                        .evaluate(leftContent, rightContent);
                 systemLogService.llmEnd(0, "FACT");
                 if (relResult != null) {
                     if (!"NONE".equals(relResult.getType())) {
-                        return new RelationshipGuess(relResult.getType(), relResult.getConfidence() > 0 ? relResult.getConfidence() : 0.8);
+                        return new RelationshipGuess(relResult.getType(),
+                                relResult.getConfidence() > 0 ? relResult.getConfidence() : 0.8);
                     }
                     return null;
                 }
@@ -1072,7 +1004,8 @@ public class MemoryServiceImpl implements MemoryService {
         return (leftPositive && rightNegative) || (rightPositive && leftNegative);
     }
 
-    private FactWriteResult persistFactCandidate(UserNode user, String factText, String originalMessage, com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
+    private FactWriteResult persistFactCandidate(UserNode user, String factText, String originalMessage,
+                                                 com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
         LocalDateTime now = LocalDateTime.now();
         String normalized = normalizeSemanticText(factText);
         SemanticProfile semanticProfile = classifyFactSemantics(factText, user);
@@ -1093,16 +1026,22 @@ public class MemoryServiceImpl implements MemoryService {
 
         try {
             systemLogService.embeddingStart(factText.length(), "MEMORY");
-            dev.langchain4j.data.embedding.Embedding queryEmbedding = embeddingModel.embed(factText).content();
+            CompletableFuture<dev.langchain4j.data.embedding.Embedding> embedFuture = CompletableFuture.supplyAsync(
+                    () -> embeddingModel.embed(factText).content());
+            dev.langchain4j.data.embedding.Embedding queryEmbedding = embedFuture.get(HISTORY_EMBED_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             systemLogService.embeddingEnd("MEMORY");
 
             systemLogService.dbStart("pgvector_query", "embeddingStore", "MEMORY");
-            dev.langchain4j.store.embedding.EmbeddingSearchRequest searchRequest = dev.langchain4j.store.embedding.EmbeddingSearchRequest.builder()
+            dev.langchain4j.store.embedding.EmbeddingSearchRequest searchRequest = dev.langchain4j.store.embedding.EmbeddingSearchRequest
+                    .builder()
                     .queryEmbedding(queryEmbedding)
                     .maxResults(5)
                     .minScore(0.5)
                     .build();
-            dev.langchain4j.store.embedding.EmbeddingSearchResult<dev.langchain4j.data.segment.TextSegment> searchResult = embeddingStore.search(searchRequest);
+            CompletableFuture<dev.langchain4j.store.embedding.EmbeddingSearchResult<dev.langchain4j.data.segment.TextSegment>> searchFuture =
+                    CompletableFuture.supplyAsync(() -> embeddingStore.search(searchRequest));
+            dev.langchain4j.store.embedding.EmbeddingSearchResult<dev.langchain4j.data.segment.TextSegment> searchResult =
+                    searchFuture.get(HISTORY_SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             systemLogService.dbEnd("pgvector_query", "MEMORY");
 
             List<Long> userFactIds = user.getFacts().stream()
@@ -1110,18 +1049,24 @@ public class MemoryServiceImpl implements MemoryService {
                     .map(FactNode::getId)
                     .collect(Collectors.toList());
 
-            for (dev.langchain4j.store.embedding.EmbeddingMatch<dev.langchain4j.data.segment.TextSegment> match : searchResult.matches()) {
+            for (dev.langchain4j.store.embedding.EmbeddingMatch<dev.langchain4j.data.segment.TextSegment> match : searchResult
+                    .matches()) {
                 String factIdStr = match.embedded().metadata().getString("fact_id");
-                if (factIdStr == null) continue;
+                if (factIdStr == null)
+                    continue;
                 Long factId = Long.parseLong(factIdStr);
-                if (!userFactIds.contains(factId)) continue;
+                if (!userFactIds.contains(factId))
+                    continue;
 
-                FactNode existingFact = user.getFacts().stream().filter(f -> f.getId().equals(factId)).findFirst().orElse(null);
-                if (existingFact == null) continue;
+                FactNode existingFact = user.getFacts().stream().filter(f -> f.getId().equals(factId)).findFirst()
+                        .orElse(null);
+                if (existingFact == null)
+                    continue;
 
                 if (factRelationshipEvaluator != null) {
                     systemLogService.llmStart("fact-relationship-evaluator", "ollama", "FACT");
-                    com.lingshu.ai.core.dto.FactRelationshipResult relResult = factRelationshipEvaluator.evaluate(existingFact.getContent() == null ? "" : existingFact.getContent(), factText);
+                    com.lingshu.ai.core.dto.FactRelationshipResult relResult = factRelationshipEvaluator
+                            .evaluate(existingFact.getContent() == null ? "" : existingFact.getContent(), factText);
                     systemLogService.llmEnd(0, "FACT");
 
                     if (relResult != null && !"NONE".equals(relResult.getType())) {
@@ -1138,8 +1083,10 @@ public class MemoryServiceImpl implements MemoryService {
             double bestSimilarity = 0.0;
             boolean contradiction = false;
             for (FactNode existing : user.getFacts()) {
-                double similarity = lexicalSimilarity(normalized, normalizeSemanticText(existing.getContent() == null ? "" : existing.getContent()));
-                boolean candidateContradiction = isContradictory(existing.getContent() == null ? "" : existing.getContent(), factText);
+                double similarity = lexicalSimilarity(normalized,
+                        normalizeSemanticText(existing.getContent() == null ? "" : existing.getContent()));
+                boolean candidateContradiction = isContradictory(
+                        existing.getContent() == null ? "" : existing.getContent(), factText);
                 if (candidateContradiction && similarity >= 0.22) {
                     bestMatch = existing;
                     bestSimilarity = similarity;
@@ -1168,7 +1115,8 @@ public class MemoryServiceImpl implements MemoryService {
             bestMatch.setLastActivatedAt(now);
             bestMatch.setActivityScore(calculateActivityScore(now, now));
             factRepository.save(bestMatch);
-            FactNode factNode = buildNewFactNode(factText, normalized, clusterKey, subType, semanticProfile.confidence, semanticProfile.source, now, originalMessage, emotion);
+            FactNode factNode = buildNewFactNode(factText, normalized, clusterKey, subType, semanticProfile.confidence,
+                    semanticProfile.source, now, originalMessage, emotion);
             factNode.setContradictsFactId(bestMatch.getId());
             factNode.setStatus("conflicted");
             systemLogService.info("检测到冲突记忆，创建冲突版本: " + shortenLabel(factText, 24), "MEMORY");
@@ -1180,7 +1128,8 @@ public class MemoryServiceImpl implements MemoryService {
             bestMatch.setLastActivatedAt(now);
             bestMatch.setActivityScore(calculateActivityScore(now, now));
             factRepository.save(bestMatch);
-            FactNode factNode = buildNewFactNode(factText, normalized, clusterKey, subType, semanticProfile.confidence, semanticProfile.source, now, originalMessage, emotion);
+            FactNode factNode = buildNewFactNode(factText, normalized, clusterKey, subType, semanticProfile.confidence,
+                    semanticProfile.source, now, originalMessage, emotion);
             factNode.setSupersedesFactId(bestMatch.getId());
             factNode.setVersion((bestMatch.getVersion() == null ? 1 : bestMatch.getVersion()) + 1);
             factNode.setStatus("active");
@@ -1188,7 +1137,8 @@ public class MemoryServiceImpl implements MemoryService {
             return saveNewFact(user, factNode);
         }
 
-        FactNode factNode = buildNewFactNode(factText, normalized, clusterKey, subType, semanticProfile.confidence, semanticProfile.source, now, originalMessage, emotion);
+        FactNode factNode = buildNewFactNode(factText, normalized, clusterKey, subType, semanticProfile.confidence,
+                semanticProfile.source, now, originalMessage, emotion);
         return saveNewFact(user, factNode);
     }
 
@@ -1207,13 +1157,15 @@ public class MemoryServiceImpl implements MemoryService {
         return new FactWriteResult(savedUser, savedFact, true);
     }
 
-    private FactNode buildNewFactNode(String factText, String normalized, String clusterKey, String subType, double semanticConfidence, String source, LocalDateTime now, String originalMessage, com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
+    private FactNode buildNewFactNode(String factText, String normalized, String clusterKey, String subType,
+                                      double semanticConfidence, String source, LocalDateTime now, String originalMessage,
+                                      com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
         double baseImportance = 0.8;
         if (emotion != null && emotion.getIntensity() != null) {
             double intensityBoost = emotion.getIntensity() * 0.2;
             baseImportance = Math.min(1.0, baseImportance + intensityBoost);
         }
-        
+
         String toneStr = "neutral";
         if (emotion != null && emotion.getEmotion() != null) {
             toneStr = emotion.getEmotion();
@@ -1239,7 +1191,8 @@ public class MemoryServiceImpl implements MemoryService {
                 .version(1)
                 .originalMessage(originalMessage)
                 .emotionalTone(toneStr)
-                .involvedEntities(java.util.Optional.ofNullable(extractEntities(factText)).filter(l -> !l.isEmpty()).map(java.util.HashSet::new).orElse(null))
+                .involvedEntities(java.util.Optional.ofNullable(extractEntities(factText)).filter(l -> !l.isEmpty())
+                        .map(java.util.HashSet::new).orElse(null))
                 .build();
     }
 
@@ -1398,7 +1351,8 @@ public class MemoryServiceImpl implements MemoryService {
         }
         String normalized = Arrays.stream(raw.trim().split("[_\\-\\s]+"))
                 .filter(token -> !token.isBlank())
-                .map(token -> token.substring(0, 1).toUpperCase(Locale.ROOT) + token.substring(1).toLowerCase(Locale.ROOT))
+                .map(token -> token.substring(0, 1).toUpperCase(Locale.ROOT)
+                        + token.substring(1).toLowerCase(Locale.ROOT))
                 .collect(Collectors.joining());
         return SUB_TYPES.contains(normalized) ? normalized : "Memory";
     }
@@ -1408,13 +1362,13 @@ public class MemoryServiceImpl implements MemoryService {
         SemanticProfile ruleProfile = resolveByRules(factText);
 
         if (historyProfile != null && ruleProfile != null) {
-            if (historyProfile.topicKey.equals(ruleProfile.topicKey) || historyProfile.subType.equals(ruleProfile.subType)) {
+            if (historyProfile.topicKey.equals(ruleProfile.topicKey)
+                    || historyProfile.subType.equals(ruleProfile.subType)) {
                 return new SemanticProfile(
                         historyProfile.topicKey,
                         historyProfile.subType,
                         Math.max(historyProfile.confidence, ruleProfile.confidence),
-                        "history+rule"
-                );
+                        "history+rule");
             }
             if (historyProfile.confidence >= 0.9 && !isGenericProfile(historyProfile)) {
                 return historyProfile;
@@ -1455,12 +1409,14 @@ public class MemoryServiceImpl implements MemoryService {
             systemLogService.embeddingEnd("MEMORY");
 
             systemLogService.dbStart("pgvector_query", "embeddingStore", "MEMORY");
-            dev.langchain4j.store.embedding.EmbeddingSearchRequest searchRequest = dev.langchain4j.store.embedding.EmbeddingSearchRequest.builder()
+            dev.langchain4j.store.embedding.EmbeddingSearchRequest searchRequest = dev.langchain4j.store.embedding.EmbeddingSearchRequest
+                    .builder()
                     .queryEmbedding(queryEmbedding)
                     .maxResults(3)
                     .minScore(0.72)
                     .build();
-            dev.langchain4j.store.embedding.EmbeddingSearchResult<dev.langchain4j.data.segment.TextSegment> searchResult = embeddingStore.search(searchRequest);
+            dev.langchain4j.store.embedding.EmbeddingSearchResult<dev.langchain4j.data.segment.TextSegment> searchResult = embeddingStore
+                    .search(searchRequest);
             systemLogService.dbEnd("pgvector_query", "MEMORY");
 
             List<Long> userFactIds = user.getFacts().stream()
@@ -1468,14 +1424,19 @@ public class MemoryServiceImpl implements MemoryService {
                     .map(FactNode::getId)
                     .collect(Collectors.toList());
 
-            for (dev.langchain4j.store.embedding.EmbeddingMatch<dev.langchain4j.data.segment.TextSegment> match : searchResult.matches()) {
+            for (dev.langchain4j.store.embedding.EmbeddingMatch<dev.langchain4j.data.segment.TextSegment> match : searchResult
+                    .matches()) {
                 String factIdStr = match.embedded().metadata().getString("fact_id");
-                if (factIdStr == null) continue;
+                if (factIdStr == null)
+                    continue;
                 Long factId = Long.parseLong(factIdStr);
-                if (!userFactIds.contains(factId)) continue;
+                if (!userFactIds.contains(factId))
+                    continue;
 
-                FactNode existingFact = user.getFacts().stream().filter(f -> f.getId().equals(factId)).findFirst().orElse(null);
-                if (existingFact == null) continue;
+                FactNode existingFact = user.getFacts().stream().filter(f -> f.getId().equals(factId)).findFirst()
+                        .orElse(null);
+                if (existingFact == null)
+                    continue;
 
                 bestMatch = existingFact;
                 bestScore = match.score();
@@ -1504,8 +1465,7 @@ public class MemoryServiceImpl implements MemoryService {
                 deriveTopicKey(bestMatch),
                 inferFactSubType(bestMatch),
                 round(Math.min(0.95, 0.62 + bestScore * 0.3)),
-                "history"
-        );
+                "history");
     }
 
     private SemanticProfile resolveByRules(String factText) {
@@ -1528,7 +1488,9 @@ public class MemoryServiceImpl implements MemoryService {
         }
         try {
             systemLogService.llmStart("fact-semantic-classifier", "ollama", "FACT");
-            FactSemanticClassification classification = factSemanticClassifier.classify(factText, buildHistorySummary(user));
+            CompletableFuture<FactSemanticClassification> future = CompletableFuture.supplyAsync(
+                    () -> factSemanticClassifier.classify(factText, buildHistorySummary(user)));
+            FactSemanticClassification classification = future.get(SEMANTIC_CLASSIFY_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             systemLogService.llmEnd(0, "FACT");
             if (classification == null) {
                 return null;
@@ -1537,8 +1499,12 @@ public class MemoryServiceImpl implements MemoryService {
                     normalizeTopicKey(classification.getTopicKey()),
                     normalizeSubType(classification.getSubType()),
                     round(Math.max(0.6, Math.min(0.95, classification.getConfidence()))),
-                    "llm"
-            );
+                    "llm");
+        } catch (TimeoutException e) {
+            systemLogService.llmError("fact-semantic-classifier timeout", "FACT");
+            log.warn("Fact semantic classification timeout after {}s; fallback to non-LLM",
+                    SEMANTIC_CLASSIFY_TIMEOUT_SECONDS);
+            return null;
         } catch (Exception e) {
             systemLogService.llmError(e.getMessage(), "FACT");
             log.warn("Fact semantic classification fallback to local rules: {}", e.getMessage());
@@ -1570,7 +1536,8 @@ public class MemoryServiceImpl implements MemoryService {
         }
         return user.getFacts().stream()
                 .filter(fact -> fact.getContent() != null && !fact.getContent().isBlank())
-                .sorted(Comparator.comparing(FactNode::getLastActivatedAt, Comparator.nullsLast(Comparator.reverseOrder())))
+                .sorted(Comparator.comparing(FactNode::getLastActivatedAt,
+                        Comparator.nullsLast(Comparator.reverseOrder())))
                 .limit(8)
                 .map(fact -> String.format("[%s/%s] %s",
                         deriveTopicKey(fact),
@@ -1676,7 +1643,8 @@ public class MemoryServiceImpl implements MemoryService {
             if (createdAt == null || (fact.getObservedAt() != null && fact.getObservedAt().isBefore(createdAt))) {
                 createdAt = fact.getObservedAt();
             }
-            if (lastActivatedAt == null || (fact.getObservedAt() != null && fact.getObservedAt().isAfter(lastActivatedAt))) {
+            if (lastActivatedAt == null
+                    || (fact.getObservedAt() != null && fact.getObservedAt().isAfter(lastActivatedAt))) {
                 lastActivatedAt = fact.getObservedAt();
             }
             importance = round(totalImportance / factCount);
@@ -1740,7 +1708,8 @@ public class MemoryServiceImpl implements MemoryService {
                 .orElse("未知内容");
 
         log.info("Cognitive cleanup: Removing fact node [{}] (ID: #{})", factContent, factId);
-        systemLogService.info("认知清理: 删除事实节点 [" + (factContent.length() > 30 ? factContent.substring(0, 30) + "..." : factContent) + "]", "MEMORY");
+        systemLogService.info("认知清理: 删除事实节点 ["
+                + (factContent.length() > 30 ? factContent.substring(0, 30) + "..." : factContent) + "]", "MEMORY");
 
         systemLogService.dbStart("neo4j_delete", "FactNode#" + factId, "MEMORY");
         try {
@@ -1759,7 +1728,8 @@ public class MemoryServiceImpl implements MemoryService {
             log.debug("Vector store cleanup successful for factId: {}", factId);
             systemLogService.dbEnd("pgvector_delete", "MEMORY");
         } catch (Exception e) {
-            log.warn("Semantic cleanup skipped or failed for factId {}: Vector store may not support automated removal", factId);
+            log.warn("Semantic cleanup skipped or failed for factId {}: Vector store may not support automated removal",
+                    factId);
             systemLogService.warn("向量库清理失败: " + e.getMessage(), "MEMORY");
         }
     }
@@ -1776,13 +1746,15 @@ public class MemoryServiceImpl implements MemoryService {
         factRepository.findAll().forEach(facts::add);
         for (FactNode fact : facts) {
             processed++;
-            LocalDateTime activatedAt = fact.getLastActivatedAt() != null ? fact.getLastActivatedAt() : fact.getObservedAt();
+            LocalDateTime activatedAt = fact.getLastActivatedAt() != null ? fact.getLastActivatedAt()
+                    : fact.getObservedAt();
             double computedActivity = calculateActivityScore(activatedAt, now);
             fact.setActivityScore(round(computedActivity));
             if (fact.getNormalizedContent() == null || fact.getNormalizedContent().isBlank()) {
                 fact.setNormalizedContent(normalizedFactContent(fact));
             }
-            if (fact.getClusterKey() == null || fact.getClusterKey().isBlank() || "memory".equals(normalizeTopicKey(fact.getClusterKey()))) {
+            if (fact.getClusterKey() == null || fact.getClusterKey().isBlank()
+                    || "memory".equals(normalizeTopicKey(fact.getClusterKey()))) {
                 SemanticProfile semanticProfile = classifyFactSemantics(fact.getContent(), null);
                 fact.setCategory(semanticProfile.topicKey);
                 fact.setClusterKey(semanticProfile.topicKey);
@@ -1842,7 +1814,8 @@ public class MemoryServiceImpl implements MemoryService {
         summary.put("reactivated", reactivated);
         summary.put("generatedAt", now.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
         lastMaintenanceSummary = summary;
-        systemLogService.info(String.format("记忆维护完成: processed=%d archived=%d cooled=%d reactivated=%d", processed, archived, cooled, reactivated), "MEMORY");
+        systemLogService.info(String.format("记忆维护完成: processed=%d archived=%d cooled=%d reactivated=%d", processed,
+                archived, cooled, reactivated), "MEMORY");
         return summary;
     }
 
@@ -1868,7 +1841,8 @@ public class MemoryServiceImpl implements MemoryService {
             fact.setSubType(subType);
             fact.setClassificationSource("manual");
             factRepository.save(fact);
-            systemLogService.info("手动更新事实分类: ID=" + factId + ", Topic=" + clusterKey + ", SubType=" + subType, "MEMORY");
+            systemLogService.info("手动更新事实分类: ID=" + factId + ", Topic=" + clusterKey + ", SubType=" + subType,
+                    "MEMORY");
         });
     }
 
@@ -1886,7 +1860,9 @@ public class MemoryServiceImpl implements MemoryService {
 
     @Override
     public Object getMemoryGovernanceList(int page, int size, String status) {
-        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, size, org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "lastActivatedAt"));
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, size,
+                org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC,
+                        "lastActivatedAt"));
         if (status == null || status.isBlank() || "all".equalsIgnoreCase(status)) {
             return factRepository.findAll(pageable);
         } else {

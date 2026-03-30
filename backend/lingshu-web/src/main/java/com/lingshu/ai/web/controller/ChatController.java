@@ -40,12 +40,6 @@ public class ChatController {
         this.chatSessionRepository = chatSessionRepository;
     }
 
-    @PostMapping("/send")
-    public String chat(@RequestBody ChatRequest request) {
-        String userId = request.userId() != null ? request.userId() : "User";
-        return chatService.chat(request.message(), request.agentId(), userId);
-    }
-
     @GetMapping(value = "/welcome", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> getWelcome(@RequestParam(name = "userId", defaultValue = "User") String userId) {
         return Flux.empty();

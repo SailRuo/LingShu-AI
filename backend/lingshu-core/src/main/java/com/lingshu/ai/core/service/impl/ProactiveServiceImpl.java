@@ -72,7 +72,6 @@ public class ProactiveServiceImpl implements ProactiveService {
         int inactiveThresholdMinutes = setting.getInactiveThresholdMinutes() != null ? setting.getInactiveThresholdMinutes() : 5;
         
         log.debug("检查不活跃用户...");
-        systemLogService.info("定时任务: 检查不活跃用户", "PROACTIVE");
 
         LocalDateTime threshold = LocalDateTime.now().minusMinutes(inactiveThresholdMinutes);
         List<UserState> inactiveUsers = userStateRepository.findInactiveUsers(threshold);

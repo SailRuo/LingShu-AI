@@ -3,9 +3,9 @@ package com.lingshu.ai.core.service.impl;
 import com.lingshu.ai.core.dto.EmotionAnalysis;
 import com.lingshu.ai.core.service.AffinityService;
 import com.lingshu.ai.core.service.EmotionAnalyzer;
+import com.lingshu.ai.core.service.EmotionalEpisodeService;
 import com.lingshu.ai.core.service.MemoryService;
 import com.lingshu.ai.core.service.SystemLogService;
-import com.lingshu.ai.core.service.EmotionalEpisodeService;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.SystemMessage;
@@ -41,7 +41,8 @@ public class TurnPostProcessingServiceImpl {
     }
 
     @Async("taskExecutor")
-    public void processCompletedTurn(String userId, String userMessage, String assistantResponse) {
+    public void processCompletedTurn(String userId, String userMessage, String assistantResponse,
+                                     EmotionAnalysis preAnalyzedEmotion) {
         if (userId == null || userId.isBlank() || userMessage == null || userMessage.isBlank()) {
             return;
         }
@@ -58,7 +59,7 @@ public class TurnPostProcessingServiceImpl {
                 return;
             }
 
-            systemLogService.info(String.format(
+            systemLogService.debug(String.format(
                     "回合后处理决策: emotion=%s, facts=%s, interaction=%s, confidence=%.2f, reason=%s",
                     decision.isAnalyzeEmotion(),
                     decision.isExtractFacts(),
@@ -67,34 +68,30 @@ public class TurnPostProcessingServiceImpl {
                     safeReason(decision.getReason())
             ), "POST_PROCESS");
 
-            systemLogService.success(String.format(
-                    "后处理决策事件 | analyzeEmotion=%s | extractFacts=%s | recordInteraction=%s | confidence=%.2f",
-                    decision.isAnalyzeEmotion(),
-                    decision.isExtractFacts(),
-                    decision.isRecordInteraction(),
-                    decision.getConfidence()
+            systemLogService.info(String.format(
+                    "后处理决策: 情感分析=%s, 事实提取=%s, 记录互动=%s (置信度: %.2f) | 理由: %s",
+                    decision.isAnalyzeEmotion() ? "是" : "否",
+                    decision.isExtractFacts() ? "是" : "否",
+                    decision.isRecordInteraction() ? "是" : "否",
+                    decision.getConfidence(),
+                    safeReason(decision.getReason())
             ), "POST_PROCESS");
 
-            EmotionAnalysis emotionResult = null;
+            EmotionAnalysis emotionResult = preAnalyzedEmotion;
             if (decision.isAnalyzeEmotion()) {
-                systemLogService.info("后处理事件: 已触发情感分析", "POST_PROCESS");
-                emotionResult = analyzeEmotion(userId, userMessage);
-            } else {
-                systemLogService.debug("后处理事件: 跳过情感分析", "POST_PROCESS");
+                if (emotionResult == null) {
+                    emotionResult = analyzeEmotion(userId, userMessage);
+                } else {
+                    applyEmotionResult(userId, userMessage, emotionResult);
+                }
             }
 
             if (decision.isExtractFacts()) {
-                systemLogService.info("后处理事件: 已触发事实提取", "POST_PROCESS");
                 extractFacts(userId, userMessage, emotionResult);
-            } else {
-                systemLogService.debug("后处理事件: 跳过事实提取", "POST_PROCESS");
             }
 
             if (decision.isRecordInteraction()) {
-                systemLogService.info("后处理事件: 已记录互动", "POST_PROCESS");
                 affinityService.recordInteraction(userId);
-            } else {
-                systemLogService.debug("后处理事件: 跳过互动记录", "POST_PROCESS");
             }
         } catch (Exception e) {
             log.warn("回合后处理失败: {}", e.getMessage(), e);
@@ -108,7 +105,6 @@ public class TurnPostProcessingServiceImpl {
 
     private EmotionAnalysis analyzeEmotion(String userId, String userMessage) {
         try {
-            systemLogService.info("回合后处理: 开始情感分析", "EMOTION");
             EmotionAnalysis emotion = emotionAnalyzer.analyze(userMessage);
             if (emotion == null) {
                 systemLogService.debug("情感分析返回空结果", "EMOTION");
@@ -117,7 +113,7 @@ public class TurnPostProcessingServiceImpl {
 
             affinityService.updateEmotion(userId, emotion.getEmotion(), emotion.getIntensity());
             systemLogService.info(String.format(
-                    "情绪分析: %s (强度: %.2f)",
+                    "情感分析: %s (强度: %.2f)",
                     emotion.getEmotion(),
                     emotion.getIntensity() != null ? emotion.getIntensity() : 0.0
             ), "EMOTION");
@@ -131,9 +127,8 @@ public class TurnPostProcessingServiceImpl {
             if (emotion.needsAttention()) {
                 systemLogService.info("检测到用户需要关注", "EMOTION");
             }
-            
+
             emotionalEpisodeService.extractAndSaveEpisode(userId, userMessage, emotion);
-            
             return emotion;
         } catch (Exception e) {
             log.warn("情感分析失败: {}", e.getMessage(), e);
@@ -141,9 +136,21 @@ public class TurnPostProcessingServiceImpl {
         }
     }
 
+    private void applyEmotionResult(String userId, String userMessage, EmotionAnalysis emotion) {
+        if (emotion == null) {
+            return;
+        }
+        affinityService.updateEmotion(userId, emotion.getEmotion(), emotion.getIntensity());
+        if (emotion.isPositive()) {
+            affinityService.increaseAffinity(userId, 1);
+        } else if (emotion.isNegative() && emotion.getIntensity() != null && emotion.getIntensity() > 0.5) {
+            affinityService.decreaseAffinity(userId, 1);
+        }
+        emotionalEpisodeService.extractAndSaveEpisode(userId, userMessage, emotion);
+    }
+
     private void extractFacts(String userId, String userMessage, EmotionAnalysis emotion) {
         try {
-            systemLogService.info("回合后处理: 开始事实提取", "MEMORY");
             memoryService.extractFacts(userId, userMessage, emotion);
         } catch (Exception e) {
             log.warn("事实提取失败: {}", e.getMessage(), e);
@@ -166,53 +173,56 @@ public class TurnPostProcessingServiceImpl {
     public interface TurnDecisionClassifier {
 
         @SystemMessage("""
-                你是“回合后处理决策器”。
-                你的任务不是回复用户，而是在一轮对话已经完成后，
-                根据“用户原始消息”和“助手最终回复”判断：
-                1. 是否需要做情感分析
-                2. 是否需要做事实提取
-                3. 是否需要记录一次互动
+                你是灵枢 (LingShu-AI) 的“回合后处理决策器”。
+                你的唯一任务是在一轮对话结束后，判断是否触发以下三项：
+                1. analyzeEmotion
+                2. extractFacts
+                3. recordInteraction
 
-                关键原则：
-                - 你只负责“是否触发”的决策，不做真正的情感分析/事实提取。
-                - 你必须尽量智能，不依赖固定关键词。
-                - 重点判断这一轮是否具有“用户状态更新价值”或“长期记忆价值”。
-                - 如果这轮主要是后端工具执行、命令查询、文件读取、代码排查、环境检查，
-                  且没有明显暴露用户情绪或稳定个人事实，则不要触发情感分析/事实提取。
-                - 如果用户表达了情绪、态度、困扰、满意/失望、压力、偏好、身份、计划、经历、
-                  长期稳定习惯、关系信息、自我描述等，则应触发相应处理。
-                - 如果用户透露了具有长期记忆价值的稳定事实，例如持续的偏好、反复出现的困扰、
-                  性相关需求或习惯、常见的应对方式、自我认知或关系状态，通常应触发 extractFacts=true。
-                - reason 必须只基于当前提供的“用户消息”和“助手最终回复”，不得编造未出现的细节。
-                - recordInteraction 通常应为 true；除非输入无效或完全没有形成有效回合。
+                你必须依据整轮语义判断，并直接返回严格 JSON。
 
-                决策定义：
-                - analyzeEmotion=true：
-                  当用户消息值得更新“当前情绪状态”时触发。
-                - extractFacts=true：
-                  当用户消息中可能包含值得写入长期记忆的稳定信息时触发。
-                - recordInteraction=true：
-                  当这是一轮真实有效的用户交互时触发。
+                判定标准：
+
+                1. analyzeEmotion
+                - 只要用户表达了明显情绪、态度、压力、满意/不满、焦虑、兴奋等主观状态，设为 true。
+
+                2. extractFacts
+                - 只要用户透露了“可被后续对话复用”的个人信息或状态，设为 true。
+                - 包括长期静态事实，也包括阶段性进行中状态。
+                - 下面这类表达必须判为 true：
+                  * 我在训练
+                  * 我最近在备考
+                  * 我这段时间在减脂
+                  * 我正在学 Rust
+                - 即使是技术对话，只要出现上述可记忆信息，也必须 true。
+                - 仅当消息完全是一次性工具指令、纯噪声、无可记忆信息时，才可 false。
+
+                3. recordInteraction
+                - 绝大多数有效对话都应设为 true。
+                - 仅空内容或明显系统噪声时可 false。
 
                 输出要求：
-                你必须且只能输出合法 JSON，不得输出 Markdown，不得输出解释文字。
-                格式如下：
+                - confidence: 0.0 到 1.0
+                - reason: 中文简短说明，明确指出触发依据
+                - 只返回 JSON，不要任何额外文本
+
+                返回格式：
                 {
                   "analyzeEmotion": true,
-                  "extractFacts": false,
+                  "extractFacts": true,
                   "recordInteraction": true,
-                  "confidence": 0.0,
-                  "reason": "一句简短中文原因"
+                  "confidence": 0.95,
+                  "reason": "用户透露了进行中状态事实：我在训练"
                 }
                 """)
         @UserMessage("""
-                用户消息：
+                【用户消息】
                 {{userMessage}}
 
-                助手最终回复：
+                【助手回复】
                 {{assistantResponse}}
 
-                请直接返回 JSON。
+                直接返回决策 JSON。
                 """)
         TurnPostProcessorDecision classify(@V("userMessage") String userMessage,
                                            @V("assistantResponse") String assistantResponse);

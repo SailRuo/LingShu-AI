@@ -16,6 +16,7 @@ interface LogLine {
 const logs = ref<LogLine[]>([])
 const searchQuery = ref('')
 const activeFilters = ref<Set<string>>(new Set())
+const showDebug = ref(false)
 let logEventSource: EventSource | null = null
 const maxLines = 500
 const message = useMessage()
@@ -114,6 +115,10 @@ const exportLogs = () => {
 const filteredLogs = computed(() => {
   let result = logs.value
   
+  if (!showDebug.value) {
+    result = result.filter(l => l.type !== 'DEBUG')
+  }
+  
   if (activeFilters.value.size > 0) {
     result = result.filter(l => activeFilters.value.has(l.section))
   }
@@ -198,7 +203,19 @@ onUnmounted(() => {
       >
         {{ opt.label }}
       </n-tag>
-      <n-tag v-if="activeFilters.size > 0" @click="activeFilters.clear()" class="clear-filter">
+      
+      <div class="filter-divider"></div>
+      
+      <n-tag 
+        :checked="showDebug"
+        checkable
+        @click="showDebug = !showDebug"
+        class="filter-tag debug-tag"
+      >
+        显示 DEBUG
+      </n-tag>
+
+      <n-tag v-if="activeFilters.size > 0 || showDebug" @click="activeFilters.clear(); showDebug = false" class="clear-filter">
         清除筛选
       </n-tag>
     </div>
@@ -298,9 +315,26 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  background: var(--color-surface);
+  background: rgba(255, 255, 255, 0.05);
   border-bottom: 1px solid var(--color-outline);
   flex-shrink: 0;
+}
+
+.filter-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--color-outline);
+  margin: 0 4px;
+}
+
+.debug-tag {
+  border-color: #6b7280 !important;
+  color: #6b7280 !important;
+}
+
+.debug-tag.n-tag--checked {
+  background-color: #6b7280 !important;
+  color: #fff !important;
 }
 
 .filter-label {

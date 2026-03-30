@@ -14,12 +14,6 @@ public interface ChatService {
         }
     }
 
-    String chat(String message);
-    
-    String chat(String message, Long agentId);
-    
-    String chat(String message, Long agentId, String userId);
-    
     Flux<String> streamChat(String message);
     
     Flux<String> streamChat(String message, Long agentId);

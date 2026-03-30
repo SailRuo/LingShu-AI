@@ -1,7 +1,9 @@
 package com.lingshu.ai.core.dto;
 
-import java.util.List;
+import lombok.Data;
 
+import java.util.List;
+@Data
 public class ExtractionResult {
 
     private List<ExtractedFact> newFacts;

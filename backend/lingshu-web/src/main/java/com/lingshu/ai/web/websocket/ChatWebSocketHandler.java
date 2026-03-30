@@ -63,7 +63,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         String payload = message.getPayload();
-        log.debug("收到 WebSocket 消息: {}", payload);
+        log.debug("收到 WebSocket 消息: {}", payload != null && payload.length() > 200 ? payload.substring(0, 200) + "..." : payload);
         
         try {
             Map<String, Object> data = objectMapper.readValue(payload, Map.class);

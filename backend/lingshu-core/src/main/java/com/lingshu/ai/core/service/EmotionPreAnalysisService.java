@@ -53,7 +53,8 @@ public class EmotionPreAnalysisService {
 
     public EmotionContextResult analyzeBeforeResponse(String userId, String currentMessage, Long sessionId) {
         try {
-            systemLogService.info("情感前置分析: 开始分析用户消息", "EMOTION");
+            String modelName = dynamicMemoryModel.getModelName();
+            systemLogService.info(String.format("情感前置分析: 开始分析用户消息 (模型: %s)", modelName), "EMOTION");
             systemLogService.startTimer("emotion_pre_analysis");
 
             String conversationHistory = buildConversationHistory(sessionId);
@@ -130,11 +131,30 @@ public class EmotionPreAnalysisService {
                 String time = msg.getCreatedAt() != null ? 
                     msg.getCreatedAt().format(TIME_FORMATTER) : "";
                 String role = "user".equals(msg.getRole()) ? "用户" : "灵枢";
+                
                 String content = msg.getContent();
-                if (content != null && content.length() > 100) {
-                    content = content.substring(0, 100) + "...";
+                String textOnly = content;
+                
+                // 处理多模态 JSON 存储格式
+                if (content != null && content.trim().startsWith("{") && content.trim().endsWith("}")) {
+                    try {
+                        com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(content);
+                        if (node.has("text")) {
+                            textOnly = node.get("text").asText();
+                        } else if (node.has("content") && node.get("content").isTextual()) {
+                             textOnly = node.get("content").asText();
+                        }
+                    } catch (Exception e) {
+                        // 解析失败则按原样截断处理
+                        log.debug("Failed to pre-parse history message content as JSON, using raw text");
+                    }
                 }
-                sb.append(String.format("[%s] %s: %s\n", time, role, content));
+
+                if (textOnly != null && textOnly.length() > 200) {
+                    textOnly = textOnly.substring(0, 200) + "...";
+                }
+                
+                sb.append(String.format("[%s] %s: %s\n", time, role, textOnly));
             }
             
             return sb.toString();
