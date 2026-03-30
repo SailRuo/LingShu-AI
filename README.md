@@ -2,12 +2,12 @@
 
 <div align="center">
 
-**一个具备长期记忆、情感演化与现实干预能力的本地化电子伴侣**
+**一个具备长期记忆、情感演化与现实干预能力的本地化陪伴/协作智能体**
 
 [![Java](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.org/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2.4-brightgreen.svg)](https://spring.io/projects/spring-boot)
 [![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D.svg)](https://vuejs.org/)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 </div>
 
@@ -15,7 +15,7 @@
 
 ## 项目简介
 
-**灵枢** 取自中医经典《灵枢经》，意为"灵魂的枢纽"。项目愿景是从 0 到 1 打造一个具备长期记忆、情感演化与现实干预能力的本地化电子伴侣。
+**灵枢** 意为"灵魂的枢纽"。项目愿景是从 0 到 1 打造一个具备长期记忆、情感演化与现实干预能力的本地化陪伴/协作智能体。
 
 ### 核心特性
 
@@ -26,6 +26,15 @@
 - **本地化部署**：完全离线运行，保护数据隐私
 - **MCP工具调用**：支持 Model Context Protocol，实现现实世界干预
 - **多智能体支持**：可配置多个 AI 智能体，满足不同场景需求
+
+---
+
+## 界面预览 (Screenshots)
+
+<div align="center">
+  <p><i>(此处建议添加实际运行截图或 GIF 演示)</i></p>
+  <img src="doc/png/lingshu_ai_ui_mockup_1773996576105.png" width="800" alt="UI Mockup">
+</div>
 
 ---
 
@@ -150,6 +159,19 @@ LingShu-AI/
 | 文档 | 说明 |
 |------|------|
 | [UI/UX设计详细文档](doc/UI_UX设计详细文档.md) | Cyber-Zen视觉风格、多主题色彩方案、布局系统 |
+
+---
+
+## 项目路线图
+
+项目目前处于快速迭代阶段，主要演化路径如下：
+
+- **第一阶段：【启蒙】** (已完成) - 建立双向记忆与基础对话链路。
+- **第二阶段：【百宝袋】** (进行中) - 通过 MCP 协议获得现实世界干预能力。
+- **第三阶段：【共生】** (规划中) - 情感波动与主动意识增强。
+- **第四阶段：【深鉴】** (规划中) - 系统可观测性与思维过程可视化。
+
+详细规划请参考 [项目计划书](doc/项目计划书.md)。
 
 ---
 
@@ -498,6 +520,25 @@ docker exec lingshu-neo4j neo4j-admin database dump neo4j --to-path=/backup
 
 ---
 
+## 故障排查 (Troubleshooting)
+
+### 1. 数据库连接失败
+- 确保 Docker 容器已正常启动：`docker ps`
+- 检查端口是否被占用（5432, 7474, 7687, 6379）
+- 验证 `application.yml` 中的用户名和密码是否与 `docker-compose.yml` 一致
+
+### 2. LLM 响应缓慢或报错
+- 检查 Ollama 是否已启动并加载了对应模型
+- 验证 API Key 和 Base URL 是否配置正确
+- 检查网络连接（如果使用云端 API）
+
+### 3. 前端无法连接后端
+- 检查后端服务是否在 8080 端口运行
+- 检查浏览器控制台是否有跨域 (CORS) 错误
+- 确保 WebSocket 连接地址正确
+
+---
+
 ## 贡献指南
 
 欢迎提交 Issue 和 Pull Request！
@@ -512,7 +553,7 @@ docker exec lingshu-neo4j neo4j-admin database dump neo4j --to-path=/backup
 
 ## 许可证
 
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件。
+本项目采用 GPLv3 许可证 - 详见 [LICENSE](LICENSE) 文件。
 
 ---
 

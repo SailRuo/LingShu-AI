@@ -475,7 +475,7 @@ ollama list
 你好，灵枢！
 ```
 
-> 🎉 **恭喜！** 你已经成功搭建了自己的本地化 AI 伴侣！
+> 🎉 **恭喜！** 你已经成功搭建了自己的本地化 AI 陪伴/协作智能体！
 
 ---
 
@@ -722,7 +722,7 @@ public List<FactNode> rerankFacts(List<FactNode> graphFacts,
 ```
 用户：我之前提到的那个 Spring Boot 项目叫什么名字？
 AI：你指的是"灵枢 AI"项目，这是一个基于 Spring Boot 3 + LangChain4j 
-     的本地化 AI 伴侣项目，采用 Java 21 开发。
+     的本地化 AI 陪伴/协作智能体项目，采用 Java 21 开发。
      
      [检索自记忆图谱：Fact ID=12, 类别=项目]
 ```
