@@ -56,10 +56,5 @@ public interface FactRepository extends Neo4jRepository<FactNode, Long> {
            "SET r.weight = rel.weight, r.lastActivatedAt = rel.lastActivatedAt")
     void saveContradictsRelations(List<Map<String, Object>> relations);
 
-    @Query("MATCH (a:Fact)-[r:RELATED_TO|SUPERSEDES|CONTRADICTS]->(b:Fact) " +
-           "WHERE id(a) IN $factIds AND id(b) IN $factIds " +
-           "RETURN id(a) AS sourceId, id(b) AS targetId, type(r) AS relationType, r.weight AS weight, toString(r.lastActivatedAt) AS lastActivatedAt")
-    List<FactRelationProjection> findFactRelationsByFactIds(List<Long> factIds);
-
     Page<FactNode> findAllByStatus(String status, Pageable pageable);
 }

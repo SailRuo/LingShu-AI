@@ -10,7 +10,6 @@ import com.lingshu.ai.core.dto.FactType;
 import com.lingshu.ai.core.model.DynamicMemoryModel;
 import com.lingshu.ai.infrastructure.entity.FactNode;
 import com.lingshu.ai.infrastructure.entity.UserNode;
-import com.lingshu.ai.infrastructure.repository.FactRelationProjection;
 import com.lingshu.ai.infrastructure.repository.FactRepository;
 import com.lingshu.ai.infrastructure.repository.UserRepository;
 import dev.langchain4j.model.chat.ChatModel;
@@ -21,6 +20,7 @@ import dev.langchain4j.store.embedding.EmbeddingSearchResult;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import dev.langchain4j.data.segment.TextSegment;
 import jakarta.annotation.PostConstruct;
+import org.springframework.data.neo4j.core.Neo4jClient;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -71,6 +71,7 @@ public class MemoryServiceImpl implements MemoryService {
     private final dev.langchain4j.model.embedding.EmbeddingModel embeddingModel;
     private final dev.langchain4j.store.embedding.EmbeddingStore<TextSegment> embeddingStore;
     private final FactRepository factRepository;
+    private final Neo4jClient neo4jClient;
     private final com.lingshu.ai.core.service.SystemLogService systemLogService;
     private final ChatModel chatLanguageModel;
     private final DynamicMemoryModel dynamicMemoryModel;
@@ -86,6 +87,7 @@ public class MemoryServiceImpl implements MemoryService {
                              dev.langchain4j.model.embedding.EmbeddingModel embeddingModel,
                              dev.langchain4j.store.embedding.EmbeddingStore<TextSegment> embeddingStore,
                              FactRepository factRepository,
+                             Neo4jClient neo4jClient,
                              com.lingshu.ai.core.service.SystemLogService systemLogService,
                              com.lingshu.ai.core.service.SettingService settingService,
                              ChatModel chatLanguageModel,
@@ -94,6 +96,7 @@ public class MemoryServiceImpl implements MemoryService {
         this.embeddingModel = embeddingModel;
         this.embeddingStore = embeddingStore;
         this.factRepository = factRepository;
+        this.neo4jClient = neo4jClient;
         this.systemLogService = systemLogService;
         this.settingService = settingService;
         this.chatLanguageModel = chatLanguageModel;
@@ -849,14 +852,26 @@ public class MemoryServiceImpl implements MemoryService {
             return List.of();
         }
 
-        return factRepository.findFactRelationsByFactIds(factIds).stream()
+        String cypher = """
+                MATCH (a:Fact)-[r:RELATED_TO|SUPERSEDES|CONTRADICTS]->(b:Fact)
+                WHERE id(a) IN $factIds AND id(b) IN $factIds
+                RETURN id(a) AS sourceId,
+                       id(b) AS targetId,
+                       type(r) AS relationType,
+                       r.weight AS weight,
+                       r.lastActivatedAt AS lastActivatedAt
+                """;
+
+        return neo4jClient.query(cypher)
+                .bind(factIds).to("factIds")
+                .fetch().all().stream()
                 .map(row -> {
                     Map<String, Object> link = new LinkedHashMap<>();
-                    link.put("source", "fact_" + row.getSourceId());
-                    link.put("target", "fact_" + row.getTargetId());
-                    link.put("type", row.getRelationType());
-                    link.put("weight", row.getWeight() != null ? row.getWeight() : 0.5d);
-                    link.put("lastActivatedAt", formatDateTime(castLocalDateTime(row.getLastActivatedAt())));
+                    link.put("source", "fact_" + castLong(row.get("sourceId")));
+                    link.put("target", "fact_" + castLong(row.get("targetId")));
+                    link.put("type", row.get("relationType"));
+                    link.put("weight", row.get("weight") != null ? row.get("weight") : 0.5d);
+                    link.put("lastActivatedAt", formatDateTime(castLocalDateTime(row.get("lastActivatedAt"))));
                     return link;
                 })
                 .collect(Collectors.toList());

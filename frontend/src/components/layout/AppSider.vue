@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { NMenu, NIcon } from 'naive-ui'
-import { Layers, Activity as ActivityIcon, FileText, Settings, Hexagon, Zap, Radio, DatabaseBackup } from 'lucide-vue-next'
+import { Layers, Activity as ActivityIcon, FileText, Settings, Zap, Radio, DatabaseBackup, Hexagon } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import { h } from 'vue'
 
@@ -46,8 +46,7 @@ const infraNav = [
       <!-- Logo Area -->
       <div class="logo-section">
         <div class="logo-mark">
-          <div class="logo-glow"></div>
-          <Hexagon :size="24" class="logo-icon" />
+          <img src="/bot.png" alt="Logo" class="logo-image" />
         </div>
         <div class="logo-text">
           <span class="logo-title">灵枢</span>
@@ -168,35 +167,19 @@ const infraNav = [
 
 .logo-mark {
   position: relative;
-  width: 40px;
-  height: 40px;
+  width: 64px;
+  height: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--color-primary-dim);
   border-radius: 12px;
-  border: 1px solid var(--color-primary);
+  overflow: hidden;
 }
 
-.logo-glow {
-  position: absolute;
-  inset: -4px;
-  background: var(--color-primary);
-  opacity: 0.15;
-  border-radius: 16px;
-  filter: blur(8px);
-  animation: pulse-glow 3s ease-in-out infinite;
-}
-
-@keyframes pulse-glow {
-  0%, 100% { opacity: 0.1; transform: scale(1); }
-  50% { opacity: 0.2; transform: scale(1.05); }
-}
-
-.logo-icon {
-  color: var(--color-primary);
-  position: relative;
-  z-index: 1;
+.logo-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .logo-text {
