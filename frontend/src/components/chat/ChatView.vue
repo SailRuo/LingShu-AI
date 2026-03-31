@@ -42,7 +42,7 @@ const {
   startHeartbeat
 } = useWebSocket()
 
-const { settings, fetchSettings } = useSettings()
+const { settings, fetchSettings, toggleThinking } = useSettings()
 
 const {
   isPlaying: ttsPlaying,
@@ -71,7 +71,6 @@ const message = useMessage()
 const scrollRef = ref<InstanceType<typeof NScrollbar> | null>(null)
 const isLoadingMore = ref(false)
 const prevScrollHeight = ref(0)
-const enableThinking = ref(false)
 const autoScrollEnabled = ref(true) // 是否开启自动滚动到底部
 let stopHeartbeat: (() => void) | null = null
 
@@ -119,7 +118,7 @@ function handleSend() {
       settings.value.model, 
       settings.value.apiKey, 
       settings.value.baseUrl, 
-      enableThinking.value,
+      settings.value.enableThinking,
       images.length > 0 ? [...images] : undefined
     )
   } else {
@@ -128,7 +127,7 @@ function handleSend() {
 }
 
 function handleToggleThinking() {
-  enableThinking.value = !enableThinking.value
+  toggleThinking()
 }
 
 function handleQuickAction(text: string) {
@@ -450,7 +449,7 @@ async function handleToggleTts() {
       :asr-listening="asrListening"
       :asr-recording="asrRecording"
       :asr-processing="asrProcessing"
-      :enable-thinking="enableThinking"
+      :enable-thinking="settings.enableThinking"
       @send="handleSend"
       @toggle-asr="handleToggleAsr"
       @toggle-thinking="handleToggleThinking"

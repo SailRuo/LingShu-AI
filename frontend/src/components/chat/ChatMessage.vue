@@ -1,14 +1,20 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import MarkdownIt from 'markdown-it'
-import { FileText, Brain } from 'lucide-vue-next'
+import { FileText, Brain, ChevronDown, ChevronRight } from 'lucide-vue-next'
 import type { ChatMessage, ChatMessageSegment, ChatToolSegment } from '@/types'
 
 const props = defineProps<{
   message: ChatMessage
   timeLabel: string
-  isLastUserMessage?: boolean  // 是否是最后一条用户消息（用于显示加载状态）
+  isLastUserMessage?: boolean
 }>()
+
+const reasoningExpanded = ref(false)
+
+function toggleReasoning() {
+  reasoningExpanded.value = !reasoningExpanded.value
+}
 
 const md = new MarkdownIt({
   html: true,
@@ -116,12 +122,18 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
           :key="segment.type === 'tool' ? (segment.toolCallId || segment.id || `${segment.toolName || 'tool'}-${index}`) : segment.type === 'reasoning' ? `reasoning-${index}` : `text-${index}`"
           class="message-segment"
         >
-          <div v-if="segment.type === 'reasoning'" class="reasoning-block">
-            <div class="reasoning-header">
-              <Brain :size="14" />
-              <span>推理过程</span>
+          <div v-if="segment.type === 'reasoning'" class="reasoning-block" :class="{ collapsed: !reasoningExpanded }">
+            <div class="reasoning-header" @click="toggleReasoning">
+              <div class="reasoning-header-left">
+                <Brain :size="14" />
+                <span>推理过程</span>
+              </div>
+              <div class="reasoning-toggle">
+                <ChevronDown v-if="reasoningExpanded" :size="16" />
+                <ChevronRight v-else :size="16" />
+              </div>
             </div>
-            <div class="reasoning-content" v-html="renderContent(segment.content)"></div>
+            <div v-show="reasoningExpanded" class="reasoning-content" v-html="renderContent(segment.content)"></div>
           </div>
 
           <div v-else-if="segment.type === 'tool'" class="tool-step">
@@ -395,16 +407,45 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
   border-radius: 12px;
   padding: 12px;
   margin-bottom: 14px;
+  transition: all 0.2s ease;
+}
+
+.reasoning-block.collapsed {
+  padding: 10px 12px;
 }
 
 .reasoning-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   font-size: 12px;
   font-weight: 600;
   color: #8b5cf6;
   margin-bottom: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.reasoning-block.collapsed .reasoning-header {
+  margin-bottom: 0;
+}
+
+.reasoning-header:hover {
+  opacity: 0.8;
+}
+
+.reasoning-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.reasoning-toggle {
+  display: flex;
+  align-items: center;
+  color: #8b5cf6;
+  transition: transform 0.2s ease;
 }
 
 .reasoning-content {

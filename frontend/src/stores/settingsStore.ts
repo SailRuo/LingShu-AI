@@ -12,6 +12,7 @@ export interface SystemSettings {
   ttsDefaultSpeed: number
   ttsDefaultFormat: string
   ttsEnabled: boolean
+  enableThinking: boolean
 }
 
 export interface AsrSettings {
@@ -30,7 +31,8 @@ const settings = ref<SystemSettings>({
   ttsDefaultVoice: 'alloy',
   ttsDefaultSpeed: 1.0,
   ttsDefaultFormat: 'mp3',
-  ttsEnabled: false
+  ttsEnabled: false,
+  enableThinking: false
 })
 
 const asrSettings = ref<AsrSettings>({
@@ -56,7 +58,8 @@ async function fetchSettings() {
         ttsDefaultVoice: data.ttsDefaultVoice || 'alloy',
         ttsDefaultSpeed: data.ttsDefaultSpeed || 1.0,
         ttsDefaultFormat: data.ttsDefaultFormat || 'mp3',
-        ttsEnabled: data.ttsEnabled ?? false
+        ttsEnabled: data.ttsEnabled ?? false,
+        enableThinking: localStorage.getItem('enableThinking') === 'true'
       }
       isLoaded.value = true
     }
@@ -116,6 +119,11 @@ async function saveAsrSettings() {
   }
 }
 
+function toggleThinking() {
+  settings.value.enableThinking = !settings.value.enableThinking
+  localStorage.setItem('enableThinking', String(settings.value.enableThinking))
+}
+
 export function useSettings() {
   return {
     settings,
@@ -124,6 +132,7 @@ export function useSettings() {
     fetchSettings,
     fetchAsrSettings,
     saveSettings,
-    saveAsrSettings
+    saveAsrSettings,
+    toggleThinking
   }
 }

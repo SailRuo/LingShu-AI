@@ -706,9 +706,22 @@ export function useChat() {
         return latestAssistant;
       }
 
+      const currentMessage = messages.value[lastAssistantIndex];
+      const currentReasoningSegments = (currentMessage.segments ?? []).filter(
+        (segment) => segment.type === "reasoning"
+      );
+      
+      const mergedSegments = [
+        ...currentReasoningSegments,
+        ...(latestAssistant.segments ?? []).filter(
+          (segment) => segment.type !== "reasoning"
+        ),
+      ];
+
       messages.value[lastAssistantIndex] = {
-        ...messages.value[lastAssistantIndex],
+        ...currentMessage,
         ...latestAssistant,
+        segments: mergedSegments.length > 0 ? mergedSegments : latestAssistant.segments,
       };
       
       return latestAssistant;
