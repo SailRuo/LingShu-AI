@@ -50,10 +50,10 @@ public class MemoryServiceImpl implements MemoryService {
 
     private static final double GAIN_THRESHOLD = 0.3;
     private static final Set<String> TOPIC_KEYS = Set.of("interest", "growth", "goal", "emotion", "relationship",
-            "event", "timeline", "memory");
+            "event", "timeline", "memory", "health");
     private static final Set<String> GENERIC_TOPIC_KEYS = Set.of("memory", "timeline");
     private static final Set<String> SUB_TYPES = Set.of("Preference", "EmotionState", "Person", "Project", "Goal",
-            "Event", "TimeAnchor", "Memory");
+            "Event", "TimeAnchor", "Memory", "HealthState");
     private static final Set<String> GENERIC_SUB_TYPES = Set.of("Memory", "TimeAnchor");
     private static final long SEMANTIC_CLASSIFY_TIMEOUT_SECONDS = 8;
     private static final long HISTORY_EMBED_TIMEOUT_SECONDS = 6;
@@ -385,9 +385,12 @@ public class MemoryServiceImpl implements MemoryService {
                 .query(message)
                 .timestamp(LocalDateTime.now())
                 .extractedEntities(new ArrayList<>())
-                .graphMatchedIds(new ArrayList<>())
                 .semanticMatches(new ArrayList<>())
+                .graphMatchedContent(new ArrayList<>())
+                .finalRankedContent(new ArrayList<>())
                 .finalRankedIds(new ArrayList<>());
+
+        List<String> finalFacts = new ArrayList<>();
 
         List<String> entities = extractEntities(message);
 
@@ -415,15 +418,19 @@ public class MemoryServiceImpl implements MemoryService {
                     relevantFacts = new ArrayList<>();
                 }
 
-                if (relevantFacts.size() < 3 || message.contains("我是谁") || message.contains("我的名字")
-                        || message.contains("叫什么")) {
-                    List<FactNode> coreFacts = user.getFacts().stream()
-                            .filter(f -> !relevantFacts.contains(f))
-                            .sorted((f1, f2) -> Double.compare(f2.getImportance(), f1.getImportance()))
-                            .limit(5 - relevantFacts.size() > 0 ? 5 - relevantFacts.size() : 2)
-                            .toList();
-                    relevantFacts.addAll(coreFacts);
-                    systemLogService.debug(String.format("图谱检索: 补充了 %d 条核心事实", coreFacts.size()), "MEMORY");
+                // 如果事实数量不足3个，或者是身份查询，则补充核心事实
+                boolean isIdentityQuery = isIdentityQuery(message, entities);
+                if (relevantFacts.size() < 3 || isIdentityQuery) {
+                    // Only inject core facts if it's an identity query or if we have NO relevant facts at all
+                    if (relevantFacts.isEmpty() || isIdentityQuery) {
+                        List<FactNode> coreFacts = user.getFacts().stream()
+                                .filter(f -> !relevantFacts.contains(f))
+                                .sorted((f1, f2) -> Double.compare(f2.getImportance(), f1.getImportance()))
+                                .limit(isIdentityQuery ? 5 : 2)
+                                .toList();
+                        relevantFacts.addAll(coreFacts);
+                        systemLogService.debug(String.format("图谱检索: 保底补充了 %d 条核心事实", coreFacts.size()), "MEMORY");
+                    }
                 }
 
                 if (!relevantFacts.isEmpty()) {
@@ -432,9 +439,18 @@ public class MemoryServiceImpl implements MemoryService {
                     relevantFacts.forEach(f -> {
                         log.debug("  Fact: {}", f.getContent());
                         contextBuilder.append("- ").append(f.getContent()).append("\n");
+                        finalFacts.add(f.getContent());
                         systemLogService.info(String.format("  - %s (重要度: %.2f)", f.getContent(), f.getImportance()),
                                 "MEMORY");
                     });
+                    eventBuilder.graphMatchedContent(relevantFacts.stream().map(FactNode::getContent).collect(Collectors.toList()));
+                    eventBuilder.graphMatchedIds(relevantFacts.stream().map(FactNode::getId).collect(Collectors.toList()));
+
+                    // If we fall back to core facts or specific identity queries, mark it
+                    if (relevantFacts.size() > 0 && isIdentityQuery) {
+                        eventBuilder.fallbackActivated(true);
+                        eventBuilder.baseFactContents(relevantFacts.stream().map(FactNode::getContent).collect(Collectors.toList()));
+                    }
                 } else {
                     systemLogService.debug("图谱检索: 未找到与当前对话相关的事实", "MEMORY");
                 }
@@ -445,6 +461,7 @@ public class MemoryServiceImpl implements MemoryService {
         });
 
         if (!needsSemanticRetrieval(message, entities, eventBuilder)) {
+            eventBuilder.finalRankedContent(finalFacts);
             recordRetrievalEvent(eventBuilder.build());
             return contextBuilder.toString();
         }
@@ -483,6 +500,7 @@ public class MemoryServiceImpl implements MemoryService {
 
                 log.trace("Match text: {} (score: {})", matchText, score);
                 contextBuilder.append(matchText).append(" (relevant); ");
+                finalFacts.add(displayText);
                 String abbreviated = displayText.length() > 50 ? displayText.substring(0, 50) + "..." : displayText;
                 systemLogService.info(String.format("  [%d] 相似度: %.3f | 内容: %s", i + 1, score, abbreviated), "MEMORY");
 
@@ -505,9 +523,30 @@ public class MemoryServiceImpl implements MemoryService {
 
         eventBuilder.semanticMatches(semanticMatches);
         eventBuilder.finalRankedIds(finalRankedIds);
+        eventBuilder.finalRankedContent(finalFacts);
         recordRetrievalEvent(eventBuilder.build());
 
         return contextBuilder.toString();
+    }
+
+    private boolean isIdentityQuery(String message, List<String> entities) {
+        if (message == null) return false;
+        
+        // 1. Check direct hardcoded patterns (fast path)
+        if (message.contains("我是谁") || message.contains("我的名字") || message.contains("叫什么") || message.contains("关于我")) {
+            return true;
+        }
+        
+        // 2. Check extracted entities for identity intent
+        if (entities != null) {
+            for (String entity : entities) {
+                if (entity.equals("名字") || entity.equals("身份") || entity.equals("我是谁")) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
     }
 
     private boolean needsSemanticRetrieval(String message, List<String> entities,
@@ -525,6 +564,7 @@ public class MemoryServiceImpl implements MemoryService {
         List<FactNode> activatedFacts = factRepository.findFactsByKeywords(entities);
 
         eventBuilder.graphMatchedIds(activatedFacts.stream().map(FactNode::getId).collect(Collectors.toList()));
+        eventBuilder.graphMatchedContent(activatedFacts.stream().map(FactNode::getContent).collect(Collectors.toList()));
 
         if (activatedFacts.isEmpty()) {
             systemLogService.debug("GAM-RAG: 实体未激活任何记忆路径，增益=0，跳过语义检索", "MEMORY");
@@ -548,14 +588,34 @@ public class MemoryServiceImpl implements MemoryService {
             if (entityExtractor != null) {
                 String modelName = dynamicMemoryModel.getModelName();
                 systemLogService.llmStart("entity-extractor", modelName, "MEMORY");
-                List<String> extracted = entityExtractor.extractEntities(message);
+                String extractedJson = entityExtractor.extractEntities(message);
                 systemLogService.llmEnd(0, "MEMORY");
 
-                if (extracted != null) {
-                    for (String word : extracted) {
-                        if (word != null && !word.trim().isEmpty() && !STOP_WORDS.contains(word.toLowerCase())) {
-                            entities.add(word.trim());
+                if (extractedJson != null && !extractedJson.trim().isEmpty()) {
+                    // Clean up potential markdown formatting
+                    String cleanJson = extractedJson.replaceAll("```json", "").replaceAll("```", "").trim();
+                    log.debug("实体提取器原始返回: {}", cleanJson);
+                    
+                    try {
+                        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                        // 先用 JsonNode 解析，处理 LLM 可能返回嵌套数组的情况
+                        com.fasterxml.jackson.databind.JsonNode rootNode = mapper.readTree(cleanJson);
+                        List<String> extracted = new java.util.ArrayList<>();
+                        
+                        if (rootNode.isArray()) {
+                            flattenJsonArray(rootNode, extracted);
                         }
+                        
+                        if (extracted != null) {
+                            for (String word : extracted) {
+                                if (word != null && !word.trim().isEmpty() && !STOP_WORDS.contains(word.toLowerCase())) {
+                                    entities.add(word.trim());
+                                }
+                            }
+                        }
+                        log.debug("实体提取结果(过滤后): {}", entities);
+                    } catch (Exception parseEx) {
+                        log.warn("Failed to parse entity JSON: {}", cleanJson, parseEx);
                     }
                 }
             }
@@ -566,15 +626,68 @@ public class MemoryServiceImpl implements MemoryService {
 
         // Fallback to regex split if LLM extraction failed or returned empty
         if (entities.isEmpty()) {
-            String[] words = message.replaceAll("[\\p{Punct}\\s+]", " ").split("\\s+");
+            log.debug("LLM实体提取为空，使用回退逻辑处理: {}", message);
+            // 先清理标点和空白
+            String cleanMsg = message.replaceAll("[\\p{Punct}\\p{IsPunctuation}\\u3000-\\u303F\\uFF00-\\uFFEF\\s]+", " ").trim();
+            String[] words = cleanMsg.split("\\s+");
+            
             for (String word : words) {
-                if (word.length() >= 1 && !STOP_WORDS.contains(word.toLowerCase())) {
+                if (word.length() >= 2 && word.length() <= 4 && !STOP_WORDS.contains(word.toLowerCase())) {
                     entities.add(word);
                 }
             }
+            
+            // 对于没有空格的中文文本，从文本中剔除停用字符后提取有意义的连续片段
+            if (entities.isEmpty() && !message.contains(" ")) {
+                // 将停用词替换为分隔符，然后提取剩余片段
+                String processed = cleanMsg.replace(" ", "");
+                for (String sw : STOP_WORDS) {
+                    processed = processed.replace(sw, "|");
+                }
+                // 提取分割后的有意义片段
+                String[] segments = processed.split("\\|+");
+                for (String seg : segments) {
+                    String trimmed = seg.trim();
+                    if (trimmed.length() >= 2 && trimmed.length() <= 4) {
+                        entities.add(trimmed);
+                    } else if (trimmed.length() > 4) {
+                        // 对较长的片段，取前2和前3字符作为实体
+                        entities.add(trimmed.substring(0, 2));
+                        entities.add(trimmed.substring(0, Math.min(3, trimmed.length())));
+                    }
+                }
+            }
+            
+            // 只对非常短的文本（<=6字）启用 N-gram，避免长句产生垃圾
+            if (entities.isEmpty() && cleanMsg.replace(" ", "").length() <= 6) {
+                String shortMsg = cleanMsg.replace(" ", "");
+                for (int i = 0; i < shortMsg.length() - 1; i++) {
+                    String chunk2 = shortMsg.substring(i, i + 2);
+                    if (!STOP_WORDS.contains(chunk2)) entities.add(chunk2);
+                }
+            }
+            
+            log.debug("回退实体提取结果: {}", entities);
         }
 
         return entities.stream().distinct().limit(10).collect(java.util.stream.Collectors.toList());
+    }
+
+    /**
+     * 递归扁平化 JSON 数组，处理 LLM 可能返回嵌套数组（如 [["今天", "干什么"]]）的情况
+     */
+    private void flattenJsonArray(com.fasterxml.jackson.databind.JsonNode node, List<String> result) {
+        if (node.isArray()) {
+            for (com.fasterxml.jackson.databind.JsonNode child : node) {
+                if (child.isTextual()) {
+                    result.add(child.asText());
+                } else if (child.isArray()) {
+                    flattenJsonArray(child, result);
+                } else if (child.isValueNode()) {
+                    result.add(child.asText());
+                }
+            }
+        }
     }
 
     private double calculateGain(List<String> entities, List<FactNode> activatedFacts) {
@@ -940,7 +1053,8 @@ public class MemoryServiceImpl implements MemoryService {
 
         if (factRelationshipEvaluator != null) {
             try {
-                systemLogService.llmStart("fact-relationship-evaluator-guess", "ollama", "FACT");
+                String modelName = dynamicMemoryModel.getModelName();
+                systemLogService.llmStart("fact-relationship-evaluator-guess", modelName, "FACT");
                 com.lingshu.ai.core.dto.FactRelationshipResult relResult = factRelationshipEvaluator
                         .evaluate(leftContent, rightContent);
                 systemLogService.llmEnd(0, "FACT");
@@ -953,7 +1067,7 @@ public class MemoryServiceImpl implements MemoryService {
                 }
             } catch (Exception e) {
                 systemLogService.llmError(e.getMessage(), "FACT");
-                log.warn("Fact relationship evaluation fallback to local rules: {}", e.getMessage());
+                log.error("Fact relationship evaluation fallback to local rules: {}", e.getMessage());
             }
         }
 
@@ -1079,7 +1193,8 @@ public class MemoryServiceImpl implements MemoryService {
                     continue;
 
                 if (factRelationshipEvaluator != null) {
-                    systemLogService.llmStart("fact-relationship-evaluator", "ollama", "FACT");
+                    String modelName = dynamicMemoryModel.getModelName();
+                    systemLogService.llmStart("fact-relationship-evaluator", modelName, "FACT");
                     com.lingshu.ai.core.dto.FactRelationshipResult relResult = factRelationshipEvaluator
                             .evaluate(existingFact.getContent() == null ? "" : existingFact.getContent(), factText);
                     systemLogService.llmEnd(0, "FACT");
@@ -1289,6 +1404,9 @@ public class MemoryServiceImpl implements MemoryService {
         if (containsAny(content, "焦虑", "开心", "难过", "情绪", "压力", "睡眠", "疲惫")) {
             return "emotion";
         }
+        if (containsAny(content, "消化不良", "感冒", "头疼", "过敏", "生病", "健康", "身体")) {
+            return "health";
+        }
         if (containsAny(content, "朋友", "家人", "同事", "老师", "她", "他", "关系")) {
             return "relationship";
         }
@@ -1307,6 +1425,7 @@ public class MemoryServiceImpl implements MemoryService {
             case "growth" -> "成长计划";
             case "goal" -> "目标轨道";
             case "emotion" -> "情绪状态";
+            case "health" -> "身体状况";
             case "relationship" -> "关系网络";
             case "event" -> "事件带";
             case "timeline" -> "近期事件";
@@ -1329,6 +1448,9 @@ public class MemoryServiceImpl implements MemoryService {
         }
         if (containsAny(content, "焦虑", "开心", "难过", "压力", "疲惫", "睡眠")) {
             return "EmotionState";
+        }
+        if (containsAny(content, "消化不良", "感冒", "头疼", "过敏", "生病", "健康", "身体")) {
+            return "HealthState";
         }
         if (containsAny(content, "朋友", "家人", "同事", "老师", "她", "他")) {
             return "Person";
@@ -1502,7 +1624,8 @@ public class MemoryServiceImpl implements MemoryService {
             return null;
         }
         try {
-            systemLogService.llmStart("fact-semantic-classifier", "ollama", "FACT");
+            String modelName = dynamicMemoryModel.getModelName();
+            systemLogService.llmStart("fact-semantic-classifier", modelName, "FACT");
             CompletableFuture<FactSemanticClassification> future = CompletableFuture.supplyAsync(
                     () -> factSemanticClassifier.classify(factText, buildHistorySummary(user)));
             FactSemanticClassification classification = future.get(SEMANTIC_CLASSIFY_TIMEOUT_SECONDS, TimeUnit.SECONDS);

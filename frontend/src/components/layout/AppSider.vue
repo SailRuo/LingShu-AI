@@ -167,8 +167,8 @@ const infraNav = [
 
 .logo-mark {
   position: relative;
-  width: 64px;
-  height: 64px;
+  width: 48px;
+  height: 48px;
   display: flex;
   align-items: center;
   justify-content: center;

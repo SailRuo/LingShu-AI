@@ -17,12 +17,15 @@ public interface EntityExtractor {
             3. 保持实体词的独立性，不要提取过长的句子。例如：“写代码的应该买什么外设”，应提取为 ["写代码", "买", "外设"]。
             4. 如果输入很短且都是核心词，可以直接提取。
             5. 提取的实体词数量控制在 1 到 5 个之间。
+            6. 特别注意：如果用户询问“我是谁”、“我的名字”、“我叫什么”、“关于我”，必须提取出 ["名字", "身份", "我是谁"] 这样的核心意图词。
             
             【返回格式】
             请直接返回一个 JSON 数组，包含提取出的实体词字符串。不要包含任何其他解释性文本或 Markdown 标记（如 ```json）。
             例如：
             ["实体1", "实体2", "实体3"]
+            
+            如果无法提取任何实体，请返回空数组：[]
             """)
     @UserMessage("请提取以下文本中的核心实体词：{{message}}")
-    List<String> extractEntities(@V("message") String message);
+    String extractEntities(@V("message") String message);
 }
