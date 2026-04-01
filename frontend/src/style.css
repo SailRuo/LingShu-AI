@@ -30,8 +30,10 @@ body {
 .mesh-bg {
   position: fixed;
   inset: 0;
-  z-index: -1; /* 在最底层 */
+  z-index: -1;
   overflow: hidden;
+  contain: strict;
+  transform: translateZ(0);
 }
 
 .mesh-blob {
@@ -39,18 +41,18 @@ body {
   width: 80vmax;
   height: 80vmax;
   border-radius: 50%;
-  filter: blur(120px);
+  filter: blur(80px);
   opacity: 0.25;
   pointer-events: none;
-  /* Mesh 渐变动画 - 根据主题有不同的速度 */
   transition: background 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
+  contain: layout style;
 }
 
 .mesh-1 { 
   background: var(--color-bg-mesh-1); 
   top: -30%; 
   left: -20%; 
-  /* 动画速度根据主题类型调整 */
   animation: float 50s infinite ease-in-out;
   animation-duration: var(--mesh-animation-speed, 50s);
 }
@@ -73,22 +75,34 @@ body {
 
 /* 主题专属 Mesh 动画速度 */
 .dark.cyberPurple {
-  --mesh-animation-speed: 35s; /* 赛博紫 - 快速流动 */
+  --mesh-animation-speed: 35s;
 }
 .dark.deepTechFuturistic {
-  --mesh-animation-speed: 45s; /* 科技感 - 中速 */
+  --mesh-animation-speed: 45s;
 }
 .dark.midnightBlue {
-  --mesh-animation-speed: 55s; /* 午夜蓝 - 缓慢深邃 */
+  --mesh-animation-speed: 55s;
 }
 .light.polarLight {
-  --mesh-animation-speed: 60s; /* 极地白 - 缓慢宁静 */
+  --mesh-animation-speed: 60s;
 }
 
 @keyframes float {
   0%, 100% { transform: translate(0, 0) scale(1); }
   33% { transform: translate(3%, 8%) scale(1.05); }
   66% { transform: translate(-2%, 5%) scale(0.98); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mesh-bg {
+    contain: strict;
+  }
+
+  .mesh-blob {
+    animation: none !important;
+    transform: none !important;
+    will-change: auto;
+  }
 }
 
 /* Glass Effect - 分层毛玻璃效果 */
@@ -183,4 +197,28 @@ body {
 .slide-up-leave-to {
   opacity: 0;
   transform: translateY(20px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  body {
+    transition: none !important;
+  }
+
+  .glass-morphism,
+  .glass-light,
+  .glass-medium,
+  .glass-heavy,
+  .glass-panel {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
 }

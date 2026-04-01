@@ -644,4 +644,22 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
     box-shadow: 0 0 20px var(--color-primary);
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .message-row.user,
+  .message-row.assistant:not(.is-loading) {
+    animation: none !important;
+  }
+
+  .loading-stars span {
+    animation: none !important;
+    opacity: 0.8;
+    box-shadow: none;
+  }
+
+  .pulse-dot {
+    animation: none !important;
+    box-shadow: none;
+  }
+}
 </style>

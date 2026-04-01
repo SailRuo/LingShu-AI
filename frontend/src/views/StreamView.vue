@@ -552,4 +552,15 @@ const getScoreColor = (score: number) => {
   font-size: 11px;
   line-height: 1.4;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .dot.pulse {
+    animation: none !important;
+    box-shadow: none;
+  }
+
+  .event-card {
+    transition: none;
+  }
+}
 </style>

@@ -3,7 +3,7 @@ import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getFullUrl } from '@/utils/request'
 import { NButton, NDropdown, NIcon, NInput, NProgress, NScrollbar, NSlider, NTag, useMessage } from 'naive-ui'
 import { Clock3, Eye, Play, RefreshCcw, Search, Sparkles, Target, Trash2, ZoomIn, ZoomOut } from 'lucide-vue-next'
-
+import { useIntersectionObserver } from '@vueuse/core'
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -57,7 +57,7 @@ let cssRenderer: CSS2DRenderer
 let scene: THREE.Scene
 let camera: THREE.PerspectiveCamera
 let controls: OrbitControls
-let animationFrameId: number
+let animationFrameId: number | null = null
 const meshGroup = new THREE.Group()
 const linkGroup = new THREE.Group()
 
@@ -345,8 +345,6 @@ function initThree() {
   renderer.domElement.addEventListener('pointermove', onPointerMove)
   renderer.domElement.addEventListener('click', onClick)
   renderer.domElement.addEventListener('contextmenu', onContextMenu)
-
-  animate()
 }
 
 function onPointerMove(event: PointerEvent) {
@@ -392,8 +390,7 @@ function onContextMenu(event: MouseEvent) {
   }
 }
 
-function animate() {
-  animationFrameId = requestAnimationFrame(animate)
+function renderLoop() {
   controls.update()
   
   const time = Date.now() * 0.005
@@ -421,6 +418,22 @@ function animate() {
 
   renderer.render(scene, camera)
   cssRenderer.render(scene, camera)
+}
+
+function startAnimation() {
+  if (animationFrameId !== null) return // Already running
+  function loop() {
+    renderLoop()
+    animationFrameId = window.requestAnimationFrame(loop)
+  }
+  loop()
+}
+
+function stopAnimation() {
+  if (animationFrameId !== null) {
+    window.cancelAnimationFrame(animationFrameId)
+    animationFrameId = null
+  }
 }
 
 function onWindowResize() {
@@ -575,6 +588,7 @@ function updateColors() {
 }
 
 let themeObserver: MutationObserver | null = null
+let intersectionObserverStop: (() => void) | null = null
 
 onMounted(async () => { 
   updateColors()
@@ -583,15 +597,32 @@ onMounted(async () => {
   themeObserver.observe(document.body, { attributes: true, attributeFilter: ['style', 'class'] })
   
   initThree()
-  resizeObserver.value = new ResizeObserver(onWindowResize)
-  if (galaxyStageRef.value) resizeObserver.value.observe(galaxyStageRef.value)
+
+  if (galaxyStageRef.value) {
+    const { stop } = useIntersectionObserver(
+      galaxyStageRef,
+      ([{ isIntersecting }]) => {
+        if (isIntersecting) {
+          startAnimation()
+        } else {
+          stopAnimation()
+        }
+      }
+    )
+    intersectionObserverStop = stop
+
+    resizeObserver.value = new ResizeObserver(onWindowResize)
+    resizeObserver.value.observe(galaxyStageRef.value)
+  }
+
   await fetchGraph() 
 })
 
 onBeforeUnmount(() => {
-  cancelAnimationFrame(animationFrameId)
+  stopAnimation()
   resizeObserver.value?.disconnect()
   themeObserver?.disconnect()
+  intersectionObserverStop?.()
   
   for (const group of nodeMeshes.values()) {
     const cssObject = group.children.find(c => c instanceof CSS2DObject) as CSS2DObject

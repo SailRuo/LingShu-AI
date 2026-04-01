@@ -787,4 +787,22 @@ const components = computed(() => [
     grid-template-columns: 1fr;
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .orb-ring {
+    animation: none !important;
+  }
+
+  .component-card:hover {
+    transform: none;
+  }
+
+  .metric-card:hover {
+    transform: none;
+  }
+
+  .orb-icon.healthy {
+    filter: none;
+  }
+}
 </style>

@@ -520,4 +520,19 @@ function handleMicMouseUp() {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.2); }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-dot,
+  .spinning,
+  .spin,
+  .breathing,
+  .pulse {
+    animation: none !important;
+  }
+
+  .send-btn:hover:not(:disabled) {
+    transform: none;
+    box-shadow: none;
+  }
+}
 </style>

@@ -531,12 +531,12 @@ public class MemoryServiceImpl implements MemoryService {
 
     private boolean isIdentityQuery(String message, List<String> entities) {
         if (message == null) return false;
-        
+
         // 1. Check direct hardcoded patterns (fast path)
         if (message.contains("我是谁") || message.contains("我的名字") || message.contains("叫什么") || message.contains("关于我")) {
             return true;
         }
-        
+
         // 2. Check extracted entities for identity intent
         if (entities != null) {
             for (String entity : entities) {
@@ -545,7 +545,7 @@ public class MemoryServiceImpl implements MemoryService {
                 }
             }
         }
-        
+
         return false;
     }
 
@@ -595,17 +595,17 @@ public class MemoryServiceImpl implements MemoryService {
                     // Clean up potential markdown formatting
                     String cleanJson = extractedJson.replaceAll("```json", "").replaceAll("```", "").trim();
                     log.debug("实体提取器原始返回: {}", cleanJson);
-                    
+
                     try {
                         com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
                         // 先用 JsonNode 解析，处理 LLM 可能返回嵌套数组的情况
                         com.fasterxml.jackson.databind.JsonNode rootNode = mapper.readTree(cleanJson);
                         List<String> extracted = new java.util.ArrayList<>();
-                        
+
                         if (rootNode.isArray()) {
                             flattenJsonArray(rootNode, extracted);
                         }
-                        
+
                         if (extracted != null) {
                             for (String word : extracted) {
                                 if (word != null && !word.trim().isEmpty() && !STOP_WORDS.contains(word.toLowerCase())) {
@@ -630,13 +630,13 @@ public class MemoryServiceImpl implements MemoryService {
             // 先清理标点和空白
             String cleanMsg = message.replaceAll("[\\p{Punct}\\p{IsPunctuation}\\u3000-\\u303F\\uFF00-\\uFFEF\\s]+", " ").trim();
             String[] words = cleanMsg.split("\\s+");
-            
+
             for (String word : words) {
                 if (word.length() >= 2 && word.length() <= 4 && !STOP_WORDS.contains(word.toLowerCase())) {
                     entities.add(word);
                 }
             }
-            
+
             // 对于没有空格的中文文本，从文本中剔除停用字符后提取有意义的连续片段
             if (entities.isEmpty() && !message.contains(" ")) {
                 // 将停用词替换为分隔符，然后提取剩余片段
@@ -657,7 +657,7 @@ public class MemoryServiceImpl implements MemoryService {
                     }
                 }
             }
-            
+
             // 只对非常短的文本（<=6字）启用 N-gram，避免长句产生垃圾
             if (entities.isEmpty() && cleanMsg.replace(" ", "").length() <= 6) {
                 String shortMsg = cleanMsg.replace(" ", "");
@@ -666,7 +666,7 @@ public class MemoryServiceImpl implements MemoryService {
                     if (!STOP_WORDS.contains(chunk2)) entities.add(chunk2);
                 }
             }
-            
+
             log.debug("回退实体提取结果: {}", entities);
         }
 
@@ -1853,7 +1853,6 @@ public class MemoryServiceImpl implements MemoryService {
         try {
             factRepository.deleteById(factId);
             log.debug("Neo4j node removal successful: {}", factId);
-            synchronizeAllFactRelations();
             systemLogService.dbEnd("neo4j_delete", "MEMORY");
         } catch (Exception e) {
             log.error("Neo4j cleanup failed for factId {}: {}", factId, e.getMessage());
