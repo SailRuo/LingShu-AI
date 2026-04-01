@@ -79,7 +79,7 @@ public class MemoryServiceImpl implements MemoryService {
     private FactSemanticClassifier factSemanticClassifier;
     private com.lingshu.ai.core.service.FactRelationshipEvaluator factRelationshipEvaluator;
     private EmotionAwareFactExtractor emotionAwareFactExtractor;
-    private com.lingshu.ai.core.service.EntityExtractor entityExtractor;
+    // Removed entityExtractor
     private volatile Map<String, Object> lastMaintenanceSummary = new LinkedHashMap<>();
     private final java.util.Queue<com.lingshu.ai.core.dto.MemoryRetrievalEvent> recentRetrievalEvents = new java.util.concurrent.ConcurrentLinkedQueue<>();
 
@@ -114,9 +114,7 @@ public class MemoryServiceImpl implements MemoryService {
         this.emotionAwareFactExtractor = AiServices.builder(EmotionAwareFactExtractor.class)
                 .chatModel(dynamicMemoryModel)
                 .build();
-        this.entityExtractor = AiServices.builder(com.lingshu.ai.core.service.EntityExtractor.class)
-                .chatModel(dynamicMemoryModel)
-                .build();
+        // Removed entityExtractor initialization
 
         try {
             factRepository.createOriginalMessageIndex();
@@ -584,49 +582,31 @@ public class MemoryServiceImpl implements MemoryService {
         }
 
         List<String> entities = new java.util.ArrayList<>();
+
+        // 1. 规则引擎：处理特殊意图
+        if (message.contains("我是谁") || message.contains("我叫什么") || message.contains("关于我")) {
+            entities.addAll(java.util.Arrays.asList("名字", "身份", "我是谁"));
+        }
+
         try {
-            if (entityExtractor != null) {
-                String modelName = dynamicMemoryModel.getModelName();
-                systemLogService.llmStart("entity-extractor", modelName, "MEMORY");
-                String extractedJson = entityExtractor.extractEntities(message);
-                systemLogService.llmEnd(0, "MEMORY");
-
-                if (extractedJson != null && !extractedJson.trim().isEmpty()) {
-                    // Clean up potential markdown formatting
-                    String cleanJson = extractedJson.replaceAll("```json", "").replaceAll("```", "").trim();
-                    log.debug("实体提取器原始返回: {}", cleanJson);
-
-                    try {
-                        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-                        // 先用 JsonNode 解析，处理 LLM 可能返回嵌套数组的情况
-                        com.fasterxml.jackson.databind.JsonNode rootNode = mapper.readTree(cleanJson);
-                        List<String> extracted = new java.util.ArrayList<>();
-
-                        if (rootNode.isArray()) {
-                            flattenJsonArray(rootNode, extracted);
+            // 2. 本地 NLP 提词库：提取核心名词、动词
+            List<String> nlpKeywords = com.hankcs.hanlp.HanLP.extractKeyword(message, 5);
+            if (nlpKeywords != null) {
+                for (String kw : nlpKeywords) {
+                    if (kw != null && !kw.trim().isEmpty() && !STOP_WORDS.contains(kw.toLowerCase())) {
+                        if (!entities.contains(kw.trim())) {
+                            entities.add(kw.trim());
                         }
-
-                        if (extracted != null) {
-                            for (String word : extracted) {
-                                if (word != null && !word.trim().isEmpty() && !STOP_WORDS.contains(word.toLowerCase())) {
-                                    entities.add(word.trim());
-                                }
-                            }
-                        }
-                        log.debug("实体提取结果(过滤后): {}", entities);
-                    } catch (Exception parseEx) {
-                        log.warn("Failed to parse entity JSON: {}", cleanJson, parseEx);
                     }
                 }
             }
         } catch (Exception e) {
-            log.warn("LLM entity extraction failed, falling back to regex split: {}", e.getMessage());
-            systemLogService.llmError(e.getMessage(), "MEMORY");
+            log.warn("HanLP entity extraction failed, falling back to regex split: {}", e.getMessage());
         }
 
-        // Fallback to regex split if LLM extraction failed or returned empty
+        // Fallback or additional filtering if needed
         if (entities.isEmpty()) {
-            log.debug("LLM实体提取为空，使用回退逻辑处理: {}", message);
+            log.debug("HanLP实体提取为空，使用回退逻辑处理: {}", message);
             // 先清理标点和空白
             String cleanMsg = message.replaceAll("[\\p{Punct}\\p{IsPunctuation}\\u3000-\\u303F\\uFF00-\\uFFEF\\s]+", " ").trim();
             String[] words = cleanMsg.split("\\s+");

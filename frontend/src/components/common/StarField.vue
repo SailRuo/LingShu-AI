@@ -173,13 +173,13 @@ const createMeteor = (usedStarts: Array<{ x: number; y: number }>, forceVanish =
     brightness: trajectory === 'vanish' ? random(0.68, 0.9) : random(0.8, 1),
     endScale: trajectory === 'vanish' ? random(0.22, 0.48) : random(0.82, 1.05),
     trajectory,
-    delayTimer: random(120, 600) // 延迟 2 到 10 秒
+    delayTimer: random(300, 1800) // 延迟 5 到 30 秒
   }
 }
 
 const generateMeteors = () => {
   meteors = []
-  const numMeteors = 6
+  const numMeteors = 2
   const usedStarts: Array<{ x: number; y: number }> = []
   const vanishIndex = Math.random() < 0.45 ? Math.floor(random(0, numMeteors)) : -1
 

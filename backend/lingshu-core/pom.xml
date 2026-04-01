@@ -71,7 +71,7 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis-reactive</artifactId>
         </dependency>
-        
+
         <!-- Caffeine Cache for Tool Result Summary -->
         <dependency>
             <groupId>com.github.ben-manes.caffeine</groupId>
@@ -82,6 +82,18 @@
             <groupId>net.coobird</groupId>
             <artifactId>thumbnailator</artifactId>
             <version>0.4.20</version>
+        </dependency>
+        <!-- HanLP for NLP Keyword Extraction -->
+        <dependency>
+            <groupId>com.hankcs</groupId>
+            <artifactId>hanlp</artifactId>
+            <version>portable-1.8.4</version>
+        </dependency>
+        <!-- Jieba for local Chinese Keyword Extraction -->
+        <dependency>
+            <groupId>com.huaban</groupId>
+            <artifactId>jieba-analysis</artifactId>
+            <version>1.0.2</version>
         </dependency>
         <!-- Lombok -->
         <dependency>
