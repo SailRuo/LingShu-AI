@@ -374,4 +374,24 @@ public class ChatController {
 
         return chatService.streamChat(request.message(), request.agentId(), userId, finalModel, finalApiKey, finalBaseUrl);
     }
+
+    @PostMapping(value = "/sync", produces = MediaType.APPLICATION_JSON_VALUE)
+    public reactor.core.publisher.Mono<Map<String, String>> syncChat(
+            @RequestBody ChatRequest request,
+            @RequestHeader(value = "X-LS-BaseUrl", required = false) String baseUrl,
+            @RequestHeader(value = "X-LS-ApiKey", required = false) String apiKey,
+            @RequestHeader(value = "X-LS-Model", required = false) String model) {
+
+        String finalBaseUrl = request.baseUrl() != null ? request.baseUrl() : baseUrl;
+        String finalApiKey = request.apiKey() != null ? request.apiKey() : apiKey;
+        String finalModel = request.model() != null ? request.model() : model;
+        String userId = request.userId() != null ? request.userId() : "User";
+
+        return chatService.streamChat(request.message(), request.agentId(), userId, finalModel, finalApiKey, finalBaseUrl)
+                .reduce("", String::concat)
+                .map(fullResponse -> {
+                    String cleanResponse = fullResponse.replaceAll("\u0001REASONING\u0001.*?\u0001/REASONING\u0001", "");
+                    return Map.of("reply", cleanResponse);
+                });
+    }
 }

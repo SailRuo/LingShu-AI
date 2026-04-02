@@ -32,7 +32,7 @@ public class SystemSetting {
      *   "embedding": { ... },
      *   "proactive": { ... }
      * }
-     * 
+     *
      * 或者对于 local_tools ID：
      * {
      *   "tools": [
@@ -154,35 +154,35 @@ public class SystemSetting {
     }
 
     // ========== 便捷访问方法 ==========
-    
+
     /**
      * 获取 LLM 的 source 配置
      */
     public String getSource() {
         return (String) getLlmConfig().get("source");
     }
-    
+
     /**
      * 获取 LLM 的 model 配置
      */
     public String getChatModel() {
         return (String) getLlmConfig().get("model");
     }
-    
+
     /**
      * 获取 LLM 的 baseUrl 配置
      */
     public String getBaseUrl() {
         return (String) getLlmConfig().get("baseUrl");
     }
-    
+
     /**
      * 获取 LLM 的 apiKey 配置
      */
     public String getApiKey() {
         return (String) getLlmConfig().get("apiKey");
     }
-    
+
     /**
      * 获取 LLM 的 enableThinking 配置（是否启用推理/思考模式）
      */
@@ -193,42 +193,42 @@ public class SystemSetting {
         }
         return false;
     }
-    
+
     /**
      * 获取 Embedding 的 source 配置
      */
     public String getEmbedSource() {
         return (String) getEmbeddingConfig().get("source");
     }
-    
+
     /**
      * 获取 Embedding 的 model 配置
      */
     public String getEmbedModel() {
         return (String) getEmbeddingConfig().get("model");
     }
-    
+
     /**
      * 获取 Embedding 的 baseUrl 配置
      */
     public String getEmbedBaseUrl() {
         return (String) getEmbeddingConfig().get("baseUrl");
     }
-    
+
     /**
      * 获取 Embedding 的 apiKey 配置
      */
     public String getEmbedApiKey() {
         return (String) getEmbeddingConfig().get("apiKey");
     }
-    
+
     /**
      * 获取主动问候是否启用
      */
     public Boolean getProactiveEnabled() {
         return (Boolean) getProactiveConfig().get("enabled");
     }
-    
+
     /**
      * 获取不活跃阈值（分钟）
      */
@@ -239,7 +239,7 @@ public class SystemSetting {
         }
         return 5;
     }
-    
+
     /**
      * 获取问候冷却时间（秒）
      */
@@ -250,7 +250,7 @@ public class SystemSetting {
         }
         return 300;
     }
-    
+
     /**
      * 获取不活跃检查间隔（毫秒）
      */
@@ -483,6 +483,43 @@ public class SystemSetting {
             return (Map<String, Object>) tts;
         }
         return createDefaultTtsConfig();
+    }
+
+    /**
+     * 获取微信 Bot 配置
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getWechatBotConfig() {
+        if (settings == null) {
+            return createDefaultWechatBotConfig();
+        }
+        Object wechatBot = settings.get("wechatBot");
+        if (wechatBot instanceof Map) {
+            return (Map<String, Object>) wechatBot;
+        }
+        return createDefaultWechatBotConfig();
+    }
+
+    /**
+     * 更新微信 Bot 配置
+     */
+    public void setWechatBotConfig(Map<String, Object> config) {
+        if (this.settings == null) {
+            this.settings = new java.util.HashMap<>();
+        }
+        this.settings.put("wechatBot", config);
+    }
+
+    /**
+     * 创建默认微信 Bot 配置
+     */
+    public Map<String, Object> createDefaultWechatBotConfig() {
+        Map<String, Object> config = new java.util.HashMap<>();
+        config.put("botToken", "");
+        config.put("baseUrl", "https://ilinkai.weixin.qq.com");
+        config.put("status", "wait");
+        config.put("lastLoginTime", "");
+        return config;
     }
 
     /**

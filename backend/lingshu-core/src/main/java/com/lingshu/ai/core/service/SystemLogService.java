@@ -38,6 +38,13 @@ public class SystemLogService {
             redisTemplate.opsForList().leftPush(LOG_LIST_KEY, json);
             redisTemplate.opsForList().trim(LOG_LIST_KEY, 0, MAX_HISTORY - 1);
             redisTemplate.convertAndSend(LOG_CHANNEL, json);
+        } catch (org.springframework.data.redis.RedisSystemException | IllegalStateException e) {
+            // 特殊处理连接工厂已销毁的情况（通常发生在应用重启/关闭期间）
+            if (e.getMessage() != null && (e.getMessage().contains("destroyed") || e.getMessage().contains("closed"))) {
+                // 静默失败，不再打印到 System.err，因为这是正常的 Context 关闭现象
+                return;
+            }
+            System.err.println("Failed to publish log to Redis: " + e.getMessage());
         } catch (Exception e) {
             System.err.println("Failed to publish log: " + e.getMessage());
         }

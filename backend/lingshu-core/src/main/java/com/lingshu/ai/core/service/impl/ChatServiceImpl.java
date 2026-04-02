@@ -310,7 +310,7 @@ public class ChatServiceImpl implements ChatService {
         builder.build()
                 .chat(session.getId(), safeMessage.isBlank() ? " " : safeMessage, systemPrompt)
             .onPartialThinking(thinking -> {
-                systemLogService.thinking(thinking.text(), "LLM");
+                //systemLogService.thinking(thinking.text(), "LLM");
                 sink.tryEmitNext("\u0001REASONING\u0001" + thinking.text() + "\u0001/REASONING\u0001");
             })
             .beforeToolExecution(beforeToolExecution -> {
@@ -414,7 +414,7 @@ public class ChatServiceImpl implements ChatService {
                                       StringBuilder assistantResponseStore,
                                       Sinks.Many<String> sink) {
         if (assistantResponseStore.isEmpty()) {
-            systemLogService.info("娴佸紡杈撳嚭宸插紑鍚紝鎺ユ敹棣栦釜 token...", "LLM");
+            systemLogService.info("流式输出已开启，接收首个 token...", "LLM");
         }
         assistantResponseStore.append(token);
         sink.tryEmitNext(token);
@@ -427,20 +427,20 @@ public class ChatServiceImpl implements ChatService {
                                            com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion) {
         int tokenCount = assistantResponseStore.length() / 4;
         systemLogService.llmEnd(tokenCount, "LLM");
-        systemLogService.success("瀵硅瘽瀹屾垚锛屽洖澶嶉暱搴? " + assistantResponseStore.length() + " 瀛楃", "CHAT");
+        systemLogService.success("对话完成，回复长度: " + assistantResponseStore.length() + " 字符", "CHAT");
         sink.tryEmitComplete();
         postProcessAfterResponse(userId, safeMessage, assistantResponseStore.toString(), preAnalyzedEmotion);
     }
 
     private void handleStreamingError(Throwable error, Sinks.Many<String> sink) {
-        log.error("娴佸紡瀵硅瘽鍙戠敓閿欒: {}", error.getMessage(), error);
-        systemLogService.error("LLM 璋冪敤澶辫触: " + error.getMessage(), "LLM");
+        log.error("流式对话发生错误: {}", error.getMessage(), error);
+        systemLogService.error("LLM 调用失败: " + error.getMessage(), "LLM");
 
         String errorMsg = error.getMessage() != null ? error.getMessage() : "";
         if (errorMsg.contains("context length") || errorMsg.contains("n_ctx") || errorMsg.contains("n_keep")) {
-            sink.tryEmitError(new RuntimeException("杈撳叆鍐呭杩囬暱锛岃秴鍑烘ā鍨嬩笂涓嬫枃闄愬埗銆傝灏濊瘯锛歕n1. 鍑忓皯鍥剧墖鏁伴噺鎴栦娇鐢ㄦ洿灏忕殑鍥剧墖\n2. 娓呴櫎瀵硅瘽鍘嗗彶鍚庨噸璇昞n3. 鍒囨崲鍒版敮鎸佹洿闀夸笂涓嬫枃鐨勬ā鍨?"));
+            sink.tryEmitError(new RuntimeException("输入内容过长，超出模型上下文限制。请尝试：\n1. 减少图片数量或使用更小的图片\n2. 清除对话历史后重试\n3. 切换到支持更长上下文的模型"));
         } else if (errorMsg.contains("image") || errorMsg.contains("vision") || errorMsg.contains("multimodal")) {
-            sink.tryEmitError(new RuntimeException("褰撳墠妯″瀷涓嶆敮鎸佸浘鍍忚瘑鍒紝璇峰垏鎹㈠埌鏀寔瑙嗚鐨勬ā鍨嬶紙濡?Qwen-VL 绛夛級鎴栫Щ闄ゅ浘鐗囧悗閲嶈瘯銆?"));
+            sink.tryEmitError(new RuntimeException("当前模型不支持图像识别，请切换到支持视觉的模型（如 Qwen-VL 等）或移除图片后重试。"));
         } else {
             sink.tryEmitError(error);
         }

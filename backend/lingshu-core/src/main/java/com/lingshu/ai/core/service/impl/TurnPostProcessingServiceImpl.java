@@ -205,6 +205,7 @@ public class TurnPostProcessingServiceImpl {
                 - confidence: 0.0 到 1.0
                 - reason: 中文简短说明，明确指出触发依据
                 - 只返回 JSON，不要任何额外文本
+                - 严格注意：所有的 JSON 键和字符串值必须使用标准英文双引号 `"`，绝对不能使用中文双引号 `”` 等全角字符作为 JSON 格式符。
 
                 返回格式：
                 {

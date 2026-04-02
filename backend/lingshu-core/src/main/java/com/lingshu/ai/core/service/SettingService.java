@@ -22,4 +22,14 @@ public interface SettingService {
      * 保存本地工具配置 (local_tools)。
      */
     void saveLocalToolsSetting(SystemSetting setting);
+
+    /**
+     * 获取微信 Bot 配置 (WECHAT_BOT)。
+     */
+    SystemSetting getWechatBotSetting();
+
+    /**
+     * 保存微信 Bot 配置 (WECHAT_BOT)。
+     */
+    void saveWechatBotSetting(SystemSetting setting);
 }
