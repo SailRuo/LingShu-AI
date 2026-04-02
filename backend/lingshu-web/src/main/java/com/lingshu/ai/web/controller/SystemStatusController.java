@@ -156,7 +156,7 @@ public class SystemStatusController {
                     } else throw e;
                 }
             } catch (Exception e) {
-                log.warn("Chat OpenAI status check failed: {}", e.getMessage());
+                log.error("Chat OpenAI status check failed: {}", e.getMessage());
                 chatStatus = "offline";
             }
         }

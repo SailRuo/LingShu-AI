@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { 
-  BrainCircuit, 
-  Brain, 
-  Database, 
-  Cpu, 
-  Activity, 
-  Zap, 
-  CheckCircle, 
-  AlertTriangle, 
+import {
+  BrainCircuit,
+  Brain,
+  Database,
+  Cpu,
+  Activity,
+  Zap,
+  CheckCircle,
+  AlertTriangle,
   XCircle,
   Server,
   HardDrive,
@@ -74,8 +74,8 @@ const aiSourceLabel = computed(() => {
 })
 
 const isSystemReady = computed(() => {
-  return status.value.chatStatus === 'online' && 
-         status.value.embedStatus === 'online' && 
+  return status.value.chatStatus === 'online' &&
+         status.value.embedStatus === 'online' &&
          status.value.neo4j === 'online'
 })
 
@@ -140,14 +140,6 @@ const components = computed(() => [
     status: status.value.latency !== '---' ? 'online' : 'offline',
     icon: Activity,
     description: '系统响应速度'
-  },
-  {
-    key: 'sync',
-    name: '神经同步',
-    subName: '0.994σ',
-    status: 'online',
-    icon: Zap,
-    description: '跨组件同步率'
   }
 ])
 </script>
@@ -199,8 +191,8 @@ const components = computed(() => [
 
           <!-- Component Cards (Orbiting) -->
           <div class="orbit-components">
-            <div 
-              v-for="component in components" 
+            <div
+              v-for="component in components"
               :key="component.key"
               class="component-card"
               :class="[getStatusInfo(component.status).color]"
@@ -213,7 +205,7 @@ const components = computed(() => [
                     <div class="indicator-dot"></div>
                   </div>
                 </div>
-                
+
                 <div class="card-body">
                   <div class="component-name">{{ component.name }}</div>
                   <div class="component-sub">{{ component.subName }}</div>
@@ -222,8 +214,8 @@ const components = computed(() => [
 
                 <div class="card-footer">
                   <div class="status-bar">
-                    <div 
-                      class="status-fill" 
+                    <div
+                      class="status-fill"
                       :class="[getStatusInfo(component.status).color]"
                       :style="{ width: component.status === 'online' ? '100%' : '0%' }"
                     ></div>
@@ -242,7 +234,7 @@ const components = computed(() => [
           <Server :size="18" class="panel-icon" />
           <h2 class="panel-title">系统指标</h2>
         </div>
-        
+
         <div class="metrics-grid">
           <div class="metric-card">
             <HardDrive :size="20" class="metric-icon" />
@@ -251,7 +243,7 @@ const components = computed(() => [
               <span class="metric-value">{{ status.vram }}</span>
             </div>
           </div>
-          
+
           <div class="metric-card">
             <Activity :size="20" class="metric-icon" />
             <div class="metric-content">
@@ -259,23 +251,14 @@ const components = computed(() => [
               <span class="metric-value">{{ status.latency }}</span>
             </div>
           </div>
-          
-          <div class="metric-card">
-            <Wifi :size="20" class="metric-icon" />
-            <div class="metric-content">
-              <span class="metric-label">神经同步</span>
-              <span class="metric-value">0.994σ</span>
-            </div>
-          </div>
-          
+
           <div class="metric-card">
             <Zap :size="20" class="metric-icon" />
             <div class="metric-content">
               <span class="metric-label">系统版本</span>
               <span class="metric-value">v1.0.0</span>
             </div>
-          </div>
-        </div>
+          </div>        </div>
       </div>
     </div>
   </div>
@@ -445,7 +428,7 @@ const components = computed(() => [
 
 .orb-core.healthy {
   border-color: var(--color-success);
-  box-shadow: 
+  box-shadow:
     0 0 40px rgba(74, 222, 128, 0.4),
     inset 0 0 30px rgba(74, 222, 128, 0.1);
 }
@@ -499,6 +482,7 @@ const components = computed(() => [
   font-size: 14px;
   font-weight: 600;
   color: var(--color-text);
+  margin-top: 24px;
 }
 
 .orb-status {
@@ -749,7 +733,7 @@ const components = computed(() => [
   .orbit-grid {
     grid-template-columns: 1fr;
   }
-  
+
   .orbit-center {
     order: -1;
   }
@@ -759,30 +743,30 @@ const components = computed(() => [
   .security-header {
     padding: 20px 16px;
   }
-  
+
   .header-content {
     flex-direction: column;
     gap: 16px;
     align-items: flex-start;
   }
-  
+
   .health-summary {
     align-self: flex-end;
   }
-  
+
   .security-content {
     padding: 16px;
   }
-  
+
   .orbit-monitor-panel,
   .metrics-panel {
     padding: 16px;
   }
-  
+
   .orbit-components {
     grid-template-columns: 1fr;
   }
-  
+
   .metrics-grid {
     grid-template-columns: 1fr;
   }

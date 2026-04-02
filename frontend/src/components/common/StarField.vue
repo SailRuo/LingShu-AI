@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useThemeStore } from '@/stores/themeStore'
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -207,11 +207,9 @@ const drawStar = (star: Star, isDark: boolean) => {
   const rgb = isDark ? '255, 255, 255' : '0, 50, 150'
   const alpha = isDark ? currentOpacity : currentOpacity * 0.7
 
-  ctx.beginPath()
-  ctx.arc(star.x, star.y, star.size / 2, 0, Math.PI * 2)
   ctx.fillStyle = `rgba(${rgb}, ${alpha})`
-  // 移除耗费 GPU 的 shadowBlur
-  ctx.fill()
+  // 使用 fillRect 替代 arc，大幅降低 GPU 计算路径的开销
+  ctx.fillRect(star.x - star.size / 2, star.y - star.size / 2, star.size, star.size)
 }
 
 const drawMeteor = (meteor: Meteor, isDark: boolean) => {
@@ -323,7 +321,8 @@ const handleResize = () => {
     if (canvasRef.value) {
       width = window.innerWidth
       height = window.innerHeight
-      const dpr = window.devicePixelRatio || 1
+      // 限制像素比最大为 1.25，防止高分屏下渲染面积翻倍导致 GPU 占用过高
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.25)
       canvasRef.value.width = width * dpr
       canvasRef.value.height = height * dpr
       ctx?.scale(dpr, dpr)
@@ -342,7 +341,8 @@ onMounted(() => {
     if (ctx) {
       width = window.innerWidth
       height = window.innerHeight
-      const dpr = window.devicePixelRatio || 1
+      // 限制像素比最大为 1.25，大幅度优化高分屏性能
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.25)
       canvasRef.value.width = width * dpr
       canvasRef.value.height = height * dpr
       ctx.scale(dpr, dpr)

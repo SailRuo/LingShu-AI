@@ -22,6 +22,8 @@ const sidebarCollapsed = ref(false)
 const mobileSidebarVisible = ref(false)
 const isMobile = ref(false)
 
+// 动画特效开关，使用 LocalStorage 持久化，默认开启
+const enableAnimations = useLocalStorage('lingshu-enable-animations', false)
 
 // 监听窗口大小变化
 function checkMobile() {
@@ -105,15 +107,15 @@ function getViewKey(menuKey: string): string {
         <n-notification-provider>
           <n-loading-bar-provider>
             <div class="app-container">
-              <!-- Mesh Background -->
-              <div class="mesh-bg">
+              <!-- Mesh Background (根据开关控制) -->
+              <div class="mesh-bg" v-if="enableAnimations">
                 <div class="mesh-blob mesh-1"></div>
                 <div class="mesh-blob mesh-2"></div>
                 <div class="mesh-blob mesh-3"></div>
               </div>
               
-              <!-- Star Field Background Component -->
-              <StarField />
+              <!-- Star Field Background Component (根据开关控制) -->
+              <StarField v-if="enableAnimations" />
 
               <!-- Main Layout -->
               <div class="main-layout" :class="{ 'sidebar-collapsed': sidebarCollapsed && !isMobile }">
