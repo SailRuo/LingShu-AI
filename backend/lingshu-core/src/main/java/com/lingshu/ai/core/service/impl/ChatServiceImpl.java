@@ -188,6 +188,14 @@ public class ChatServiceImpl implements ChatService {
         ChatSession session = getOrCreateSession();
         AgentConfig agent = getAgent(agentId);
         
+        if (agent != null) {
+            log.info("处理聊天消息: agentId={}, 使用智能体: id={}, name={}, systemPrompt长度={}", 
+                    agentId, agent.getId(), agent.getName(), 
+                    agent.getSystemPrompt() != null ? agent.getSystemPrompt().length() : 0);
+        } else {
+            log.warn("处理聊天消息: agentId={}, 未找到智能体", agentId);
+        }
+        
         String safeMessage = message != null ? message : "";
 
         systemLogService.info("收到用户消息 (流式): " + (safeMessage.length() > 20 ? safeMessage.substring(0, 20) + "..." : safeMessage) + ", enableThinking=" + enableThinking + ", images=" + (images != null ? images.size() : 0), "CHAT");

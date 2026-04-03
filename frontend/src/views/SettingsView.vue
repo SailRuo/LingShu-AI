@@ -350,7 +350,9 @@ async function fetchSettings() {
 async function fetchAgents() {
   try {
     const res = await fetch(getFullUrl('/api/agents'))
-    agents.value = await res.json()
+    const data = await res.json()
+    console.log('[SettingsView] 获取智能体列表:', data.length, '个智能体')
+    agents.value = data
   } catch (err) {
     console.error('Failed to fetch agents', err)
   }
@@ -566,6 +568,9 @@ async function saveAgent() {
     const url = editingAgent.value ? getFullUrl(`/api/agents/${editingAgent.value.id}`) : getFullUrl('/api/agents')
     const method = editingAgent.value ? 'PUT' : 'POST'
 
+    console.log('[SettingsView] 保存智能体:', editingAgent.value ? '更新' : '创建', editingAgent.value?.name)
+    console.log('[SettingsView] systemPrompt 长度:', agentForm.value.systemPrompt?.length)
+
     await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
@@ -574,6 +579,7 @@ async function saveAgent() {
 
     message.success(editingAgent.value ? '智能体已更新' : '智能体已创建')
     showAgentModal.value = false
+    console.log('[SettingsView] 保存成功，刷新智能体列表...')
     fetchAgents()
   } catch (err) {
     message.error('保存失败')

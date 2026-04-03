@@ -314,17 +314,51 @@ function aggregateHistoryMessages(historyMessages: HistoryMessage[]): ChatMessag
 
     if (current.role === "assistant") {
       let segments: ChatMessageSegment[] = [];
-      let toolSteps: ChatToolStep[] = mergeToolStepLists(
-        undefined,
-        current.toolSteps?.map(normalizeToolStep)
-      ) ?? [];
+      const toolIndexByKey = new Map<string, number>();
 
-      if (toolSteps.length) {
-        segments = mergeSegments(
-          segments,
-          toolSteps.map((step) => ({ ...step, type: "tool" as const }))
-        ) ?? [];
-      }
+      const pushTextSegment = (content: string, timestamp: number) => {
+        const text = content?.trim();
+        if (!text) return;
+
+        const last = segments[segments.length - 1];
+        if (last?.type === "text") {
+          segments[segments.length - 1] = {
+            ...last,
+            content: `${last.content}\n${text}`.trim(),
+            timestamp,
+          };
+          return;
+        }
+
+        segments.push({
+          type: "text",
+          content: text,
+          timestamp,
+        });
+      };
+
+      const upsertToolSegment = (step: ChatToolStep, timestamp: number) => {
+        const key = getToolStepKey(step, segments.length);
+        const existingIndex = toolIndexByKey.get(key);
+
+        if (existingIndex == null) {
+          toolIndexByKey.set(key, segments.length);
+          segments.push({
+            ...step,
+            type: "tool",
+            timestamp: step.timestamp ?? timestamp,
+          });
+          return;
+        }
+
+        const previous = segments[existingIndex] as ChatToolSegment;
+        segments[existingIndex] = {
+          ...previous,
+          ...step,
+          type: "tool",
+          timestamp: step.timestamp ?? previous.timestamp ?? timestamp,
+        };
+      };
 
       while (index < chronological.length) {
         const message = chronological[index];
@@ -334,44 +368,61 @@ function aggregateHistoryMessages(historyMessages: HistoryMessage[]): ChatMessag
         }
 
         if (message.role === "assistant") {
-          const content = message.content?.trim();
-          if (content) {
-            segments = mergeSegments(segments, [
-              {
-                type: "text",
-                content: content,
-                timestamp: toTimestamp(message.timestamp),
-              },
-            ]) ?? [];
-          }
+          const messageTimestamp = toTimestamp(message.timestamp);
 
           if (message.toolSteps?.length) {
-            const nextToolSteps = message.toolSteps.map(normalizeToolStep);
-            toolSteps = mergeToolStepLists(toolSteps, nextToolSteps) ?? [];
-            segments = mergeSegments(
-              segments,
-              nextToolSteps.map((step) => ({ ...step, type: "tool" as const }))
-            ) ?? [];
+            message.toolSteps
+              .map(normalizeToolStep)
+              .forEach((step) => upsertToolSegment(step, messageTimestamp));
           } else if (message.toolCalls) {
-            const nextToolSteps = parseToolCalls(message.toolCalls);
-            toolSteps = mergeToolStepLists(toolSteps, nextToolSteps) ?? [];
-            segments = mergeSegments(
-              segments,
-              nextToolSteps.map((step) => ({ ...step, type: "tool" as const }))
-            ) ?? [];
+            parseToolCalls(message.toolCalls)
+              .forEach((step) => upsertToolSegment(step, messageTimestamp));
           }
+
+          pushTextSegment(message.content ?? "", messageTimestamp);
 
           index++;
           continue;
         }
 
-        attachToolResult(toolSteps, message);
-        segments = mergeSegments(
-          segments,
-          toolSteps.map((step) => ({ ...step, type: "tool" as const }))
-        ) ?? [];
+        const toolResultTimestamp = toTimestamp(message.timestamp);
+        const toolCallId = message.toolCallId ?? "";
+        const targetIndex = segments.findIndex(
+          (segment) =>
+            segment.type === "tool" &&
+            !!toolCallId &&
+            ((segment.id ?? "") === toolCallId || (segment.toolCallId ?? "") === toolCallId)
+        );
+
+        if (targetIndex >= 0) {
+          const previous = segments[targetIndex] as ChatToolSegment;
+          segments[targetIndex] = {
+            ...previous,
+            result: message.content ?? "",
+            output: message.content ?? "",
+            toolName: previous.toolName || message.toolName || "",
+            status: message.content ? "success" : previous.status ?? "running",
+            isError: previous.isError ?? false,
+            timestamp: previous.timestamp ?? toolResultTimestamp,
+          };
+        } else {
+          const fallbackStep: ChatToolStep = {
+            id: toolCallId || undefined,
+            toolCallId: toolCallId || undefined,
+            toolName: message.toolName ?? "",
+            result: message.content ?? "",
+            output: message.content ?? "",
+            status: "success",
+            isError: false,
+            timestamp: toolResultTimestamp,
+          };
+          upsertToolSegment(fallbackStep, toolResultTimestamp);
+        }
+
         index++;
       }
+
+      const toolSteps = buildToolStepsFromSegments(segments);
 
       aggregated.push({
         id: current.id,
@@ -382,7 +433,7 @@ function aggregateHistoryMessages(historyMessages: HistoryMessage[]): ChatMessag
           .join(""),
         timestamp: toTimestamp(current.timestamp),
         segments: segments.length ? segments : undefined,
-        toolSteps: buildToolStepsFromSegments(segments) ?? (toolSteps.length ? toolSteps : undefined),
+        toolSteps: toolSteps,
         isToolStepsExpanded: false,
       });
       continue;

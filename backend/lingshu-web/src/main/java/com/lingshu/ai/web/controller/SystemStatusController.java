@@ -142,18 +142,32 @@ public class SystemStatusController {
             vram = "Cloud";
             try {
                 String base = setting.getBaseUrl();
+                String apiKey = setting.getApiKey();
                 if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
                 String url = (base.contains("/v1") || base.endsWith("/v1")) ? base + "/models" : base + "/v1/models";
                 try {
-                    restTemplate.getForObject(url, String.class);
+                    org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+                    if (apiKey != null && !apiKey.isBlank()) {
+                        headers.set("Authorization", "Bearer " + apiKey);
+                    }
+                    org.springframework.http.HttpEntity<String> entity = new org.springframework.http.HttpEntity<>(headers);
+                    restTemplate.exchange(url, org.springframework.http.HttpMethod.GET, entity, String.class);
                     chatStatus = "online";
                 } catch (Exception e) {
-                    if (e.getMessage() != null && (e.getMessage().contains("401") || e.getMessage().contains("403"))) chatStatus = "online";
-                    else if (!base.contains("/v1")) {
-                        String fallbackUrl = base + "/models";
-                        restTemplate.getForObject(fallbackUrl, String.class);
+                    if (e.getMessage() != null && (e.getMessage().contains("401") || e.getMessage().contains("403") || e.getMessage().contains("400"))) {
                         chatStatus = "online";
-                    } else throw e;
+                    } else if (!base.contains("/v1")) {
+                        String fallbackUrl = base + "/models";
+                        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+                        if (apiKey != null && !apiKey.isBlank()) {
+                            headers.set("Authorization", "Bearer " + apiKey);
+                        }
+                        org.springframework.http.HttpEntity<String> entity = new org.springframework.http.HttpEntity<>(headers);
+                        restTemplate.exchange(fallbackUrl, org.springframework.http.HttpMethod.GET, entity, String.class);
+                        chatStatus = "online";
+                    } else {
+                        throw e;
+                    }
                 }
             } catch (Exception e) {
                 log.error("Chat OpenAI status check failed: {}", e.getMessage());

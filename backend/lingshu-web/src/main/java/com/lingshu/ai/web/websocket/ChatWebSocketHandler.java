@@ -103,7 +103,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         String userId = (String) data.getOrDefault("userId", "User");
         sessionUserMap.put(session.getId(), userId);
         
-        log.info("用户注册: {} -> {}", session.getId(), userId);
+        //log.info("用户注册: {} -> {}", session.getId(), userId);
         
         sendMessage(session, Map.of(
             "type", "registered",

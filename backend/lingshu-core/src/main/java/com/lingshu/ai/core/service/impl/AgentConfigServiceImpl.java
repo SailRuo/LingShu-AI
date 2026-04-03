@@ -50,7 +50,10 @@ public class AgentConfigServiceImpl implements AgentConfigService {
 
     @Override
     public Optional<AgentConfig> getDefaultAgent() {
-        return agentConfigRepository.findByIsDefaultTrue();
+        Optional<AgentConfig> agent = agentConfigRepository.findByIsDefaultTrue();
+        agent.ifPresent(a -> log.debug("获取默认智能体: id={}, name={}, systemPrompt长度={}", 
+                a.getId(), a.getName(), a.getSystemPrompt() != null ? a.getSystemPrompt().length() : 0));
+        return agent;
     }
 
     @Override
@@ -77,6 +80,11 @@ public class AgentConfigServiceImpl implements AgentConfigService {
         AgentConfig existing = agentConfigRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Agent not found with id: " + id));
         
+        log.info("更新智能体 {}: 原始 systemPrompt 长度={}, 新 systemPrompt 长度={}", 
+                existing.getName(), 
+                existing.getSystemPrompt() != null ? existing.getSystemPrompt().length() : 0,
+                agent.getSystemPrompt() != null ? agent.getSystemPrompt().length() : 0);
+        
         if (agent.getName() != null && !agent.getName().equals(existing.getName())) {
             if (agentConfigRepository.findByName(agent.getName()).isPresent()) {
                 throw new IllegalArgumentException("Agent with name '" + agent.getName() + "' already exists");
@@ -85,7 +93,12 @@ public class AgentConfigServiceImpl implements AgentConfigService {
         }
         
         if (agent.getDisplayName() != null) existing.setDisplayName(agent.getDisplayName());
-        if (agent.getSystemPrompt() != null) existing.setSystemPrompt(agent.getSystemPrompt());
+        if (agent.getSystemPrompt() != null) {
+            log.debug("更新 systemPrompt: {} -> {}", 
+                    existing.getSystemPrompt() != null ? existing.getSystemPrompt().substring(0, Math.min(50, existing.getSystemPrompt().length())) : "null",
+                    agent.getSystemPrompt().substring(0, Math.min(50, agent.getSystemPrompt().length())));
+            existing.setSystemPrompt(agent.getSystemPrompt());
+        }
         if (agent.getFactExtractionPrompt() != null) existing.setFactExtractionPrompt(agent.getFactExtractionPrompt());
         if (agent.getBehaviorPrinciples() != null) existing.setBehaviorPrinciples(agent.getBehaviorPrinciples());
         if (agent.getDecisionMechanism() != null) existing.setDecisionMechanism(agent.getDecisionMechanism());
@@ -97,7 +110,12 @@ public class AgentConfigServiceImpl implements AgentConfigService {
         if (agent.getColor() != null) existing.setColor(agent.getColor());
         if (agent.getIsActive() != null) existing.setIsActive(agent.getIsActive());
         
-        return agentConfigRepository.save(existing);
+        AgentConfig saved = agentConfigRepository.save(existing);
+        log.info("智能体已保存到数据库: id={}, name={}, systemPrompt长度={}", 
+                saved.getId(), 
+                saved.getName(), 
+                saved.getSystemPrompt() != null ? saved.getSystemPrompt().length() : 0);
+        return saved;
     }
 
     @Override
