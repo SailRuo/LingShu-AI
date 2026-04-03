@@ -133,7 +133,13 @@ const filteredNodes = computed(() => {
 })
 
 const visibleNodeIds = computed(() => new Set(filteredNodes.value.map((n) => n.id)))
-const filteredLinks = computed(() => graph.value.links.filter((l) => visibleNodeIds.value.has(l.source) && visibleNodeIds.value.has(l.target)))
+const filteredLinks = computed(() => graph.value.links.filter((l) => {
+  if (!visibleNodeIds.value.has(l.source) || !visibleNodeIds.value.has(l.target)) return false
+  if (l.type === 'HAS_FACT' || l.type === 'BELONGS_TO_TOPIC') return true
+  if (l.type === 'SUPERSEDES' || l.type === 'CONTRADICTS') return true
+  if (l.type === 'RELATED_TO' && (l.weight || 0) >= 0.6) return true
+  return false
+}))
 
 const searchKeyword = computed(() => searchQuery.value.trim().toLowerCase())
 

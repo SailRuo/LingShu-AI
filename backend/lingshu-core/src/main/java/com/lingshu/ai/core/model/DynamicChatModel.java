@@ -44,22 +44,24 @@ public class DynamicChatModel implements ChatModel, StreamingChatModel {
     private void ensureDelegate() {
         SystemSetting setting = settingService.getSetting();
         // 简单的配置指纹，用于检测变更
-        String currentConfigId = String.format("%s|%s|%s|%s|%s", 
-                setting.getSource(), setting.getChatModel(), setting.getBaseUrl(), setting.getApiKey(), setting.getEnableThinking());
-        
+        String currentConfigId = String.format("%s|%s|%s|%s|%s",
+                setting.getSource(), setting.getChatModel(), setting.getBaseUrl(), setting.getApiKey(),
+                setting.getEnableThinking());
+
         if (chatDelegate == null || streamingDelegate == null || !currentConfigId.equals(lastConfigId)) {
             synchronized (this) {
                 if (chatDelegate == null || streamingDelegate == null || !currentConfigId.equals(lastConfigId)) {
-                    log.debug("初始化/更新动态模型代理: Source={}, Model={}, BaseUrl={}", 
+                    log.debug("初始化/更新动态模型代理: Source={}, Model={}, BaseUrl={}",
                             setting.getSource(), setting.getChatModel(), setting.getBaseUrl());
-                    
+
                     String source = setting.getSource();
                     String baseUrl = setting.getBaseUrl();
                     String modelName = setting.getChatModel();
                     String apiKey = setting.getApiKey();
                     Boolean enableThinking = setting.getEnableThinking();
 
-                    if ("ollama".equalsIgnoreCase(source) || (source == null && baseUrl != null && baseUrl.contains("11434"))) {
+                    if ("ollama".equalsIgnoreCase(source)
+                            || (source == null && baseUrl != null && baseUrl.contains("11434"))) {
                         chatDelegate = OllamaChatModel.builder()
                                 .baseUrl(baseUrl)
                                 .modelName(modelName)
@@ -77,13 +79,13 @@ public class DynamicChatModel implements ChatModel, StreamingChatModel {
                         if (effectiveUrl != null && !effectiveUrl.endsWith("/v1") && !effectiveUrl.endsWith("/v1/")) {
                             effectiveUrl = effectiveUrl + (effectiveUrl.endsWith("/") ? "v1" : "/v1");
                         }
-                        
+
                         JdkHttpClientBuilder httpClientBuilder = dev.langchain4j.http.client.jdk.JdkHttpClient.builder()
                                 .httpClientBuilder(HttpClient.newBuilder()
                                         .version(HttpClient.Version.HTTP_1_1)
                                         .connectTimeout(Duration.ofSeconds(30))
                                         .executor(Executors.newCachedThreadPool()));
-                        
+
                         var chatBuilder = OpenAiChatModel.builder()
                                 .baseUrl(effectiveUrl)
                                 .apiKey(apiKey != null && !apiKey.isBlank() ? apiKey : "no-key")
@@ -91,14 +93,22 @@ public class DynamicChatModel implements ChatModel, StreamingChatModel {
                                 .timeout(Duration.ofMinutes(5))
                                 .listeners(listeners)
                                 .httpClientBuilder(httpClientBuilder);
-                        
+
+                        boolean isGemini = modelName != null && modelName.toLowerCase().contains("gemini");
+
                         if (Boolean.TRUE.equals(enableThinking)) {
-                            chatBuilder.returnThinking(true);
-                            log.info("启用 Thinking/Reasoning 模式");
+                            if (isGemini) {
+                                log.warn(
+                                        "检测到 Gemini 模型 [{}]，当前 LangChain4j 版本不支持 Gemini 在 Thinking 模式下的工具调用 (缺少 thought_signature)，已自动回退到普通模式以保证工具正常运行。",
+                                        modelName);
+                            } else {
+                                chatBuilder.returnThinking(true);
+                                log.info("启用 Thinking/Reasoning 模式: [{}]", modelName);
+                            }
                         }
-                        
+
                         chatDelegate = chatBuilder.build();
-                        
+
                         var streamingBuilder = OpenAiStreamingChatModel.builder()
                                 .baseUrl(effectiveUrl)
                                 .apiKey(apiKey != null && !apiKey.isBlank() ? apiKey : "no-key")
@@ -106,14 +116,14 @@ public class DynamicChatModel implements ChatModel, StreamingChatModel {
                                 .timeout(Duration.ofMinutes(5))
                                 .listeners(listeners)
                                 .httpClientBuilder(httpClientBuilder);
-                        
-                        if (Boolean.TRUE.equals(enableThinking)) {
+
+                        if (Boolean.TRUE.equals(enableThinking) && !isGemini) {
                             streamingBuilder.returnThinking(true);
                         }
-                        
+
                         streamingDelegate = streamingBuilder.build();
                     }
-                    
+
                     lastConfigId = currentConfigId;
                 }
             }

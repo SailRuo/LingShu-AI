@@ -46,6 +46,7 @@ public class AgentConfig {
     @Column(columnDefinition = "TEXT")
     private String hiddenRules;
 
+    @Column(columnDefinition = "TEXT")
     private String avatar;
 
     private String color;

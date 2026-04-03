@@ -170,7 +170,7 @@ public class AiConfig {
     }
 
     @Bean
-    public dev.langchain4j.store.embedding.EmbeddingStore<dev.langchain4j.data.segment.TextSegment> embeddingStore() {
+    public dev.langchain4j.store.embedding.EmbeddingStore<dev.langchain4j.data.segment.TextSegment> embeddingStore(dev.langchain4j.model.embedding.EmbeddingModel embeddingModel) {
         // 从 JDBC URL 解析数据库配置 (例如：jdbc:postgresql://postgres:5432/lingshu)
         String dbHost = "localhost";
         int dbPort = 5432;
@@ -204,7 +204,7 @@ public class AiConfig {
                 .user(username)
                 .password(password)
                 .table("memory_segments")
-                .dimension(4096)
+                .dimension(embeddingModel.dimension())
                 .build();
     }
 

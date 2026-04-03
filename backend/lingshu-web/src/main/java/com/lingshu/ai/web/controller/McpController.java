@@ -44,7 +44,7 @@ public class McpController {
     public ResponseEntity<McpServerConfig> toggleConfig(@PathVariable Long id) {
         return ResponseEntity.ok(mcpService.toggleConfig(id));
     }
-    
+
     @PostMapping("/{id}/ping")
     public ResponseEntity<java.util.Map<String, Object>> ping(@PathVariable Long id) {
         java.util.List<java.util.Map<String, Object>> tools = mcpService.getToolDetails(id);

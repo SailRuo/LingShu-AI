@@ -259,9 +259,14 @@ public class ChatServiceImpl implements ChatService {
                         .listeners(listeners)
                         .httpClientBuilder(httpClientBuilder);
                 
+                boolean isGemini = model != null && model.toLowerCase().contains("gemini");
                 if (Boolean.TRUE.equals(enableThinking)) {
-                    openAiBuilder.returnThinking(true);
-                    log.info("启用 Thinking/Reasoning 模式");
+                    if (isGemini) {
+                        log.warn("检测到 Gemini 模型 [{}]，切换到普通模式（由于当前版本暂不支持推理模式下的工具调用）。", model);
+                    } else {
+                        openAiBuilder.returnThinking(true);
+                        log.info("启用 Thinking/Reasoning 模式: [{}]", model);
+                    }
                 }
                 
                 streamingModelToUse = openAiBuilder.build();
@@ -564,14 +569,14 @@ public class ChatServiceImpl implements ChatService {
                         List<String> models = list.stream()
                                 .map(m -> (String) ((java.util.Map<?, ?>) m).get("id"))
                                 .collect(java.util.stream.Collectors.toList());
-                        log.debug("获取到 " + models.size() + " 个OpenAI兼容模型");
+                        //log.debug("获取到 " + models.size() + " 个OpenAI兼容模型");
                         return models;
                     }
                 } else if (responseObj instanceof java.util.List<?> list) {
                     List<String> models = list.stream()
                             .map(m -> (String) ((java.util.Map<?, ?>) m).get("id"))
                             .collect(java.util.stream.Collectors.toList());
-                    log.debug("获取到 " + models.size() + " 个OpenAI兼容模型");
+                    //log.debug("获取到 " + models.size() + " 个OpenAI兼容模型");
                     return models;
                 }
 
