@@ -36,6 +36,8 @@ public class DynamicMemoryModel implements ChatModel {
         String modelName = setting.getMemoryModel();
         String apiKey = setting.getMemoryModelApiKey();
         
+        //log.info("记忆模型配置: source={}, modelName={}, baseUrl={}", source, modelName, baseUrl);
+        
         String currentConfigId = String.format("memory|%s|%s|%s|%s",
                 source, modelName, baseUrl, apiKey);
         

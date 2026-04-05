@@ -108,14 +108,16 @@ const asrSettings = ref({
 })
 const savingAsr = ref(false)
 
-const voiceOptions = [
+const voiceOptions = ref([
   { label: 'Alloy (中性)', value: 'alloy' },
   { label: 'Echo (男性)', value: 'echo' },
   { label: 'Fable (英式)', value: 'fable' },
   { label: 'Onyx (低沉)', value: 'onyx' },
   { label: 'Nova (女性)', value: 'nova' },
   { label: 'Shimmer (柔和)', value: 'shimmer' }
-]
+])
+
+const loadingVoices = ref(false)
 
 const formatOptions = [
   { label: 'MP3', value: 'mp3' },
@@ -169,6 +171,13 @@ function startPollingStatus() {
     try {
       const res = await fetch(getFullUrl(`/api/settings/wechat-bot/status?qrcode=${qrcodeId.value}`))
       const data = await res.json()
+      if (data && data.errcode === -14) {
+        clearInterval(pollingTimer)
+        pollingStatus.value = false
+        message.warning('会话已过期，请重新授权')
+        fetchWechatBotConfig()
+        return
+      }
       if (data && data.status) {
         wechatBot.value.status = data.status
         if (data.status === 'confirmed') {
@@ -277,6 +286,54 @@ async function fetchMemoryModels(silent = false) {
   }
 }
 
+async function fetchVoices(silent = false) {
+  if (!settings.value.ttsBaseUrl) return
+  loadingVoices.value = true
+  try {
+    const params = new URLSearchParams({
+      baseUrl: settings.value.ttsBaseUrl,
+      apiKey: settings.value.ttsApiKey || '',
+    })
+    const res = await fetch(getFullUrl(`/api/tts/voices?${params.toString()}`))
+    if (!res.ok) throw new Error('Failed to fetch voices')
+    const data = await res.json()
+
+    let voicesList: any[] = []
+
+    // 支持 OpenAI 标准格式 (doubaotts 等)
+    if (data && Array.isArray(data.data)) {
+      voicesList = data.data
+    }
+    // 支持 edge-tts 自定义格式
+    else if (data && Array.isArray(data.voices)) {
+      voicesList = data.voices
+    }
+    // 兼容直接返回数组的情况
+    else if (Array.isArray(data)) {
+      voicesList = data
+    }
+
+    if (voicesList.length > 0) {
+      voiceOptions.value = voicesList.map((v: any) => {
+        // edge-tts 只有 name，豆包有 id 和 name
+        const value = v.id || v.name
+        const label = v.name || v.id
+        return { label: label, value: value }
+      })
+
+      if (voiceOptions.value.length > 0 && !voiceOptions.value.find((o: any) => o.value === settings.value.ttsDefaultVoice)) {
+        settings.value.ttsDefaultVoice = voiceOptions.value[0].value
+      }
+      if (!silent) message.success('音色列表已更新')
+    } else {
+      throw new Error('Invalid voices format or empty list')
+    }
+    } catch (err) {    if (!silent) message.error('无法获取音色列表，请检查服务地址或 Token 是否有效')
+  } finally {
+    loadingVoices.value = false
+  }
+}
+
 function handleSourceChange(newSource: string) {
   if (newSource === 'ollama') {
     settings.value.baseUrl = 'http://localhost:11434'
@@ -342,10 +399,16 @@ async function fetchSettings() {
     fetchChatModels(true)
     fetchEmbedModels(true)
     fetchMemoryModels(true)
+    fetchVoices(true)
   } catch (err) {
     console.error('Failed to fetch settings', err)
   }
 }
+
+watch(
+  [() => settings.value.ttsBaseUrl, () => settings.value.ttsApiKey],
+  () => fetchVoices(true)
+)
 
 async function fetchAgents() {
   try {
@@ -862,14 +925,19 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
                   <div class="setting-item">
                     <div class="item-label">
                       <span class="label-text">默认语音</span>
+                      <n-button quaternary circle size="small" @click="fetchVoices(false)" :loading="loadingVoices">
+                        <template #icon><n-icon :component="RefreshCw" /></template>
+                      </n-button>
                     </div>
                     <n-select
                       v-model:value="settings.ttsDefaultVoice"
                       :options="voiceOptions"
                       placeholder="选择默认语音..."
                       size="large"
+                      filterable
+                      tag
                     />
-                    <div class="item-hint">OpenAI 兼容语音选项</div>
+                    <div class="item-hint">OpenAI 兼容语音选项，支持手动输入自定义音色名称</div>
                   </div>
 
                   <div class="dual-fields mt-4">
@@ -1157,7 +1225,7 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
                 <div class="item-label">授权状态</div>
                 <div class="flex items-center gap-4">
                   <n-tag :type="wechatBot.status === 'confirmed' ? 'success' : (wechatBot.status === 'wait' || wechatBot.status === 'scaned' ? 'warning' : 'error')" size="large">
-                    {{ wechatBot.status === 'confirmed' ? '已授权' : (wechatBot.status === 'wait' || wechatBot.status === 'scaned' ? '等待扫码确认' : '未授权/已过期') }}
+                    {{ wechatBot.status === 'confirmed' ? '已授权' : (wechatBot.status === 'wait' || wechatBot.status === 'scaned' ? '等待扫码确认' : (wechatBot.status === 'session_timeout' ? '会话过期' : '未授权/已过期')) }}
                   </n-tag>
                   <span v-if="wechatBot.lastLoginTime" class="text-sm text-gray-500">最后更新: {{ new Date(wechatBot.lastLoginTime).toLocaleString() }}</span>
                 </div>

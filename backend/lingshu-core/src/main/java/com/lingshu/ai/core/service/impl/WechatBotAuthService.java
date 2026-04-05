@@ -81,6 +81,16 @@ public class WechatBotAuthService {
         Map<String, Object> body = response.getBody();
 
         if (body != null) {
+            Integer errcode = (Integer) body.get("errcode");
+            if (errcode != null && errcode == -14) {
+                SystemSetting setting = settingService.getWechatBotSetting();
+                Map<String, Object> config = setting.getWechatBotConfig();
+                config.put("status", "session_timeout");
+                setting.setWechatBotConfig(config);
+                settingService.saveWechatBotSetting(setting);
+                return body;
+            }
+
             String status = (String) body.get("status");
             SystemSetting setting = settingService.getWechatBotSetting();
             Map<String, Object> config = setting.getWechatBotConfig();
@@ -119,4 +129,5 @@ public class WechatBotAuthService {
         }
 
         return body;
-    }}
+    }
+}

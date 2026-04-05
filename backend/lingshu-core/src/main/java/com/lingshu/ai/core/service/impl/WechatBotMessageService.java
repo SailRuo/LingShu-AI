@@ -103,8 +103,19 @@ public class WechatBotMessageService {
 
             if (response.getBody() != null) {
                 String responseBodyStr = new String(response.getBody(), StandardCharsets.UTF_8);
-                log.debug("微信长轮询响应: {}", responseBodyStr);
+                //log.debug("微信长轮询响应: {}", responseBodyStr);
                 Map<String, Object> responseBody = objectMapper.readValue(responseBodyStr, Map.class);
+                
+                Integer errcode = (Integer) responseBody.get("errcode");
+                if (errcode != null && errcode == -14) {
+                    log.warn("微信会话已过期 (errcode: -14)，更新状态为 session_timeout");
+                    Map<String, Object> config1 = setting.getWechatBotConfig();
+                    config1.put("status", "session_timeout");
+                    setting.setWechatBotConfig(config1);
+                    settingService.saveWechatBotSetting(setting);
+                    return;
+                }
+                
                 if (responseBody.containsKey("get_updates_buf")) {
                     updateBuf = (String) responseBody.get("get_updates_buf");
                 }

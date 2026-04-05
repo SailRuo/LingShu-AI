@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import MarkdownIt from 'markdown-it'
-import { FileText, Brain, ChevronDown, ChevronRight } from 'lucide-vue-next'
+import { FileText, Brain, ChevronDown, ChevronRight, Volume2, VolumeX } from 'lucide-vue-next'
 import type { ChatMessage, ChatMessageSegment, ChatToolSegment } from '@/types'
+import { useTts } from '@/composables/useTts'
 
 const props = defineProps<{
   message: ChatMessage
@@ -10,7 +11,29 @@ const props = defineProps<{
   isLastUserMessage?: boolean
 }>()
 
+const { isPlaying, currentPlayingId, speak } = useTts()
+
 const reasoningExpanded = ref(false)
+
+const messageText = computed(() => {
+  if (props.message.role !== 'assistant') return ''
+  if (Array.isArray(props.message.segments) && props.message.segments.length > 0) {
+    return props.message.segments
+      .filter(s => s.type === 'text' && s.content)
+      .map(s => s.content)
+      .join('\n')
+  }
+  return props.message.content || ''
+})
+
+const isThisMessagePlaying = computed(() => {
+  return isPlaying.value && currentPlayingId.value === props.message.id
+})
+
+async function handleTtsClick() {
+  if (!messageText.value) return
+  await speak(messageText.value, props.message.id)
+}
 
 function toggleReasoning() {
   reasoningExpanded.value = !reasoningExpanded.value
@@ -108,7 +131,7 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
         <span></span>
       </div>
     </div>
-    
+
     <!-- 正常消息气泡框 -->
     <div v-else class="message-bubble">
       <!-- 渲染用户发送的图片 -->
@@ -173,6 +196,15 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
       <span class="meta-role">{{ message.role === 'assistant' ? '灵枢' : '你' }}</span>
       <span class="meta-dot">·</span>
       <span class="meta-time">{{ timeLabel }}</span>
+      <button
+        v-if="message.role === 'assistant' && messageText && !message.isLoading"
+        class="tts-btn"
+        :class="{ active: isThisMessagePlaying }"
+        @click="handleTtsClick"
+        :title="isThisMessagePlaying ? '停止播放' : '朗读此回复'"
+      >
+        <Volume2 :size="14" :class="{ 'playing-icon': isThisMessagePlaying }" />
+      </button>
     </div>
   </div>
 </template>
@@ -615,6 +647,45 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
   color: var(--color-text-dim);
 }
 
+.tts-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-left: 4px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  opacity: 0.6;
+}
+
+.tts-btn:hover {
+  opacity: 1;
+  background: var(--color-surface);
+  border-color: var(--color-outline);
+  color: var(--color-primary);
+}
+
+.tts-btn.active {
+  opacity: 1;
+  color: var(--color-primary);
+}
+
+.playing-icon {
+  animation: speaker-pulse 1.2s infinite ease-in-out;
+}
+
+@keyframes speaker-pulse {
+  0% { transform: scale(1); opacity: 0.7; }
+  50% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.7; }
+}
+
 /* AI 加载动画 */
 .loading-stars {
   display: flex;
@@ -634,12 +705,12 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
 .loading-stars span:nth-child(3) { animation-delay: 0.6s; }
 
 @keyframes star-pulse {
-  0%, 100% { 
-    transform: scale(1); 
+  0%, 100% {
+    transform: scale(1);
     opacity: 0.6;
   }
-  50% { 
-    transform: scale(1.5); 
+  50% {
+    transform: scale(1.5);
     opacity: 1;
     box-shadow: 0 0 20px var(--color-primary);
   }
@@ -651,7 +722,8 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
     animation: none !important;
   }
 
-  .loading-stars span {
+  .loading-stars span,
+  .playing-icon {
     animation: none !important;
     opacity: 0.8;
     box-shadow: none;

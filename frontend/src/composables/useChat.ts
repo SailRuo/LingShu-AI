@@ -74,7 +74,7 @@ function parseToolCalls(toolCalls?: string): ChatToolStep[] {
         name: typeof call?.name === "string" ? call.name : undefined,
         arguments:
           typeof call?.arguments === "string" ? call.arguments : undefined,
-      })
+      }),
     );
   } catch {
     return [];
@@ -106,7 +106,7 @@ function attachToolResult(toolSteps: ChatToolStep[], message: HistoryMessage) {
           result: message.content ?? "",
           output: message.content ?? "",
           toolName: step.toolName || message.toolName || "",
-          status: message.content ? "success" : step.status ?? "running",
+          status: message.content ? "success" : (step.status ?? "running"),
         };
         return;
       }
@@ -119,11 +119,16 @@ function attachToolResult(toolSteps: ChatToolStep[], message: HistoryMessage) {
     result: message.content ?? "",
     output: message.content ?? "",
     toolName: toolSteps[lastIndex].toolName || message.toolName || "",
-    status: message.content ? "success" : toolSteps[lastIndex].status ?? "running",
+    status: message.content
+      ? "success"
+      : (toolSteps[lastIndex].status ?? "running"),
   };
 }
 
-function getToolStepKey(step: Partial<ChatToolStep>, fallbackIndex: number): string {
+function getToolStepKey(
+  step: Partial<ChatToolStep>,
+  fallbackIndex: number,
+): string {
   return (
     step.toolCallId ||
     step.id ||
@@ -137,7 +142,7 @@ function getToolStepKey(step: Partial<ChatToolStep>, fallbackIndex: number): str
 
 function mergeToolStepLists(
   previousSteps?: ChatToolStep[],
-  nextSteps?: ChatToolStep[]
+  nextSteps?: ChatToolStep[],
 ): ChatToolStep[] | undefined {
   const merged = new Map<string, ChatToolStep>();
 
@@ -165,103 +170,109 @@ function mergeToolStepLists(
   return result.length ? result : undefined;
 }
 
-function buildToolStepsFromSegments(segments?: ChatMessageSegment[]): ChatToolStep[] | undefined {
+function buildToolStepsFromSegments(
+  segments?: ChatMessageSegment[],
+): ChatToolStep[] | undefined {
   const toolSteps = segments?.filter(
-    (segment): segment is ChatToolSegment => segment.type === "tool"
+    (segment): segment is ChatToolSegment => segment.type === "tool",
   );
   return mergeToolStepLists(undefined, toolSteps);
 }
 
 function mergeSegments(
   previousSegments?: ChatMessageSegment[],
-  nextSegments?: ChatMessageSegment[]
+  nextSegments?: ChatMessageSegment[],
 ): ChatMessageSegment[] | undefined {
   const merged: ChatMessageSegment[] = [];
   const toolSegments = new Map<string, number>();
 
-  [...(previousSegments ?? []), ...(nextSegments ?? [])].forEach((segment, index) => {
-    if (segment.type === "text") {
-      const content = segment.content ?? "";
-      if (!content) {
+  [...(previousSegments ?? []), ...(nextSegments ?? [])].forEach(
+    (segment, index) => {
+      if (segment.type === "text") {
+        const content = segment.content ?? "";
+        if (!content) {
+          return;
+        }
+
+        const last = merged[merged.length - 1];
+        if (last?.type === "text") {
+          merged[merged.length - 1] = {
+            ...last,
+            content: `${last.content}${content}`,
+            timestamp: segment.timestamp ?? last.timestamp,
+          };
+        } else {
+          merged.push({
+            type: "text",
+            content,
+            timestamp: segment.timestamp,
+          });
+        }
         return;
       }
 
-      const last = merged[merged.length - 1];
-      if (last?.type === "text") {
-        merged[merged.length - 1] = {
-          ...last,
-          content: `${last.content}${content}`,
-          timestamp: segment.timestamp ?? last.timestamp,
-        };
-      } else {
-        merged.push({
-          type: "text",
-          content,
-          timestamp: segment.timestamp,
-        });
+      if (segment.type === "reasoning") {
+        const content = segment.content ?? "";
+        const last = merged[merged.length - 1];
+        if (last?.type === "reasoning") {
+          merged[merged.length - 1] = {
+            ...last,
+            content: `${last.content}${content}`,
+            timestamp: segment.timestamp ?? last.timestamp,
+          };
+        } else {
+          merged.push({
+            type: "reasoning",
+            content,
+            timestamp: segment.timestamp,
+          });
+        }
+        return;
       }
-      return;
-    }
 
-    if (segment.type === "reasoning") {
-      const content = segment.content ?? "";
-      const last = merged[merged.length - 1];
-      if (last?.type === "reasoning") {
-        merged[merged.length - 1] = {
-          ...last,
-          content: `${last.content}${content}`,
-          timestamp: segment.timestamp ?? last.timestamp,
-        };
-      } else {
-        merged.push({
-          type: "reasoning",
-          content,
-          timestamp: segment.timestamp,
-        });
+      if (segment.type === "image") {
+        merged.push(segment);
+        return;
       }
-      return;
-    }
 
-    if (segment.type === "image") {
-      merged.push(segment);
-      return;
-    }
+      const toolSegment = segment as ChatToolSegment;
+      const key = getToolStepKey(toolSegment, index);
+      const existingIndex = toolSegments.get(key);
+      if (existingIndex == null) {
+        toolSegments.set(key, merged.length);
+        merged.push({
+          ...toolSegment,
+          type: "tool",
+        });
+        return;
+      }
 
-    const toolSegment = segment as ChatToolSegment;
-    const key = getToolStepKey(toolSegment, index);
-    const existingIndex = toolSegments.get(key);
-    if (existingIndex == null) {
-      toolSegments.set(key, merged.length);
-      merged.push({
+      const previous = merged[existingIndex] as ChatToolSegment;
+      merged[existingIndex] = {
+        ...previous,
         ...toolSegment,
         type: "tool",
-      });
-      return;
-    }
-
-    const previous = merged[existingIndex] as ChatToolSegment;
-    merged[existingIndex] = {
-      ...previous,
-      ...toolSegment,
-      type: "tool",
-      id: toolSegment.id ?? previous.id,
-      toolCallId: toolSegment.toolCallId ?? previous.toolCallId,
-      toolName: toolSegment.toolName ?? previous.toolName,
-      arguments: toolSegment.arguments ?? previous.arguments,
-      command: toolSegment.command ?? previous.command,
-      input: toolSegment.input ?? previous.input,
-      result: toolSegment.result ?? previous.result,
-      output: toolSegment.output ?? previous.output,
-      isError: toolSegment.isError ?? previous.isError ?? false,
-      status: toolSegment.status ?? previous.status,
-      timestamp: toolSegment.timestamp ?? previous.timestamp,
-    };
-  });
+        id: toolSegment.id ?? previous.id,
+        toolCallId: toolSegment.toolCallId ?? previous.toolCallId,
+        toolName: toolSegment.toolName ?? previous.toolName,
+        arguments: toolSegment.arguments ?? previous.arguments,
+        command: toolSegment.command ?? previous.command,
+        input: toolSegment.input ?? previous.input,
+        result: toolSegment.result ?? previous.result,
+        output: toolSegment.output ?? previous.output,
+        isError: toolSegment.isError ?? previous.isError ?? false,
+        status: toolSegment.status ?? previous.status,
+        timestamp: toolSegment.timestamp ?? previous.timestamp,
+      };
+    },
+  );
 
   return merged.length ? merged : undefined;
 }
 
-function aggregateHistoryMessages(historyMessages: HistoryMessage[]): ChatMessage[] {
+function aggregateHistoryMessages(
+  historyMessages: HistoryMessage[],
+): ChatMessage[] {
   const chronological = [...historyMessages].reverse();
   const aggregated: ChatMessage[] = [];
 
@@ -274,18 +285,23 @@ function aggregateHistoryMessages(historyMessages: HistoryMessage[]): ChatMessag
       let images: string[] | undefined = undefined;
 
       // 如果内容是 JSON 数组（多模态格式），进行解析
-      if (content.trim().startsWith('[')) {
+      if (content.trim().startsWith("[")) {
         try {
           const parsed = JSON.parse(content);
-          if (Array.isArray(parsed) && parsed.some((p: any) => p.type === 'text' || p.type === 'image')) {
+          if (
+            Array.isArray(parsed) &&
+            parsed.some((p: any) => p.type === "text" || p.type === "image")
+          ) {
             let extractedContent = "";
             let extractedImages: string[] = [];
             for (const part of parsed) {
-              if (part.type === 'text') {
-                extractedContent += (part.text || part.content || "");
-              } else if (part.type === 'image') {
+              if (part.type === "text") {
+                extractedContent += part.text || part.content || "";
+              } else if (part.type === "image") {
                 if (part.base64) {
-                  extractedImages.push(`data:${part.mimeType || 'image/jpeg'};base64,${part.base64}`);
+                  extractedImages.push(
+                    `data:${part.mimeType || "image/jpeg"};base64,${part.base64}`,
+                  );
                 } else if (part.url) {
                   extractedImages.push(part.url);
                 }
@@ -306,7 +322,7 @@ function aggregateHistoryMessages(historyMessages: HistoryMessage[]): ChatMessag
         role: "user",
         content: content,
         timestamp: toTimestamp(current.timestamp),
-        images: images
+        images: images,
       });
       index++;
       continue;
@@ -314,16 +330,18 @@ function aggregateHistoryMessages(historyMessages: HistoryMessage[]): ChatMessag
 
     if (current.role === "assistant") {
       let segments: ChatMessageSegment[] = [];
-      let toolSteps: ChatToolStep[] = mergeToolStepLists(
-        undefined,
-        current.toolSteps?.map(normalizeToolStep)
-      ) ?? [];
+      let toolSteps: ChatToolStep[] =
+        mergeToolStepLists(
+          undefined,
+          current.toolSteps?.map(normalizeToolStep),
+        ) ?? [];
 
       if (toolSteps.length) {
-        segments = mergeSegments(
-          segments,
-          toolSteps.map((step) => ({ ...step, type: "tool" as const }))
-        ) ?? [];
+        segments =
+          mergeSegments(
+            segments,
+            toolSteps.map((step) => ({ ...step, type: "tool" as const })),
+          ) ?? [];
       }
 
       while (index < chronological.length) {
@@ -336,29 +354,38 @@ function aggregateHistoryMessages(historyMessages: HistoryMessage[]): ChatMessag
         if (message.role === "assistant") {
           const content = message.content?.trim();
           if (content) {
-            segments = mergeSegments(segments, [
-              {
-                type: "text",
-                content: content,
-                timestamp: toTimestamp(message.timestamp),
-              },
-            ]) ?? [];
+            segments =
+              mergeSegments(segments, [
+                {
+                  type: "text",
+                  content: content,
+                  timestamp: toTimestamp(message.timestamp),
+                },
+              ]) ?? [];
           }
 
           if (message.toolSteps?.length) {
             const nextToolSteps = message.toolSteps.map(normalizeToolStep);
             toolSteps = mergeToolStepLists(toolSteps, nextToolSteps) ?? [];
-            segments = mergeSegments(
-              segments,
-              nextToolSteps.map((step) => ({ ...step, type: "tool" as const }))
-            ) ?? [];
+            segments =
+              mergeSegments(
+                segments,
+                nextToolSteps.map((step) => ({
+                  ...step,
+                  type: "tool" as const,
+                })),
+              ) ?? [];
           } else if (message.toolCalls) {
             const nextToolSteps = parseToolCalls(message.toolCalls);
             toolSteps = mergeToolStepLists(toolSteps, nextToolSteps) ?? [];
-            segments = mergeSegments(
-              segments,
-              nextToolSteps.map((step) => ({ ...step, type: "tool" as const }))
-            ) ?? [];
+            segments =
+              mergeSegments(
+                segments,
+                nextToolSteps.map((step) => ({
+                  ...step,
+                  type: "tool" as const,
+                })),
+              ) ?? [];
           }
 
           index++;
@@ -366,10 +393,11 @@ function aggregateHistoryMessages(historyMessages: HistoryMessage[]): ChatMessag
         }
 
         attachToolResult(toolSteps, message);
-        segments = mergeSegments(
-          segments,
-          toolSteps.map((step) => ({ ...step, type: "tool" as const }))
-        ) ?? [];
+        segments =
+          mergeSegments(
+            segments,
+            toolSteps.map((step) => ({ ...step, type: "tool" as const })),
+          ) ?? [];
         index++;
       }
 
@@ -377,12 +405,19 @@ function aggregateHistoryMessages(historyMessages: HistoryMessage[]): ChatMessag
         id: current.id,
         role: "assistant",
         content: segments
-          .filter((segment): segment is Extract<ChatMessageSegment, { type: "text" }> => segment.type === "text")
+          .filter(
+            (
+              segment,
+            ): segment is Extract<ChatMessageSegment, { type: "text" }> =>
+              segment.type === "text",
+          )
           .map((segment) => segment.content)
           .join(""),
         timestamp: toTimestamp(current.timestamp),
         segments: segments.length ? segments : undefined,
-        toolSteps: buildToolStepsFromSegments(segments) ?? (toolSteps.length ? toolSteps : undefined),
+        toolSteps:
+          buildToolStepsFromSegments(segments) ??
+          (toolSteps.length ? toolSteps : undefined),
         isToolStepsExpanded: false,
       });
       continue;
@@ -391,14 +426,17 @@ function aggregateHistoryMessages(historyMessages: HistoryMessage[]): ChatMessag
     if (current.role === "tool") {
       const toolSteps: ChatToolStep[] = [];
 
-      while (index < chronological.length && chronological[index].role === "tool") {
+      while (
+        index < chronological.length &&
+        chronological[index].role === "tool"
+      ) {
         attachToolResult(toolSteps, chronological[index]);
         index++;
       }
 
       const segments = mergeSegments(
         undefined,
-        toolSteps.map((step) => ({ ...step, type: "tool" as const }))
+        toolSteps.map((step) => ({ ...step, type: "tool" as const })),
       );
 
       aggregated.push({
@@ -407,7 +445,9 @@ function aggregateHistoryMessages(historyMessages: HistoryMessage[]): ChatMessag
         content: "",
         timestamp: toTimestamp(current.timestamp),
         segments,
-        toolSteps: buildToolStepsFromSegments(segments) ?? (toolSteps.length ? toolSteps : undefined),
+        toolSteps:
+          buildToolStepsFromSegments(segments) ??
+          (toolSteps.length ? toolSteps : undefined),
         isToolStepsExpanded: false,
       });
       continue;
@@ -421,14 +461,14 @@ function aggregateHistoryMessages(historyMessages: HistoryMessage[]): ChatMessag
 
 function mergeToolSteps(
   previousSteps?: ChatToolStep[],
-  nextSteps?: ChatToolStep[]
+  nextSteps?: ChatToolStep[],
 ): ChatToolStep[] | undefined {
   return mergeToolStepLists(previousSteps, nextSteps);
 }
 
 function mergeMessageBatches(
   olderMessages: ChatMessage[],
-  currentMessages: ChatMessage[]
+  currentMessages: ChatMessage[],
 ): ChatMessage[] {
   if (!olderMessages.length) {
     return currentMessages;
@@ -463,9 +503,9 @@ function mergeMessageBatches(
 }
 
 export function useChat() {
-  const messages = ref<ChatMessage[]>([])
-  const inputMessage = ref('')
-  const inputImages = ref<string[]>([])
+  const messages = ref<ChatMessage[]>([]);
+  const inputMessage = ref("");
+  const inputImages = ref<string[]>([]);
   const isTyping = ref(false);
   const welcomeGreeting = ref("欢迎回来");
   const isLoadingHistory = ref(false);
@@ -485,7 +525,7 @@ export function useChat() {
       segments: [],
       toolSteps: [],
       isToolStepsExpanded: true,
-      isLoading: true,  // 标记为加载状态
+      isLoading: true, // 标记为加载状态
     };
     messages.value.push(assistantMessage);
     return assistantMessage;
@@ -497,7 +537,9 @@ export function useChat() {
     messages.value[lastIndex] = updater({
       ...assistantMessage,
       segments: assistantMessage.segments ? [...assistantMessage.segments] : [],
-      toolSteps: assistantMessage.toolSteps ? [...assistantMessage.toolSteps] : [],
+      toolSteps: assistantMessage.toolSteps
+        ? [...assistantMessage.toolSteps]
+        : [],
     });
   }
 
@@ -524,7 +566,7 @@ export function useChat() {
     updateLastAssistant((message) => {
       const segments = message.segments ?? [];
       const lastSegment = segments[segments.length - 1];
-      
+
       if (lastSegment?.type === "reasoning") {
         const updatedSegments = [...segments];
         updatedSegments[segments.length - 1] = {
@@ -536,7 +578,7 @@ export function useChat() {
           segments: updatedSegments,
         };
       }
-      
+
       return {
         ...message,
         segments: [
@@ -557,14 +599,20 @@ export function useChat() {
       const targetId = toolStep.toolCallId ?? toolStep.id ?? "";
       const targetIndex = nextSteps.findIndex(
         (step) =>
-          (!!targetId && (step.toolCallId === targetId || step.id === targetId)) ||
-          (!!toolStep.toolName && !targetId && step.toolName === toolStep.toolName && step.status === "running")
+          (!!targetId &&
+            (step.toolCallId === targetId || step.id === targetId)) ||
+          (!!toolStep.toolName &&
+            !targetId &&
+            step.toolName === toolStep.toolName &&
+            step.status === "running"),
       );
 
       const previous = targetIndex >= 0 ? nextSteps[targetIndex] : undefined;
       const merged: ChatToolStep = {
         id: (toolStep.id ?? previous?.id ?? targetId) || undefined,
-        toolCallId: (toolStep.toolCallId ?? previous?.toolCallId ?? targetId) || undefined,
+        toolCallId:
+          (toolStep.toolCallId ?? previous?.toolCallId ?? targetId) ||
+          undefined,
         toolName: toolStep.toolName ?? previous?.toolName ?? "",
         arguments: toolStep.arguments ?? previous?.arguments,
         command: toolStep.command ?? previous?.command,
@@ -574,7 +622,11 @@ export function useChat() {
         isError: toolStep.isError ?? previous?.isError ?? false,
         status:
           toolStep.status ??
-          (toolStep.isError ? "error" : toolStep.result || previous?.result ? "success" : previous?.status ?? "running"),
+          (toolStep.isError
+            ? "error"
+            : toolStep.result || previous?.result
+              ? "success"
+              : (previous?.status ?? "running")),
         timestamp: toolStep.timestamp ?? previous?.timestamp ?? Date.now(),
       };
 
@@ -604,9 +656,9 @@ export function useChat() {
   function failLatestAssistantMessage(errorMessage?: string) {
     updateLastAssistant((message) => {
       let normalizedError = (errorMessage ?? "").trim() || "发生错误";
-      
+
       // 尝试解析 JSON 格式的错误消息
-      if (normalizedError.includes('{')) {
+      if (normalizedError.includes("{")) {
         try {
           // 提取 JSON 部分
           const jsonMatch = normalizedError.match(/\{.*\}/);
@@ -623,12 +675,14 @@ export function useChat() {
       }
 
       // 针对特定错误的友好提示
-      if (normalizedError.toLowerCase().includes('context size') || 
-          normalizedError.toLowerCase().includes('context_length_exceeded') ||
-          normalizedError.toLowerCase().includes('too many tokens')) {
+      if (
+        normalizedError.toLowerCase().includes("context size") ||
+        normalizedError.toLowerCase().includes("context_length_exceeded") ||
+        normalizedError.toLowerCase().includes("too many tokens")
+      ) {
         normalizedError = "对话上下文过长，请尝试开启新对话或清理历史记录。";
-      } else if (normalizedError.includes('聊天处理失败:')) {
-        normalizedError = normalizedError.replace('聊天处理失败:', '').trim();
+      } else if (normalizedError.includes("聊天处理失败:")) {
+        normalizedError = normalizedError.replace("聊天处理失败:", "").trim();
       }
 
       const nextToolSteps = (message.toolSteps ?? []).map((step) => {
@@ -708,23 +762,25 @@ export function useChat() {
 
       const currentMessage = messages.value[lastAssistantIndex];
       const currentReasoningSegments = (currentMessage.segments ?? []).filter(
-        (segment) => segment.type === "reasoning"
+        (segment) => segment.type === "reasoning",
       );
-      
+
       const mergedSegments = [
         ...currentReasoningSegments,
         ...(latestAssistant.segments ?? []).filter(
-          (segment) => segment.type !== "reasoning"
+          (segment) => segment.type !== "reasoning",
         ),
       ];
 
       messages.value[lastAssistantIndex] = {
         ...currentMessage,
         ...latestAssistant,
-        segments: mergedSegments.length > 0 ? mergedSegments : latestAssistant.segments,
+        isLoading: false,
+        segments:
+          mergedSegments.length > 0 ? mergedSegments : latestAssistant.segments,
       };
-      
-      return latestAssistant;
+
+      return messages.value[lastAssistantIndex];
     } catch (error) {
       console.error("Sync latest assistant message error:", error);
       return null;
@@ -819,13 +875,13 @@ export function useChat() {
     const currentImages = [...inputImages.value];
     if ((!text && currentImages.length === 0) || isTyping.value) return;
 
-    messages.value.push({ 
-      role: "user", 
-      content: text, 
+    messages.value.push({
+      role: "user",
+      content: text,
       timestamp: Date.now(),
-      ...(currentImages.length > 0 ? { images: currentImages } : {})
+      ...(currentImages.length > 0 ? { images: currentImages } : {}),
     });
-    
+
     inputMessage.value = "";
     inputImages.value = [];
     isTyping.value = true;
@@ -843,7 +899,7 @@ export function useChat() {
       if (currentImages.length > 0) {
         payload.images = currentImages;
       }
-      
+
       const res = await fetch(getFullUrl("/api/chat/stream"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },

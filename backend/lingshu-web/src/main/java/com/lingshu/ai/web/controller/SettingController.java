@@ -36,7 +36,7 @@ public class SettingController {
         setting.setId("local_tools");
         setting.setSettings(settings);
         settingService.saveLocalToolsSetting(setting);
-        
+
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
         response.put("message", "配置已保存");
@@ -69,33 +69,33 @@ public class SettingController {
     @GetMapping
     public Map<String, Object> getSetting() {
         SystemSetting setting = settingService.getSetting();
-        
+
         Map<String, Object> result = new HashMap<>();
-        
+
         Map<String, Object> llmConfig = setting.getLlmConfig();
         result.put("source", llmConfig.get("source"));
         result.put("chatModel", llmConfig.get("model"));
         result.put("baseUrl", llmConfig.get("baseUrl"));
         result.put("apiKey", llmConfig.get("apiKey"));
-        
+
         Map<String, Object> embeddingConfig = setting.getEmbeddingConfig();
         result.put("embedSource", embeddingConfig.get("source"));
         result.put("embedModel", embeddingConfig.get("model"));
         result.put("embedBaseUrl", embeddingConfig.get("baseUrl"));
         result.put("embedApiKey", embeddingConfig.get("apiKey"));
-        
+
         Map<String, Object> proactiveConfig = setting.getProactiveConfig();
         result.put("proactiveEnabled", proactiveConfig.get("enabled"));
         result.put("inactiveThresholdMinutes", proactiveConfig.get("inactiveThresholdMinutes"));
         result.put("greetingCooldownSeconds", proactiveConfig.get("greetingCooldownSeconds"));
         result.put("inactiveCheckIntervalMs", proactiveConfig.get("inactiveCheckIntervalMs"));
-        
+
         Map<String, Object> memoryModelConfig = setting.getMemoryModelConfig();
         result.put("memoryModelSource", memoryModelConfig.get("source"));
         result.put("memoryModel", memoryModelConfig.get("model"));
         result.put("memoryModelBaseUrl", memoryModelConfig.get("baseUrl"));
         result.put("memoryModelApiKey", memoryModelConfig.get("apiKey"));
-        
+
         Map<String, Object> ttsConfig = setting.getTtsConfig();
         result.put("ttsBaseUrl", ttsConfig.get("baseUrl"));
         result.put("ttsApiKey", ttsConfig.get("apiKey"));
@@ -103,7 +103,7 @@ public class SettingController {
         result.put("ttsDefaultSpeed", ttsConfig.get("defaultSpeed"));
         result.put("ttsDefaultFormat", ttsConfig.get("defaultFormat"));
         result.put("ttsEnabled", ttsConfig.get("enabled"));
-        
+
         return result;
     }
 
@@ -113,44 +113,43 @@ public class SettingController {
     @PostMapping
     public void saveSetting(@RequestBody SystemSettingDTO dto) {
         SystemSetting setting = settingService.getSetting();
-        
+
         Map<String, Object> llmConfig = setting.getLlmConfig();
-        llmConfig.put("source", dto.getSource() != null ? dto.getSource() : "ollama");
-        llmConfig.put("model", dto.getChatModel() != null ? dto.getChatModel() : "");
-        llmConfig.put("baseUrl", dto.getBaseUrl() != null ? dto.getBaseUrl() : "");
-        llmConfig.put("apiKey", dto.getApiKey() != null ? dto.getApiKey() : "");
+        if (dto.getSource() != null) llmConfig.put("source", dto.getSource());
+        if (dto.getChatModel() != null) llmConfig.put("model", dto.getChatModel());
+        if (dto.getBaseUrl() != null) llmConfig.put("baseUrl", dto.getBaseUrl());
+        if (dto.getApiKey() != null) llmConfig.put("apiKey", dto.getApiKey());
         setting.setLlmConfig(llmConfig);
-        
+
         Map<String, Object> embeddingConfig = setting.getEmbeddingConfig();
-        embeddingConfig.put("source", dto.getEmbedSource() != null ? dto.getEmbedSource() : "ollama");
-        embeddingConfig.put("model", dto.getEmbedModel() != null ? dto.getEmbedModel() : "");
-        embeddingConfig.put("baseUrl", dto.getEmbedBaseUrl() != null ? dto.getEmbedBaseUrl() : "http://localhost:11434");
-        embeddingConfig.put("apiKey", dto.getEmbedApiKey() != null ? dto.getEmbedApiKey() : "");
+        if (dto.getEmbedSource() != null) embeddingConfig.put("source", dto.getEmbedSource());
+        if (dto.getEmbedModel() != null) embeddingConfig.put("model", dto.getEmbedModel());
+        if (dto.getEmbedBaseUrl() != null) embeddingConfig.put("baseUrl", dto.getEmbedBaseUrl());
+        if (dto.getEmbedApiKey() != null) embeddingConfig.put("apiKey", dto.getEmbedApiKey());
         setting.setEmbeddingConfig(embeddingConfig);
-        
+
         Map<String, Object> proactiveConfig = setting.getProactiveConfig();
-        proactiveConfig.put("enabled", dto.getProactiveEnabled() != null ? dto.getProactiveEnabled() : true);
-        proactiveConfig.put("inactiveThresholdMinutes", dto.getInactiveThresholdMinutes() != null ? dto.getInactiveThresholdMinutes() : 5);
-        proactiveConfig.put("greetingCooldownSeconds", dto.getGreetingCooldownSeconds() != null ? dto.getGreetingCooldownSeconds() : 300);
-        proactiveConfig.put("inactiveCheckIntervalMs", dto.getInactiveCheckIntervalMs() != null ? dto.getInactiveCheckIntervalMs() : 3600000L);
+        if (dto.getProactiveEnabled() != null) proactiveConfig.put("enabled", dto.getProactiveEnabled());
+        if (dto.getInactiveThresholdMinutes() != null) proactiveConfig.put("inactiveThresholdMinutes", dto.getInactiveThresholdMinutes());
+        if (dto.getGreetingCooldownSeconds() != null) proactiveConfig.put("greetingCooldownSeconds", dto.getGreetingCooldownSeconds());
+        if (dto.getInactiveCheckIntervalMs() != null) proactiveConfig.put("inactiveCheckIntervalMs", dto.getInactiveCheckIntervalMs());
         setting.setProactiveConfig(proactiveConfig);
-        
-        Map<String, Object> memoryModelConfig = new HashMap<>();
-        memoryModelConfig.put("source", dto.getMemoryModelSource() != null ? dto.getMemoryModelSource() : "");
-        memoryModelConfig.put("model", dto.getMemoryModel() != null ? dto.getMemoryModel() : "");
-        memoryModelConfig.put("baseUrl", dto.getMemoryModelBaseUrl() != null ? dto.getMemoryModelBaseUrl() : "");
-        memoryModelConfig.put("apiKey", dto.getMemoryModelApiKey() != null ? dto.getMemoryModelApiKey() : "");
+
+        Map<String, Object> memoryModelConfig = setting.getMemoryModelConfig();
+        if (dto.getMemoryModelSource() != null) memoryModelConfig.put("source", dto.getMemoryModelSource());
+        if (dto.getMemoryModel() != null) memoryModelConfig.put("model", dto.getMemoryModel());
+        if (dto.getMemoryModelBaseUrl() != null) memoryModelConfig.put("baseUrl", dto.getMemoryModelBaseUrl());
+        if (dto.getMemoryModelApiKey() != null) memoryModelConfig.put("apiKey", dto.getMemoryModelApiKey());
         setting.setMemoryModelConfig(memoryModelConfig);
 
         Map<String, Object> ttsConfig = setting.getTtsConfig();
-        ttsConfig.put("baseUrl", dto.getTtsBaseUrl() != null ? dto.getTtsBaseUrl() : "http://localhost:5050");
-        ttsConfig.put("apiKey", dto.getTtsApiKey() != null ? dto.getTtsApiKey() : "");
-        ttsConfig.put("defaultVoice", dto.getTtsDefaultVoice() != null ? dto.getTtsDefaultVoice() : "alloy");
-        ttsConfig.put("defaultSpeed", dto.getTtsDefaultSpeed() != null ? dto.getTtsDefaultSpeed() : 1.0);
-        ttsConfig.put("defaultFormat", dto.getTtsDefaultFormat() != null ? dto.getTtsDefaultFormat() : "mp3");
-        ttsConfig.put("enabled", dto.getTtsEnabled() != null ? dto.getTtsEnabled() : false);
+        if (dto.getTtsBaseUrl() != null) ttsConfig.put("baseUrl", dto.getTtsBaseUrl());
+        if (dto.getTtsApiKey() != null) ttsConfig.put("apiKey", dto.getTtsApiKey());
+        if (dto.getTtsDefaultVoice() != null) ttsConfig.put("defaultVoice", dto.getTtsDefaultVoice());
+        if (dto.getTtsDefaultSpeed() != null) ttsConfig.put("defaultSpeed", dto.getTtsDefaultSpeed());
+        if (dto.getTtsDefaultFormat() != null) ttsConfig.put("defaultFormat", dto.getTtsDefaultFormat());
+        if (dto.getTtsEnabled() != null) ttsConfig.put("enabled", dto.getTtsEnabled());
         setting.setTtsConfig(ttsConfig);
-        
+
         settingService.saveSetting(setting);
-    }
-}
+    }}

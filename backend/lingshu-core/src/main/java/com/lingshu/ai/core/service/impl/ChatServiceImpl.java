@@ -556,14 +556,14 @@ public class ChatServiceImpl implements ChatService {
                         List<String> models = list.stream()
                                 .map(m -> (String) ((java.util.Map<?, ?>) m).get("id"))
                                 .collect(java.util.stream.Collectors.toList());
-                        log.debug("获取到 " + models.size() + " 个OpenAI兼容模型");
+                        //log.debug("获取到 " + models.size() + " 个OpenAI兼容模型");
                         return models;
                     }
                 } else if (responseObj instanceof java.util.List<?> list) {
                     List<String> models = list.stream()
                             .map(m -> (String) ((java.util.Map<?, ?>) m).get("id"))
                             .collect(java.util.stream.Collectors.toList());
-                    log.debug("获取到 " + models.size() + " 个OpenAI兼容模型");
+                    //log.debug("获取到 " + models.size() + " 个OpenAI兼容模型");
                     return models;
                 }
 

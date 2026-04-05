@@ -100,9 +100,9 @@ function handleSend() {
   if ((!text && images.length === 0) || isTyping.value) return
 
   if (isConnected.value) {
-    messages.value.push({ 
-      role: 'user', 
-      content: text, 
+    messages.value.push({
+      role: 'user',
+      content: text,
       timestamp: Date.now(),
       images: images.length > 0 ? [...images] : undefined
     })
@@ -110,14 +110,14 @@ function handleSend() {
     inputImages.value = []
     isTyping.value = true
     autoScrollEnabled.value = true // 用户发送消息，强制开启自动滚动
-    scrollToBottom('smooth') 
+    scrollToBottom('smooth')
 
     sendChat(
-      text, 
-      undefined, 
-      settings.value.model, 
-      settings.value.apiKey, 
-      settings.value.baseUrl, 
+      text,
+      undefined,
+      settings.value.model,
+      settings.value.apiKey,
+      settings.value.baseUrl,
       settings.value.enableThinking,
       images.length > 0 ? [...images] : undefined
     )
@@ -137,7 +137,7 @@ function handleQuickAction(text: string) {
 
 async function handleClearHistory() {
   if (messages.value.length === 0) return
-  
+
   dialog.warning({
     title: '确认清空',
     content: '确定要清空所有会话历史吗？此操作不可撤销。',
@@ -184,7 +184,7 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
       isTyping.value = true
       startAssistantMessage()
       break
-      
+
     case 'chatChunk':
       appendAssistantChunk(msg.content || '')
       isTyping.value = false
@@ -228,7 +228,7 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
         scrollToBottom()
       }
       break
-      
+
     case 'chatEnd':
       isTyping.value = false
       const lastMsg = await syncLatestAssistantMessage()
@@ -236,19 +236,18 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
         scrollToBottom('smooth')
       }
       if (settings.value.ttsEnabled && lastMsg && lastMsg.content) {
-        ttsSpeak(lastMsg.content)
+        ttsSpeak(lastMsg.content, lastMsg.id)
       }
       break
-      
     case 'error':
       isTyping.value = false
       const errorMsg = msg.message || '发生错误'
       failLatestAssistantMessage(errorMsg)
       await syncLatestAssistantMessage()
-      
+
       // 提取友好提示
       let friendlyMsg = errorMsg
-      if (errorMsg.toLowerCase().includes('context size') || 
+      if (errorMsg.toLowerCase().includes('context size') ||
           errorMsg.toLowerCase().includes('context_length_exceeded')) {
         friendlyMsg = '对话上下文过长，请尝试开启新对话或清理历史记录。'
       }
@@ -258,23 +257,24 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
         scrollToBottom()
       }
       break
-      
+
     case 'proactiveGreeting':
       if (msg.content) {
-        messages.value.push({ 
-          role: 'assistant', 
-          content: msg.content, 
-          timestamp: Date.now() 
+        const msgId = `proactive-${Date.now()}`
+        messages.value.push({
+          id: msgId,
+          role: 'assistant',
+          content: msg.content,
+          timestamp: Date.now()
         })
         if (autoScrollEnabled.value) {
           scrollToBottom()
         }
         if (settings.value.ttsEnabled) {
-          ttsSpeak(msg.content)
+          ttsSpeak(msg.content, msgId)
         }
       }
       break
-      
     case 'userState':
       console.log('用户状态更新:', msg)
       break
@@ -359,19 +359,19 @@ async function handleToggleTts() {
       </div>
 
       <div class="chat-actions" v-if="messages.length > 0">
-        <button 
-          class="action-btn tts-btn" 
+        <button
+          class="action-btn tts-btn"
           :class="{ active: settings.ttsEnabled, playing: ttsPlaying }"
-          @click="handleToggleTts" 
+          @click="handleToggleTts"
           :title="settings.ttsEnabled ? '关闭语音' : '开启语音'"
         >
           <Volume2 v-if="settings.ttsEnabled" :size="16" />
           <VolumeX v-else :size="16" />
         </button>
 
-        <button 
-          class="action-btn clear-btn" 
-          @click="handleClearHistory" 
+        <button
+          class="action-btn clear-btn"
+          @click="handleClearHistory"
           title="清空会话"
         >
           <Trash2 :size="14" />
@@ -388,10 +388,10 @@ async function handleToggleTts() {
           <div class="orb-ring"></div>
           <div class="orb-core"></div>
         </div>
-        
+
         <h1 class="welcome-title">{{ welcomeGreeting }}</h1>
         <p class="welcome-subtitle">与灵枢建立深度连接，探索内心世界</p>
-        
+
         <div class="quick-actions">
           <button class="quick-btn" @click="handleQuickAction('我们的回忆')">
             <Sparkles :size="16" />
@@ -414,9 +414,9 @@ async function handleToggleTts() {
       <div class="messages-content">
         <!-- Load More Indicator -->
         <div class="load-more-indicator" v-if="hasMoreHistory">
-          <button 
-            class="load-more-btn" 
-            @click="loadHistory(20)" 
+          <button
+            class="load-more-btn"
+            @click="loadHistory(20)"
             :disabled="isLoadingHistory"
           >
             <Loader2 v-if="isLoadingHistory" :size="16" class="spin" />
@@ -426,7 +426,7 @@ async function handleToggleTts() {
         <div class="no-more-indicator" v-else-if="messages.length > 0 && !hasMoreHistory">
           <span>— 没有更多历史消息 —</span>
         </div>
-        
+
         <ChatMessageComponent
           v-for="(msg, i) in messages"
           :key="i"
@@ -434,7 +434,7 @@ async function handleToggleTts() {
           :time-label="formatTime(msg.timestamp)"
           :class="{ 'loading-message': msg.isLoading && !msg.content }"
         />
-        
+
 
 
       </div>
@@ -486,11 +486,11 @@ async function handleToggleTts() {
     z-index: 1000;
     pointer-events: none;
   }
-  
+
   .chat-header > * {
     pointer-events: auto;
   }
-  
+
   .connection-status,
   .chat-actions,
   .action-btn {
@@ -595,7 +595,7 @@ async function handleToggleTts() {
   background: radial-gradient(circle at 30% 30%, var(--color-primary), transparent 70%);
   background-color: var(--color-primary);
   border-radius: 50%;
-  box-shadow: 
+  box-shadow:
     0 0 30px var(--color-primary),
     0 0 60px rgba(52, 211, 153, 0.3),
     inset 0 0 20px rgba(255, 255, 255, 0.2);
