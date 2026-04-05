@@ -75,4 +75,7 @@ public class SystemSettingDTO {
 
     @JsonProperty("ttsEnabled")
     private Boolean ttsEnabled;
+
+    @JsonProperty("enableThinking")
+    private Boolean enableThinking;
 }

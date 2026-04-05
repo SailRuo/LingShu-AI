@@ -63,7 +63,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         String payload = message.getPayload();
-        log.debug("收到 WebSocket 消息: {}", payload != null && payload.length() > 200 ? payload.substring(0, 200) + "..." : payload);
+        //log.debug("收到 WebSocket 消息: {}", payload != null && payload.length() > 200 ? payload.substring(0, 200) + "..." : payload);
         
         try {
             Map<String, Object> data = objectMapper.readValue(payload, Map.class);
@@ -128,6 +128,10 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         String apiKey = (String) data.get("apiKey");
         String baseUrl = (String) data.get("baseUrl");
         Boolean enableThinking = (Boolean) data.get("enableThinking");
+        
+        if (enableThinking == null) {
+            enableThinking = settingService.getSetting().getEnableThinking();
+        }
 
         if ((message == null || message.isBlank()) && (images == null || images.isEmpty())) {
             sendMessage(session, Map.of(

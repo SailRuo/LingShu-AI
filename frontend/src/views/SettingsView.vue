@@ -43,6 +43,7 @@ const settings = ref({
   ttsDefaultVoice: 'alloy',
   ttsDefaultSpeed: 1.0,
   ttsDefaultFormat: 'mp3',
+  enableThinking: false,
 })
 
 const chatModelOptions = ref<{label: string, value: string}[]>([])
@@ -436,6 +437,7 @@ async function fetchSettings() {
       ttsDefaultVoice: data.ttsDefaultVoice || 'alloy',
       ttsDefaultSpeed: data.ttsDefaultSpeed || 1.0,
       ttsDefaultFormat: data.ttsDefaultFormat || 'mp3',
+      enableThinking: data.enableThinking ?? false,
     }
     fetchChatModels(true)
     fetchEmbedModels(true)
@@ -573,6 +575,7 @@ const handleSave = async () => {
         ttsDefaultVoice: settings.value.ttsDefaultVoice,
         ttsDefaultSpeed: settings.value.ttsDefaultSpeed,
         ttsDefaultFormat: settings.value.ttsDefaultFormat,
+        enableThinking: settings.value.enableThinking,
       })
     })
     message.success('内核配置已同步至系统中枢')
@@ -805,6 +808,18 @@ async function setDefaultAgent(id: number) {
                     <div v-if="settings.source === 'openai'" class="setting-item flex-1">
                       <div class="item-label">API 密钥</div>
                       <n-input v-model:value="settings.apiKey" type="password" show-password-on="click" placeholder="sk-..." size="large" />
+                    </div>
+                  </div>
+
+                  <n-divider class="mt-4" />
+
+                  <div class="setting-item">
+                    <div class="item-label">
+                      <span class="label-text">推理/思考模式</span>
+                    </div>
+                    <div class="switch-row">
+                      <n-switch v-model:value="settings.enableThinking" />
+                      <span class="switch-hint">开启后，支持推理的模型会展示思考过程（如 DeepSeek R1、Qwen3 等）</span>
                     </div>
                   </div>
                 </n-card>
@@ -1528,6 +1543,18 @@ async function setDefaultAgent(id: number) {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.switch-hint {
+  font-size: 12px;
+  color: var(--color-text-dim);
+  opacity: 0.7;
 }
 
 .dual-fields {

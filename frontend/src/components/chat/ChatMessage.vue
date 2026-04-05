@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import MarkdownIt from 'markdown-it'
 import { FileText, Brain, ChevronDown, ChevronRight, Volume2, VolumeX } from 'lucide-vue-next'
 import type { ChatMessage, ChatMessageSegment, ChatToolSegment } from '@/types'
@@ -14,6 +14,26 @@ const props = defineProps<{
 const { isPlaying, currentPlayingId, speak } = useTts()
 
 const reasoningExpanded = ref(false)
+
+watch(
+  () => {
+    const segments = props.message.segments
+    const isLoading = props.message.isLoading
+    if (!segments || segments.length === 0) return { hasReasoning: false, hasText: false, isLoading }
+    
+    const hasReasoning = segments.some(s => s.type === 'reasoning' && s.content)
+    const hasText = segments.some(s => s.type === 'text' && s.content)
+    return { hasReasoning, hasText, isLoading }
+  },
+  ({ hasReasoning, hasText, isLoading }) => {
+    if (hasReasoning && isLoading && !hasText) {
+      reasoningExpanded.value = true
+    } else if (hasText && !isLoading) {
+      reasoningExpanded.value = false
+    }
+  },
+  { immediate: true }
+)
 
 const messageText = computed(() => {
   if (props.message.role !== 'assistant') return ''

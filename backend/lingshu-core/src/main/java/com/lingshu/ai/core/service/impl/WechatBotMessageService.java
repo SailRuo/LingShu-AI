@@ -104,7 +104,7 @@ public class WechatBotMessageService {
                 String responseBodyStr = new String(response.getBody(), StandardCharsets.UTF_8);
                 //log.debug("微信长轮询响应: {}", responseBodyStr);
                 Map<String, Object> responseBody = objectMapper.readValue(responseBodyStr, Map.class);
-                
+
                 Integer errcode = (Integer) responseBody.get("errcode");
                 if (errcode != null && errcode == -14) {
                     log.warn("微信会话已过期 (errcode: -14)，更新状态为 session_timeout");
@@ -114,7 +114,7 @@ public class WechatBotMessageService {
                     settingService.saveWechatBotSetting(setting);
                     return;
                 }
-                
+
                 if (responseBody.containsKey("get_updates_buf")) {
                     updateBuf = (String) responseBody.get("get_updates_buf");
                 }
@@ -158,6 +158,15 @@ public class WechatBotMessageService {
                             textBuilder.append(t);
                         }
                     }
+                } else if (itemType != null && itemType == 3) { // 语音项
+                    Map<String, Object> voiceItem = (Map<String, Object>) item.get("voice_item");
+                    if (voiceItem != null) {
+                        String t = (String) voiceItem.get("text");
+                        if (t != null && !t.isBlank()) {
+                            textBuilder.append(t);
+                            log.info("提取到微信用户的语音识别文本: {}", t);
+                        }
+                    }
                 }
             }
             String text = textBuilder.toString();
@@ -173,9 +182,9 @@ public class WechatBotMessageService {
             chatService.streamChat(text, null, "User", null, null, null)
                     .reduce("", String::concat)
                     .doOnNext(fullResponse -> {
-                        log.info("收到 AI 完整响应，长度={}, 内容={}", fullResponse.length(), 
+                        log.info("收到 AI 完整响应，长度={}, 内容={}", fullResponse.length(),
                                 fullResponse.length() > 100 ? fullResponse.substring(0, 100) + "..." : fullResponse);
-                        String cleanResponse = fullResponse.replaceAll("\u0001REASONING\u0001.*?\u0001/REASONING\u0001", "");
+                        String cleanResponse = fullResponse.replaceAll("(?s)\u0001REASONING\u0001.*?\u0001/REASONING\u0001", "");
                         log.info("清理 reasoning 后的响应，长度={}", cleanResponse.length());
                         if (cleanResponse.trim().isEmpty()) {
                             log.warn("AI 响应为空，不发送消息给用户");

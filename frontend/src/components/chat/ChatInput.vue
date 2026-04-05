@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue'
-import { ArrowUp, Mic, MicOff, Loader2, Brain, X } from 'lucide-vue-next'
+import { ArrowUp, Mic, MicOff, Loader2, X } from 'lucide-vue-next'
 
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 
@@ -12,7 +12,6 @@ const props = defineProps<{
   asrListening?: boolean
   asrRecording?: boolean
   asrProcessing?: boolean
-  enableThinking?: boolean
   images?: string[]
 }>()
 
@@ -23,7 +22,6 @@ const emit = defineEmits<{
   (e: 'toggleAsr'): void
   (e: 'startPushToTalk'): void
   (e: 'stopPushToTalk'): void
-  (e: 'toggleThinking'): void
 }>()
 
 function adjustTextareaHeight() {
@@ -150,15 +148,6 @@ function handleMicMouseUp() {
       </div>
 
       <div class="input-row">
-        <button 
-          class="thinking-btn"
-          :class="{ active: enableThinking }"
-          :title="enableThinking ? '已启用推理模式' : '启用推理模式'"
-          @click="emit('toggleThinking')"
-        >
-          <Brain :size="18" />
-        </button>
-        
         <textarea
           ref="textareaRef"
           :value="modelValue"
@@ -289,43 +278,6 @@ function handleMicMouseUp() {
 .input-wrapper:focus-within {
   border-color: var(--color-primary);
   background: var(--color-surface-elevated);
-}
-
-.input-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  background: var(--color-primary-dim);
-  border-radius: 10px;
-  color: var(--color-primary);
-}
-
-.thinking-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  background: transparent;
-  border: 1px solid var(--color-outline);
-  border-radius: 10px;
-  color: var(--color-text-dim);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.thinking-btn:hover:not(.active) {
-  border-color: var(--color-primary);
-  color: var(--color-primary);
-}
-
-.thinking-btn.active {
-  background: var(--color-primary-dim);
-  border-color: var(--color-primary);
-  color: var(--color-primary);
-  box-shadow: 0 0 12px var(--color-primary-dim);
 }
 
 .input-field {

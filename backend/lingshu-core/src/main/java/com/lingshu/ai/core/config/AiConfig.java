@@ -175,7 +175,7 @@ public class AiConfig {
         String dbHost = "localhost";
         int dbPort = 5432;
         String dbName = "lingshu";
-        
+
         if (jdbcUrl != null && jdbcUrl.contains(":postgresql://")) {
             try {
                 // 解析 JDBC URL: jdbc:postgresql://host:port/database
@@ -194,9 +194,9 @@ public class AiConfig {
                 log.warn("Failed to parse JDBC URL, using defaults: {}", e.getMessage());
             }
         }
-        
+
         log.info("Initializing PgVectorEmbeddingStore with host={}, port={}, database={}", dbHost, dbPort, dbName);
-        
+
         return dev.langchain4j.store.embedding.pgvector.PgVectorEmbeddingStore.builder()
                 .host(dbHost)
                 .port(dbPort)
@@ -211,11 +211,51 @@ public class AiConfig {
     @Bean
     public dev.langchain4j.memory.chat.ChatMemoryProvider chatMemoryProvider(
             dev.langchain4j.store.memory.chat.ChatMemoryStore chatMemoryStore) {
-        return sessionId -> dev.langchain4j.memory.chat.MessageWindowChatMemory.builder()
-                .id(sessionId)
-                .maxMessages(10)
-                .chatMemoryStore(chatMemoryStore)
-                .build();
+        return sessionId -> new dev.langchain4j.memory.ChatMemory() {
+            private final dev.langchain4j.memory.ChatMemory delegate =
+                    dev.langchain4j.memory.chat.MessageWindowChatMemory.builder()
+                            .id(sessionId)
+                            .maxMessages(15)
+                            .chatMemoryStore(chatMemoryStore)
+                            .build();
+
+            @Override
+            public Object id() {
+                return delegate.id();
+            }
+
+            @Override
+            public void add(dev.langchain4j.data.message.ChatMessage message) {
+                delegate.add(message);
+            }
+
+            @Override
+            public java.util.List<dev.langchain4j.data.message.ChatMessage> messages() {
+                java.util.List<dev.langchain4j.data.message.ChatMessage> msgs = delegate.messages();
+                if (msgs == null || msgs.isEmpty()) {
+                    return msgs;
+                }
+
+                java.util.List<dev.langchain4j.data.message.ChatMessage> result = new java.util.ArrayList<>();
+                boolean foundUserMessage = false;
+                for (dev.langchain4j.data.message.ChatMessage msg : msgs) {
+                    if (msg instanceof dev.langchain4j.data.message.SystemMessage) {
+                        result.add(msg);
+                    } else if (msg instanceof dev.langchain4j.data.message.UserMessage) {
+                        foundUserMessage = true;
+                        result.add(msg);
+                    } else if (foundUserMessage) {
+                        result.add(msg);
+                    }
+                }
+                return result;
+            }
+
+            @Override
+            public void clear() {
+                delegate.clear();
+            }
+        };
     }
 
     @Bean

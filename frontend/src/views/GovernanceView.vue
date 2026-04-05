@@ -18,6 +18,7 @@ import {
   Trash2,
   Zap 
 } from 'lucide-vue-next'
+import { getFullUrl } from '@/utils/request'
 
 const message = useMessage()
 
@@ -35,7 +36,13 @@ interface FactRecord {
 
 const tableData = ref<FactRecord[]>([])
 const isLoading = ref(false)
-const pagination = ref({ page: 1, pageSize: 50, itemCount: 0 })
+const pagination = ref({
+  page: 1,
+  pageSize: 20,
+  itemCount: 0,
+  showSizePicker: true,
+  pageSizes: [10, 20, 50, 100]
+})
 const filterStatus = ref('all')
 
 const statusOptions = [
@@ -51,8 +58,7 @@ const statusOptions = [
 const loadData = async () => {
   isLoading.value = true
   try {
-    // 增加 t 参数防止浏览器缓存
-    const res = await fetch(`/api/memory/governance/list?page=${pagination.value.page - 1}&size=${pagination.value.pageSize}&status=${filterStatus.value}&t=${Date.now()}`)
+    const res = await fetch(getFullUrl(`/api/memory/governance/list?page=${pagination.value.page - 1}&size=${pagination.value.pageSize}&status=${filterStatus.value}&t=${Date.now()}`))
     if (!res.ok) throw new Error('网络请求失败')
     const data = await res.json()
     tableData.value = data.content || []
@@ -70,13 +76,18 @@ const handlePageChange = (page: number) => {
   loadData()
 }
 
+const handlePageSizeChange = (pageSize: number) => {
+  pagination.value.pageSize = pageSize
+  pagination.value.page = 1
+  loadData()
+}
+
 const handleArchive = async (id: number) => {
   isLoading.value = true
   try {
-    const res = await fetch(`/api/memory/fact/${id}/archive`, { method: 'PUT' })
+    const res = await fetch(getFullUrl(`/api/memory/fact/${id}/archive`), { method: 'PUT' })
     if (res.ok) {
       message.success('已归档至冷库')
-      // 乐观更新：立即从本地列表中移除
       tableData.value = tableData.value.filter(item => item.id !== id)
       pagination.value.itemCount = Math.max(0, pagination.value.itemCount - 1)
       await loadData()
@@ -91,10 +102,9 @@ const handleArchive = async (id: number) => {
 const handleRestore = async (id: number) => {
   isLoading.value = true
   try {
-    const res = await fetch(`/api/memory/fact/${id}/restore`, { method: 'PUT' })
+    const res = await fetch(getFullUrl(`/api/memory/fact/${id}/restore`), { method: 'PUT' })
     if (res.ok) {
       message.success('记忆已恢复激活')
-      // 乐观更新
       tableData.value = tableData.value.filter(item => item.id !== id)
       pagination.value.itemCount = Math.max(0, pagination.value.itemCount - 1)
       await loadData()
@@ -109,10 +119,9 @@ const handleRestore = async (id: number) => {
 const handleDelete = async (id: number) => {
   isLoading.value = true
   try {
-    const res = await fetch(`/api/memory/fact/${id}`, { method: 'DELETE' })
+    const res = await fetch(getFullUrl(`/api/memory/fact/${id}`), { method: 'DELETE' })
     if (res.ok) {
       message.success('已永久删除')
-      // 乐观更新
       tableData.value = tableData.value.filter(item => item.id !== id)
       pagination.value.itemCount = Math.max(0, pagination.value.itemCount - 1)
       await loadData()
@@ -127,7 +136,7 @@ const handleDelete = async (id: number) => {
 const handleRunMaintenance = async () => {
   try {
     message.info('正在执行生命周期维护...')
-    const res = await fetch(`/api/memory/maintenance/run`, { method: 'POST' })
+    const res = await fetch(getFullUrl('/api/memory/maintenance/run'), { method: 'POST' })
     if (res.ok) {
       message.success('全局维护任务执行完成')
       await loadData()
@@ -270,6 +279,7 @@ onMounted(() => {
         :pagination="pagination"
         :row-key="(row) => row.id"
         @update:page="handlePageChange"
+        @update:page-size="handlePageSizeChange"
         class="custom-table"
       />
     </div>

@@ -389,11 +389,15 @@ public class ChatServiceImpl implements ChatService {
                                          Sinks.Many<String> sink,
                                          com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion) {
         ChatMemory chatMemory = chatMemoryProvider.get(sessionId);
-        chatMemory.add(SystemMessage.from(systemPrompt));
+        
         chatMemory.add(userMessage);
 
+        List<dev.langchain4j.data.message.ChatMessage> messagesToSend = new ArrayList<>();
+        messagesToSend.add(SystemMessage.from(systemPrompt));
+        messagesToSend.addAll(chatMemory.messages());
+
         ChatRequest request = ChatRequest.builder()
-                .messages(chatMemory.messages())
+                .messages(messagesToSend)
                 .build();
 
         streamingModel.chat(request, new StreamingChatResponseHandler() {

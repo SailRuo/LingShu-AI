@@ -104,6 +104,8 @@ public class SettingController {
         result.put("ttsDefaultFormat", ttsConfig.get("defaultFormat"));
         result.put("ttsEnabled", ttsConfig.get("enabled"));
 
+        result.put("enableThinking", setting.getEnableThinking());
+
         return result;
     }
 
@@ -119,6 +121,7 @@ public class SettingController {
         if (dto.getChatModel() != null) llmConfig.put("model", dto.getChatModel());
         if (dto.getBaseUrl() != null) llmConfig.put("baseUrl", dto.getBaseUrl());
         if (dto.getApiKey() != null) llmConfig.put("apiKey", dto.getApiKey());
+        if (dto.getEnableThinking() != null) llmConfig.put("enableThinking", dto.getEnableThinking());
         setting.setLlmConfig(llmConfig);
 
         Map<String, Object> embeddingConfig = setting.getEmbeddingConfig();

@@ -95,13 +95,12 @@ export function useWebSocket() {
     send({ type: 'register', userId: uid })
   }
 
-  function sendChat(message: string, agentId?: number, model?: string, apiKey?: string, baseUrl?: string, enableThinking?: boolean, images?: string[]) {
+  function sendChat(message: string, agentId?: number, model?: string, apiKey?: string, baseUrl?: string, images?: string[]) {
     const payload: WebSocketMessage = { type: 'chat', message }
     if (agentId) payload.agentId = agentId
     if (model) payload.model = model
     if (apiKey) payload.apiKey = apiKey
     if (baseUrl) payload.baseUrl = baseUrl
-    if (enableThinking) payload.enableThinking = enableThinking
     if (images && images.length > 0) payload.images = images
     send(payload)
   }

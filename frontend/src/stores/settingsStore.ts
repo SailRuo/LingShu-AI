@@ -59,7 +59,7 @@ async function fetchSettings() {
         ttsDefaultSpeed: data.ttsDefaultSpeed || 1.0,
         ttsDefaultFormat: data.ttsDefaultFormat || 'mp3',
         ttsEnabled: data.ttsEnabled ?? false,
-        enableThinking: localStorage.getItem('enableThinking') === 'true'
+        enableThinking: data.enableThinking ?? false
       }
       isLoaded.value = true
     }
@@ -99,7 +99,8 @@ async function saveSettings() {
         ttsDefaultVoice: settings.value.ttsDefaultVoice,
         ttsDefaultSpeed: settings.value.ttsDefaultSpeed,
         ttsDefaultFormat: settings.value.ttsDefaultFormat,
-        ttsEnabled: settings.value.ttsEnabled
+        ttsEnabled: settings.value.ttsEnabled,
+        enableThinking: settings.value.enableThinking
       })
     })
   } catch (err) {
@@ -121,7 +122,6 @@ async function saveAsrSettings() {
 
 function toggleThinking() {
   settings.value.enableThinking = !settings.value.enableThinking
-  localStorage.setItem('enableThinking', String(settings.value.enableThinking))
 }
 
 export function useSettings() {

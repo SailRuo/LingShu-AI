@@ -42,7 +42,7 @@ const {
   startHeartbeat
 } = useWebSocket()
 
-const { settings, fetchSettings, toggleThinking } = useSettings()
+const { settings, fetchSettings } = useSettings()
 
 const {
   isPlaying: ttsPlaying,
@@ -118,16 +118,11 @@ function handleSend() {
       settings.value.model,
       settings.value.apiKey,
       settings.value.baseUrl,
-      settings.value.enableThinking,
       images.length > 0 ? [...images] : undefined
     )
   } else {
     message.warning('系统连接已断开，请等待重连')
   }
-}
-
-function handleToggleThinking() {
-  toggleThinking()
 }
 
 function handleQuickAction(text: string) {
@@ -449,10 +444,8 @@ async function handleToggleTts() {
       :asr-listening="asrListening"
       :asr-recording="asrRecording"
       :asr-processing="asrProcessing"
-      :enable-thinking="settings.enableThinking"
       @send="handleSend"
       @toggle-asr="handleToggleAsr"
-      @toggle-thinking="handleToggleThinking"
       @start-push-to-talk="startPushToTalk"
       @stop-push-to-talk="stopPushToTalk"
     />
