@@ -64,7 +64,6 @@ public class WechatBotMessageService {
         headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
         headers.set("AuthorizationType", "ilink_bot_token");
         headers.set("X-WECHAT-UIN", generateUin());
-        headers.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
         if (botToken != null && !botToken.isEmpty()) {
             headers.set("Authorization", botToken.startsWith("Bearer ") ? botToken : "Bearer " + botToken);
         }
@@ -164,21 +163,29 @@ public class WechatBotMessageService {
             String text = textBuilder.toString();
             if (text.trim().isEmpty()) return;
 
-            log.info("收到微信用户 [{}] 的消息: {}", fromUserId, text);
+            log.info("收到微信用户 [{}] 的消息：{}", fromUserId, text);
 
             // 发送 "正在输入..."
             sendTyping(fromUserId, contextToken, botToken, baseUrl, 1);
 
             // 聚合响应
-            chatService.streamChat(text, null, fromUserId, null, null, null)
+            log.info("开始调用 ChatService.streamChat, userId={}, message={}", "User", text);
+            chatService.streamChat(text, null, "User", null, null, null)
                     .reduce("", String::concat)
                     .doOnNext(fullResponse -> {
+                        log.info("收到 AI 完整响应，长度={}, 内容={}", fullResponse.length(), 
+                                fullResponse.length() > 100 ? fullResponse.substring(0, 100) + "..." : fullResponse);
                         String cleanResponse = fullResponse.replaceAll("\u0001REASONING\u0001.*?\u0001/REASONING\u0001", "");
-                        sendMessage(fromUserId, toUserId, contextToken, cleanResponse, botToken, baseUrl);
+                        log.info("清理 reasoning 后的响应，长度={}", cleanResponse.length());
+                        if (cleanResponse.trim().isEmpty()) {
+                            log.warn("AI 响应为空，不发送消息给用户");
+                        } else {
+                            sendMessage(fromUserId, toUserId, contextToken, cleanResponse, botToken, baseUrl);
+                        }
                         sendTyping(fromUserId, contextToken, botToken, baseUrl, 2);
                     })
                     .doOnError(e -> {
-                        log.error("对话生成失败: {}", e.getMessage());
+                        log.error("对话生成失败：{}", e.getMessage(), e);
                         sendTyping(fromUserId, contextToken, botToken, baseUrl, 2);
                     })
                     .subscribe();
@@ -238,7 +245,7 @@ public class WechatBotMessageService {
             Map<String, Object> msg = new HashMap<>();
             msg.put("from_user_id", ""); // 官方文档建议为空字符串
             msg.put("to_user_id", toUserId);
-            msg.put("client_id", "bot-" + System.currentTimeMillis());
+            msg.put("client_id", "openclaw-weixin-" + String.format("%08x", random.nextInt()));
             msg.put("message_type", 2); // 2 表示由 Bot 发出
             msg.put("message_state", 2); // 2 表示 FINISH
             msg.put("context_token", contextToken);
@@ -260,8 +267,8 @@ public class WechatBotMessageService {
 
             String jsonBody = objectMapper.writeValueAsString(body);
             HttpEntity<String> entity = new HttpEntity<>(jsonBody, createHeaders(botToken));
-            restTemplate.exchange(url, HttpMethod.POST, entity, byte[].class);
-            log.info("已回复微信用户 [{}]: {}", toUserId, text);
+            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
+            log.info("已回复微信用户 [{}]: {}, 响应: {}", toUserId, text, response.getBody());
         } catch (Exception e) {
             log.error("发送微信消息失败: {}", e.getMessage());
         }

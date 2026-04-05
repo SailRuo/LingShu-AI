@@ -881,7 +881,7 @@ public class MemoryServiceImpl implements MemoryService {
             group.sort(Comparator.comparing(ctx -> ctx.fact.getObservedAt(),
                     Comparator.nullsLast(Comparator.naturalOrder())));
             for (int i = 0; i < group.size(); i++) {
-                for (int j = i + 1; j < Math.min(group.size(), i + 4); j++) {
+                for (int j = i + 1; j < Math.min(group.size(), i + 3); j++) {
                     FactContext older = group.get(i);
                     FactContext newer = group.get(j);
                     RelationshipGuess guess = guessFactRelationship(older.fact, newer.fact);
@@ -1031,26 +1031,6 @@ public class MemoryServiceImpl implements MemoryService {
             return null;
         }
 
-        if (factRelationshipEvaluator != null) {
-            try {
-                String modelName = dynamicMemoryModel.getModelName();
-                systemLogService.llmStart("fact-relationship-evaluator-guess", modelName, "FACT");
-                com.lingshu.ai.core.dto.FactRelationshipResult relResult = factRelationshipEvaluator
-                        .evaluate(leftContent, rightContent);
-                systemLogService.llmEnd(0, "FACT");
-                if (relResult != null) {
-                    if (!"NONE".equals(relResult.getType())) {
-                        return new RelationshipGuess(relResult.getType(),
-                                relResult.getConfidence() > 0 ? relResult.getConfidence() : 0.8);
-                    }
-                    return null;
-                }
-            } catch (Exception e) {
-                systemLogService.llmError(e.getMessage(), "FACT");
-                log.error("Fact relationship evaluation fallback to local rules: {}", e.getMessage());
-            }
-        }
-
         String normalizedLeft = normalizeSemanticText(leftContent);
         String normalizedRight = normalizeSemanticText(rightContent);
         double similarity = lexicalSimilarity(normalizedLeft, normalizedRight);
@@ -1062,7 +1042,7 @@ public class MemoryServiceImpl implements MemoryService {
         if (similarity >= 0.68) {
             return new RelationshipGuess("SUPERSEDES", 0.88);
         }
-        if (similarity >= 0.38) {
+        if (similarity >= 0.55) {
             return new RelationshipGuess("RELATED_TO", 0.52);
         }
         return null;

@@ -40,14 +40,14 @@ public class AgentConfigController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<AgentConfig> getAgentById(@PathVariable Long id) {
+    public ResponseEntity<AgentConfig> getAgentById(@PathVariable("id") Long id) {
         return agentConfigService.getAgentById(id)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @GetMapping("/name/{name}")
-    public ResponseEntity<AgentConfig> getAgentByName(@PathVariable String name) {
+    public ResponseEntity<AgentConfig> getAgentByName(@PathVariable("name") String name) {
         return agentConfigService.getAgentByName(name)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
@@ -59,18 +59,18 @@ public class AgentConfigController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<AgentConfig> updateAgent(@PathVariable Long id, @RequestBody AgentConfig agent) {
+    public ResponseEntity<AgentConfig> updateAgent(@PathVariable("id") Long id, @RequestBody AgentConfig agent) {
         return ResponseEntity.ok(agentConfigService.updateAgent(id, agent));
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteAgent(@PathVariable Long id) {
+    public ResponseEntity<Void> deleteAgent(@PathVariable("id") Long id) {
         agentConfigService.deleteAgent(id);
         return ResponseEntity.ok().build();
     }
 
     @PostMapping("/{id}/set-default")
-    public ResponseEntity<AgentConfig> setAsDefault(@PathVariable Long id) {
+    public ResponseEntity<AgentConfig> setAsDefault(@PathVariable("id") Long id) {
         return ResponseEntity.ok(agentConfigService.setAsDefault(id));
     }
 }

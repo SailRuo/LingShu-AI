@@ -75,6 +75,47 @@ interface Agent {
 const agents = ref<Agent[]>([])
 const showAgentModal = ref(false)
 const editingAgent = ref<Agent | null>(null)
+
+const avatarOptions = [
+  { icon: 'Bot', label: '机器人', component: Bot },
+  { icon: 'Brain', label: '大脑', component: Brain },
+  { icon: 'Sparkles', label: '火花', component: Sparkles },
+  { icon: 'Cpu', label: '芯片', component: Cpu },
+  { icon: 'Gem', label: '宝石', component: Gem },
+  { icon: 'Rocket', label: '火箭', component: Rocket },
+  { icon: 'Zap', label: '闪电', component: Zap }
+]
+const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#84cc16']
+
+const getRandomAvatar = () => {
+  const randomIndex = Math.floor(Math.random() * avatarOptions.length)
+  return avatarOptions[randomIndex].icon
+}
+
+const isCustomAvatar = (avatar: string) => {
+  return avatar && (avatar.startsWith('data:image/') || avatar.startsWith('http'))
+}
+
+const fileInput = ref<HTMLInputElement | null>(null)
+
+const handleFileUpload = (event: Event) => {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+
+  if (file.size > 512 * 1024) { // 限制 512KB
+    message.error('图片大小不能超过 512KB')
+    return
+  }
+
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    const base64 = e.target?.result as string
+    agentForm.value.avatar = base64
+  }
+  reader.readAsDataURL(file)
+}
+
 const agentForm = ref({
   name: '',
   displayName: '',
@@ -86,7 +127,7 @@ const agentForm = ref({
   emotionalStrategy: '',
   greetingTriggers: '',
   hiddenRules: '',
-  avatar: 'Bot',
+  avatar: getRandomAvatar(),
   color: '#3b82f6',
   isActive: true
 })
@@ -413,7 +454,9 @@ watch(
 async function fetchAgents() {
   try {
     const res = await fetch(getFullUrl('/api/agents'))
-    agents.value = await res.json()
+    const data = await res.json()
+    console.log('[SettingsView] 获取智能体列表:', data.length, '个智能体')
+    agents.value = data
   } catch (err) {
     console.error('Failed to fetch agents', err)
   }
@@ -594,7 +637,7 @@ async function openCreateAgent() {
       emotionalStrategy: defaults.emotionalStrategy,
       greetingTriggers: defaults.greetingTriggers,
       hiddenRules: defaults.hiddenRules,
-      avatar: defaults.avatar || '🤖',
+      avatar: (defaults.avatar && avatarOptions.some(opt => opt.icon === defaults.avatar)) ? defaults.avatar : getRandomAvatar(),
       color: defaults.color || '#3b82f6',
       isActive: true
     }
@@ -629,6 +672,9 @@ async function saveAgent() {
     const url = editingAgent.value ? getFullUrl(`/api/agents/${editingAgent.value.id}`) : getFullUrl('/api/agents')
     const method = editingAgent.value ? 'PUT' : 'POST'
 
+    console.log('[SettingsView] 保存智能体:', editingAgent.value ? '更新' : '创建', editingAgent.value?.name)
+    console.log('[SettingsView] systemPrompt 长度:', agentForm.value.systemPrompt?.length)
+
     await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
@@ -637,6 +683,7 @@ async function saveAgent() {
 
     message.success(editingAgent.value ? '智能体已更新' : '智能体已创建')
     showAgentModal.value = false
+    console.log('[SettingsView] 保存成功，刷新智能体列表...')
     fetchAgents()
   } catch (err) {
     message.error('保存失败')
@@ -662,17 +709,6 @@ async function setDefaultAgent(id: number) {
     message.error('操作失败')
   }
 }
-
-const avatarOptions = [
-  { icon: 'Bot', label: '机器人', component: Bot },
-  { icon: 'Brain', label: '大脑', component: Brain },
-  { icon: 'Sparkles', label: '火花', component: Sparkles },
-  { icon: 'Cpu', label: '芯片', component: Cpu },
-  { icon: 'Gem', label: '宝石', component: Gem },
-  { icon: 'Rocket', label: '火箭', component: Rocket },
-  { icon: 'Zap', label: '闪电', component: Zap }
-]
-const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#84cc16']
 </script>
 
 <template>
@@ -992,7 +1028,10 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
               <n-card v-for="agent in agents" :key="agent.id" class="glass-card agent-card">
                 <div class="agent-header">
                   <span class="agent-avatar" :style="{ background: agent.color || '#3b82f6' }">
-                    <template v-if="agent.avatar === 'Bot'"><Bot :size="24" /></template>
+                    <template v-if="isCustomAvatar(agent.avatar)">
+                      <img :src="agent.avatar" class="avatar-image-content" />
+                    </template>
+                    <template v-else-if="agent.avatar === 'Bot'"><Bot :size="24" /></template>
                     <template v-else-if="agent.avatar === 'Brain'"><Brain :size="24" /></template>
                     <template v-else-if="agent.avatar === 'Sparkles'"><Sparkles :size="24" /></template>
                     <template v-else-if="agent.avatar === 'Cpu'"><Cpu :size="24" /></template>
@@ -1291,6 +1330,25 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
                 >
                   <component :is="av.component" :size="24" />
                 </div>
+                <div 
+                  class="avatar-option upload-btn" 
+                  :class="{ active: isCustomAvatar(agentForm.avatar) }"
+                  @click="fileInput?.click()"
+                >
+                  <template v-if="isCustomAvatar(agentForm.avatar)">
+                    <img :src="agentForm.avatar" class="avatar-image-content" />
+                  </template>
+                  <template v-else>
+                    <n-icon :component="Plus" :size="24" />
+                  </template>
+                  <input 
+                    type="file" 
+                    ref="fileInput" 
+                    style="display: none" 
+                    accept="image/*" 
+                    @change="handleFileUpload" 
+                  />
+                </div>
               </div>
             </n-form-item>
           </n-grid-item>
@@ -1512,6 +1570,24 @@ const colorOptions = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#e
   justify-content: center;
   font-size: 24px;
   color: white;
+  overflow: hidden;
+}
+
+.avatar-image-content {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-option.upload-btn {
+  border: 2px dashed var(--color-border);
+  background: transparent;
+  overflow: hidden;
+  padding: 0;
+}
+
+.avatar-option.upload-btn.active {
+  border-style: solid;
 }
 
 .agent-info {

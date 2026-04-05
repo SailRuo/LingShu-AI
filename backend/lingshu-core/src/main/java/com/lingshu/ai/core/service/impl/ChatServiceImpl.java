@@ -188,6 +188,14 @@ public class ChatServiceImpl implements ChatService {
         ChatSession session = getOrCreateSession();
         AgentConfig agent = getAgent(agentId);
         
+        if (agent != null) {
+            log.info("处理聊天消息: agentId={}, 使用智能体: id={}, name={}, systemPrompt长度={}", 
+                    agentId, agent.getId(), agent.getName(), 
+                    agent.getSystemPrompt() != null ? agent.getSystemPrompt().length() : 0);
+        } else {
+            log.warn("处理聊天消息: agentId={}, 未找到智能体", agentId);
+        }
+        
         String safeMessage = message != null ? message : "";
 
         systemLogService.info("收到用户消息 (流式): " + (safeMessage.length() > 20 ? safeMessage.substring(0, 20) + "..." : safeMessage) + ", enableThinking=" + enableThinking + ", images=" + (images != null ? images.size() : 0), "CHAT");
@@ -251,9 +259,14 @@ public class ChatServiceImpl implements ChatService {
                         .listeners(listeners)
                         .httpClientBuilder(httpClientBuilder);
                 
+                boolean isGemini = model != null && model.toLowerCase().contains("gemini");
                 if (Boolean.TRUE.equals(enableThinking)) {
-                    openAiBuilder.returnThinking(true);
-                    log.info("启用 Thinking/Reasoning 模式");
+                    if (isGemini) {
+                        log.warn("检测到 Gemini 模型 [{}]，切换到普通模式（由于当前版本暂不支持推理模式下的工具调用）。", model);
+                    } else {
+                        openAiBuilder.returnThinking(true);
+                        log.info("启用 Thinking/Reasoning 模式: [{}]", model);
+                    }
                 }
                 
                 streamingModelToUse = openAiBuilder.build();
