@@ -29,6 +29,14 @@ interface HistoryMessage {
   toolCalls?: string;
   toolCallId?: string;
   toolName?: string;
+  segments?: Array<{
+    type: string;
+    content?: string;
+    id?: string;
+    name?: string;
+    arguments?: string;
+    result?: string;
+  }>;
 }
 
 function toTimestamp(value?: string): number {
@@ -329,6 +337,58 @@ function aggregateHistoryMessages(
     }
 
     if (current.role === "assistant") {
+      if (current.segments && current.segments.length > 0) {
+        const serverSegments: ChatMessageSegment[] = current.segments
+          .map((seg) => {
+            if (seg.type === "text" && seg.content) {
+              return {
+                type: "text" as const,
+                content: seg.content,
+                timestamp: toTimestamp(current.timestamp),
+              };
+            }
+            if (seg.type === "tool") {
+              return {
+                type: "tool" as const,
+                id: seg.id,
+                toolCallId: seg.id,
+                toolName: seg.name || "",
+                arguments: seg.arguments,
+                result: seg.result,
+                output: seg.result,
+                status: seg.result ? "success" : "running",
+                timestamp: toTimestamp(current.timestamp),
+              };
+            }
+            return null;
+          })
+          .filter((s): s is ChatMessageSegment => s !== null);
+
+        aggregated.push({
+          id: current.id,
+          role: "assistant",
+          content: serverSegments
+            .filter(
+              (
+                segment,
+              ): segment is Extract<ChatMessageSegment, { type: "text" }> =>
+                segment.type === "text",
+            )
+            .map((segment) => segment.content)
+            .join(""),
+          timestamp: toTimestamp(current.timestamp),
+          segments: serverSegments.length ? serverSegments : undefined,
+          toolSteps:
+            buildToolStepsFromSegments(serverSegments) ??
+            (current.toolSteps?.length
+              ? current.toolSteps.map(normalizeToolStep)
+              : undefined),
+          isToolStepsExpanded: false,
+        });
+        index++;
+        continue;
+      }
+
       let segments: ChatMessageSegment[] = [];
       let toolSteps: ChatToolStep[] = [];
 

@@ -1,7 +1,7 @@
 package com.lingshu.ai.core.service;
 
 import com.lingshu.ai.infrastructure.entity.McpServerConfig;
-import dev.langchain4j.mcp.client.McpClient;
+import com.lingshu.ai.core.tool.RawMcpClient;
 
 import java.util.List;
 
@@ -14,7 +14,7 @@ public interface McpService {
     /**
      * Get all active MCP clients
      */
-    List<McpClient> getActiveClients();
+    List<RawMcpClient> getActiveClients();
     
     /**
      * Get discovered tools from an active MCP client

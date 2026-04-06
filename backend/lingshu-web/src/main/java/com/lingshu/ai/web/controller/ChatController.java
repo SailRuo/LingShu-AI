@@ -155,6 +155,7 @@ public class ChatController {
                         "user",
                         safe(current.getContent()),
                         toTimestamp(current),
+                        null,
                         null
                 ));
                 i++;
@@ -168,7 +169,8 @@ public class ChatController {
                         "assistant",
                         aggregatedAssistant.content(),
                         aggregatedAssistant.timestamp(),
-                        aggregatedAssistant.toolSteps()
+                        aggregatedAssistant.toolSteps(),
+                        aggregatedAssistant.segments()
                 ));
                 i = aggregatedAssistant.nextIndex();
                 continue;
@@ -176,14 +178,23 @@ public class ChatController {
 
             if ("tool".equalsIgnoreCase(role)) {
                 List<ToolStepResponse> orphanSteps = new ArrayList<>();
+                List<Map<String, Object>> orphanSegments = new ArrayList<>();
                 while (i < messages.size() && "tool".equalsIgnoreCase(safe(messages.get(i).getRole()))) {
                     ChatMessage toolMsg = messages.get(i);
+                    String stepId = safe(toolMsg.getToolCallId());
                     orphanSteps.add(new ToolStepResponse(
-                            safe(toolMsg.getToolCallId()),
+                            stepId,
                             safe(toolMsg.getToolName()),
                             null,
                             safe(toolMsg.getContent())
                     ));
+                    Map<String, Object> toolSegment = new java.util.LinkedHashMap<>();
+                    toolSegment.put("type", "tool");
+                    toolSegment.put("id", stepId);
+                    toolSegment.put("name", safe(toolMsg.getToolName()));
+                    toolSegment.put("arguments", null);
+                    toolSegment.put("result", safe(toolMsg.getContent()));
+                    orphanSegments.add(toolSegment);
                     i++;
                 }
 
@@ -192,7 +203,8 @@ public class ChatController {
                         "assistant",
                         "",
                         toTimestamp(current),
-                        orphanSteps.isEmpty() ? null : orphanSteps
+                        orphanSteps.isEmpty() ? null : orphanSteps,
+                        orphanSegments.isEmpty() ? null : orphanSegments
                 ));
                 continue;
             }
@@ -210,6 +222,7 @@ public class ChatController {
 
         StringBuilder contentBuilder = new StringBuilder();
         List<ToolStepResponse> toolSteps = new ArrayList<>();
+        List<Map<String, Object>> segments = new ArrayList<>();
 
         int i = startIndex;
         boolean consumedAny = false;
@@ -223,8 +236,28 @@ public class ChatController {
             }
 
             if ("assistant".equalsIgnoreCase(role)) {
-                appendContent(contentBuilder, safe(msg.getContent()));
-                toolSteps.addAll(buildToolRequests(msg.getToolCalls()));
+                String msgContent = safe(msg.getContent());
+                if (msgContent != null && !msgContent.isBlank()) {
+                    appendContent(contentBuilder, msgContent);
+                    Map<String, Object> textSegment = new java.util.LinkedHashMap<>();
+                    textSegment.put("type", "text");
+                    textSegment.put("content", msgContent.trim());
+                    segments.add(textSegment);
+                }
+
+                List<ToolStepResponse> requestSteps = buildToolRequests(msg.getToolCalls());
+                if (!requestSteps.isEmpty()) {
+                    toolSteps.addAll(requestSteps);
+                    for (ToolStepResponse step : requestSteps) {
+                        Map<String, Object> toolSegment = new java.util.LinkedHashMap<>();
+                        toolSegment.put("type", "tool");
+                        toolSegment.put("id", step.id());
+                        toolSegment.put("name", step.name());
+                        toolSegment.put("arguments", step.arguments());
+                        toolSegment.put("result", step.result());
+                        segments.add(toolSegment);
+                    }
+                }
                 consumedAny = true;
                 i++;
                 continue;
@@ -232,6 +265,14 @@ public class ChatController {
 
             if ("tool".equalsIgnoreCase(role)) {
                 attachToolResult(toolSteps, msg);
+                String toolCallId = safe(msg.getToolCallId());
+                for (int t = 0; t < segments.size(); t++) {
+                    Map<String, Object> seg = segments.get(t);
+                    if ("tool".equals(seg.get("type")) && toolCallId.equals(seg.get("id"))) {
+                        seg.put("result", safe(msg.getContent()));
+                        break;
+                    }
+                }
                 consumedAny = true;
                 i++;
             }
@@ -242,11 +283,13 @@ public class ChatController {
         }
 
         List<ToolStepResponse> normalizedSteps = toolSteps.isEmpty() ? null : toolSteps;
+        List<Map<String, Object>> normalizedSegments = segments.isEmpty() ? null : segments;
         return new AggregatedAssistant(
                 id,
                 contentBuilder.toString().trim(),
                 timestamp,
                 normalizedSteps,
+                normalizedSegments,
                 i
         );
     }
@@ -340,6 +383,7 @@ public class ChatController {
             String content,
             String timestamp,
             List<ToolStepResponse> toolSteps,
+            List<Map<String, Object>> segments,
             int nextIndex
     ) {}
 
@@ -355,7 +399,8 @@ public class ChatController {
             String role,
             String content,
             String timestamp,
-            List<ToolStepResponse> toolSteps
+            List<ToolStepResponse> toolSteps,
+            List<Map<String, Object>> segments
     ) {}
 
     public record ChatRequest(String message, Long agentId, String model, String apiKey, String baseUrl, String userId) {}

@@ -281,11 +281,18 @@ public class AiConfig {
                             i++;
 
                             int toolResultCount = 0;
+                            java.util.List<dev.langchain4j.data.message.UserMessage> injectedMessages = new java.util.ArrayList<>();
+                            
                             while (i < messages.size() && toolResultCount < toolCallCount) {
                                 dev.langchain4j.data.message.ChatMessage nextMsg = messages.get(i);
                                 if (nextMsg instanceof dev.langchain4j.data.message.ToolExecutionResultMessage) {
                                     result.add(nextMsg);
                                     toolResultCount++;
+                                    i++;
+                                } else if (nextMsg instanceof dev.langchain4j.data.message.UserMessage) {
+                                    // 暂存 MCP Provider 注入的图片或消息，稍后拼接到 ToolResult 之后
+                                    injectedMessages.add((dev.langchain4j.data.message.UserMessage) nextMsg);
+                                    modified = true;
                                     i++;
                                 } else {
                                     break;
@@ -299,6 +306,10 @@ public class AiConfig {
                                     result.remove(result.size() - 1);
                                 }
                                 modified = true;
+                            } else {
+                                // 找齐了所有 tool result，将暂存的注入消息附加在后面。
+                                // 这样传递给大模型时，顺序就是合法的 [AiMessage] -> [ToolResults] -> [UserMessage]
+                                result.addAll(injectedMessages);
                             }
                             continue;
                         } else {

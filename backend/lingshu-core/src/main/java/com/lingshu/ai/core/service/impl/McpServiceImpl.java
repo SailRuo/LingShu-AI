@@ -5,8 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lingshu.ai.core.service.McpService;
 import com.lingshu.ai.infrastructure.entity.McpServerConfig;
 import com.lingshu.ai.infrastructure.repository.McpServerConfigRepository;
+import com.lingshu.ai.core.tool.RawMcpClient;
+import com.lingshu.ai.core.tool.SimpleMcpClient;
 import dev.langchain4j.mcp.client.DefaultMcpClient;
 import dev.langchain4j.mcp.client.McpClient;
+import dev.langchain4j.mcp.client.transport.McpTransport;
 import dev.langchain4j.mcp.client.transport.stdio.StdioMcpTransport;
 import dev.langchain4j.mcp.client.transport.http.StreamableHttpMcpTransport;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -25,7 +28,7 @@ public class McpServiceImpl implements McpService {
     private final ObjectMapper objectMapper;
     
     // Cache for active MCP clients
-    private final Map<Long, McpClient> clientStorage = new ConcurrentHashMap<>();
+    private final Map<Long, RawMcpClient> clientStorage = new ConcurrentHashMap<>();
 
     public McpServiceImpl(McpServerConfigRepository repository, ObjectMapper objectMapper) {
         this.repository = repository;
@@ -48,7 +51,8 @@ public class McpServiceImpl implements McpService {
     private void initClient(McpServerConfig config) {
         removeClient(config.getId());
         
-        McpClient mcpClient;
+        McpClient defaultMcpClient;
+        McpTransport baseTransport;
         if ("STDIO".equalsIgnoreCase(config.getTransportType())) {
             List<String> argsList = Collections.emptyList();
             Map<String, String> envMap = Collections.emptyMap();
@@ -72,8 +76,9 @@ public class McpServiceImpl implements McpService {
                 .environment(envMap)
                 .logEvents(true)
                 .build();
+            baseTransport = transport;
 
-            mcpClient = new DefaultMcpClient.Builder()
+            defaultMcpClient = new DefaultMcpClient.Builder()
                     .clientName("lingshu-ai")
                     .transport(transport)
                     .build();
@@ -84,21 +89,26 @@ public class McpServiceImpl implements McpService {
                     .logRequests(true)
                     .logResponses(true)
                     .build();
-            mcpClient = new DefaultMcpClient.Builder()
+            baseTransport = transport;
+            
+            defaultMcpClient = new DefaultMcpClient.Builder()
                     .clientName("lingshu-ai")
                     .transport(transport)
                     .build();
         }
         
-        clientStorage.put(config.getId(), mcpClient);
+        SimpleMcpClient simpleClient = new SimpleMcpClient(config.getName(), baseTransport, defaultMcpClient);
+        clientStorage.put(config.getId(), simpleClient);
         log.info("Successfully initialized MCP Client: {}", config.getName());
     }
 
     private void removeClient(Long id) {
-        McpClient existing = clientStorage.remove(id);
+        RawMcpClient existing = clientStorage.remove(id);
         if (existing != null) {
             try {
-                 existing.close();
+                 if (existing instanceof SimpleMcpClient) {
+                     ((SimpleMcpClient) existing).close();
+                 }
             } catch (Exception e) {
                 log.warn("Error closing MCP client", e);
             }
@@ -159,13 +169,13 @@ public class McpServiceImpl implements McpService {
     }
 
     @Override
-    public List<McpClient> getActiveClients() {
+    public List<RawMcpClient> getActiveClients() {
         return new ArrayList<>(clientStorage.values());
     }
     
     @Override
     public java.util.List<java.util.Map<String, Object>> getToolDetails(Long id) {
-        McpClient client = clientStorage.get(id);
+        RawMcpClient client = clientStorage.get(id);
         if (client == null) return Collections.emptyList();
         try {
             var tools = client.listTools();

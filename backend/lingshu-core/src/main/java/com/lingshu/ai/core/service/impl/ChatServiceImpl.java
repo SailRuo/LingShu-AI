@@ -3,7 +3,8 @@ package com.lingshu.ai.core.service.impl;
 import com.lingshu.ai.core.config.AiConfig;
 import com.lingshu.ai.core.service.*;
 import com.lingshu.ai.core.tool.LocalTools;
-import com.lingshu.ai.core.tool.SummarizingMcpToolProvider;
+import com.lingshu.ai.core.tool.RawMcpClient;
+import com.lingshu.ai.core.tool.SafeMcpToolProvider;
 import com.lingshu.ai.core.dto.EmotionContextResult;
 import com.lingshu.ai.infrastructure.entity.AgentConfig;
 import com.lingshu.ai.infrastructure.entity.ChatMessage;
@@ -313,11 +314,11 @@ public class ChatServiceImpl implements ChatService {
             builder.tools(enabledLocalTools.toArray());
         }
 
-        List<McpClient> mcpClients = mcpService.getActiveClients();
+        List<RawMcpClient> mcpClients = mcpService.getActiveClients();
         if (!mcpClients.isEmpty()) {
             String userIntent = safeMessage;
-            builder.toolProvider(new SummarizingMcpToolProvider(
-                    mcpClients, toolResultSummarizer, () -> userIntent));
+            builder.toolProvider(new SafeMcpToolProvider(
+                    mcpClients, toolResultSummarizer, () -> userIntent, chatMemoryProvider));
         }
 
         builder.build()
