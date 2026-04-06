@@ -169,23 +169,21 @@ const formatOptions = [
   { label: 'WAV', value: 'wav' }
 ]
 
-const wechatBot = ref({
-  botToken: '',
-  baseUrl: '',
-  status: '',
-  lastLoginTime: ''
-})
+const wechatBotAccounts = ref<any[]>([])
 const qrCodeUrl = ref('')
 const qrcodeId = ref('')
+const currentAccountId = ref('')
 const pollingStatus = ref(false)
 let pollingTimer: any = null
+let authWindow: Window | null = null
+let authSuccessHandled = false
 
-async function fetchWechatBotConfig() {
+async function fetchWechatBotAccounts() {
   try {
-    const res = await fetch(getFullUrl('/api/settings/wechat-bot'))
-    wechatBot.value = await res.json()
+    const res = await fetch(getFullUrl('/api/settings/wechat-bot/accounts'))
+    wechatBotAccounts.value = await res.json()
   } catch (err) {
-    console.error('Failed to fetch WeChat Bot config', err)
+    console.error('Failed to fetch WeChat Bot accounts', err)
   }
 }
 
@@ -195,14 +193,23 @@ async function getWechatQrCode() {
     const data = await res.json()
     qrCodeUrl.value = data.qrcode_img_content || ''
     qrcodeId.value = data.qrcode || ''
+    currentAccountId.value = ''
     if (qrcodeId.value) {
+      authSuccessHandled = false
       startPollingStatus()
       if (qrCodeUrl.value) {
-        window.open(qrCodeUrl.value, '_blank')
+        authWindow = window.open(qrCodeUrl.value, 'wechat-auth', 'width=500,height=700,scrollbars=yes,resizable=yes')
       }
     }
   } catch (err) {
     message.error('获取授权链接失败')
+  }
+}
+
+function closeAuthWindow() {
+  if (authWindow && !authWindow.closed) {
+    authWindow.close()
+    authWindow = null
   }
 }
 
@@ -216,22 +223,23 @@ function startPollingStatus() {
       if (data && data.errcode === -14) {
         clearInterval(pollingTimer)
         pollingStatus.value = false
+        closeAuthWindow()
         message.warning('会话已过期，请重新授权')
-        fetchWechatBotConfig()
+        fetchWechatBotAccounts()
         return
       }
-      if (data && data.status) {
-        wechatBot.value.status = data.status
-        if (data.status === 'confirmed') {
-          clearInterval(pollingTimer)
-          pollingStatus.value = false
-          message.success('微信扫码授权成功！')
-          fetchWechatBotConfig()
-        } else if (data.status === 'expired') {
-          clearInterval(pollingTimer)
-          pollingStatus.value = false
-          message.warning('二维码已过期，请重新获取')
-        }
+      if (data && data.status === 'confirmed' && !authSuccessHandled) {
+        authSuccessHandled = true
+        clearInterval(pollingTimer)
+        pollingStatus.value = false
+        closeAuthWindow()
+        message.success('微信扫码授权成功！')
+        fetchWechatBotAccounts()
+      } else if (data && data.status === 'expired') {
+        clearInterval(pollingTimer)
+        pollingStatus.value = false
+        closeAuthWindow()
+        message.warning('二维码已过期，请重新获取')
       }
     } catch (err) {
       console.error('Polling status error', err)
@@ -239,16 +247,27 @@ function startPollingStatus() {
   }, 2000)
 }
 
+async function removeWechatBotAccount(accountId: string) {
+  try {
+    await fetch(getFullUrl(`/api/settings/wechat-bot/accounts/${accountId}`), { method: 'DELETE' })
+    message.success('账户已删除')
+    await fetchWechatBotAccounts()
+  } catch (err) {
+    message.error('删除账户失败')
+  }
+}
+
 onMounted(() => {
   fetchSettings()
   fetchAgents()
   fetchLocalTools()
   fetchAsrSettings()
-  fetchWechatBotConfig()
+  fetchWechatBotAccounts()
 })
 
 onUnmounted(() => {
   if (pollingTimer) clearInterval(pollingTimer)
+  closeAuthWindow()
 })
 
 async function fetchChatModels(silent = false) {
@@ -1274,39 +1293,87 @@ async function setDefaultAgent(id: number) {
               <h2>微信智能体接入 (基于 iLink 协议)</h2>
             </div>
 
-            <n-card class="glass-card mb-4">
-              <div class="setting-item">
-                <div class="item-label">授权状态</div>
-                <div class="flex items-center gap-4">
-                  <n-tag :type="wechatBot.status === 'confirmed' ? 'success' : (wechatBot.status === 'wait' || wechatBot.status === 'scaned' ? 'warning' : 'error')" size="large">
-                    {{ wechatBot.status === 'confirmed' ? '已授权' : (wechatBot.status === 'wait' || wechatBot.status === 'scaned' ? '等待扫码确认' : (wechatBot.status === 'session_timeout' ? '会话过期' : '未授权/已过期')) }}
-                  </n-tag>
-                  <span v-if="wechatBot.lastLoginTime" class="text-sm text-gray-500">最后更新: {{ new Date(wechatBot.lastLoginTime).toLocaleString() }}</span>
-                </div>
-              </div>
+            <div class="wechat-bot-header">
+              <p class="section-desc">支持多账户授权，每个微信用户独立记忆和对话上下文</p>
+              <n-button type="primary" @click="getWechatQrCode" :disabled="pollingStatus">
+                <template #icon><n-icon :component="Plus" /></template>
+                扫码授权
+              </n-button>
+            </div>
 
-              <div v-if="wechatBot.botToken" class="setting-item mt-4">
-                <div class="item-label">Bot Token (脱敏)</div>
-                <n-input :value="wechatBot.botToken" disabled size="large" />
+            <div v-if="wechatBotAccounts.length === 0" class="empty-state">
+              <n-icon :component="MessageCircle" :size="48" class="empty-icon" />
+              <p>暂无授权账户</p>
+              <p class="hint">点击上方"扫码授权"按钮开始授权</p>
+            </div>
+
+            <div v-else class="accounts-grid">
+              <n-card v-for="account in wechatBotAccounts" :key="account.accountId" class="account-card" :class="{ 'account-active': account.status === 'confirmed' }">
+                <div class="account-header">
+                  <div class="account-status">
+                    <span class="status-dot" :class="{
+                      'status-success': account.status === 'confirmed',
+                      'status-warning': account.status === 'wait' || account.status === 'scaned',
+                      'status-error': account.status !== 'confirmed' && account.status !== 'wait' && account.status !== 'scaned'
+                    }"></span>
+                    <span class="status-text">{{ 
+                      account.status === 'confirmed' ? '已授权' : 
+                      (account.status === 'wait' || account.status === 'scaned' ? '等待扫码' : 
+                      (account.status === 'session_timeout' ? '会话过期' : '未授权'))
+                    }}</span>
+                  </div>
+                  <n-popconfirm @positive-click="removeWechatBotAccount(account.accountId)">
+                    <template #trigger>
+                      <n-button quaternary circle size="small" type="error">
+                        <template #icon><n-icon :component="Trash2" :size="16" /></template>
+                      </n-button>
+                    </template>
+                    确定要取消此账户的授权吗？
+                  </n-popconfirm>
+                </div>
+                
+                <div class="account-body">
+                  <div class="account-info">
+                    <span class="info-label">微信 ID</span>
+                    <span class="info-value">{{ account.ilinkUserId || account.accountId?.substring(0, 12) + '...' }}</span>
+                  </div>
+                  <div class="account-info" v-if="account.botToken">
+                    <span class="info-label">Token</span>
+                    <span class="info-value token">{{ account.botToken }}</span>
+                  </div>
+                  <div class="account-info" v-if="account.lastLoginTime">
+                    <span class="info-label">最后更新</span>
+                    <span class="info-value">{{ new Date(account.lastLoginTime).toLocaleString() }}</span>
+                  </div>
+                </div>
+
+                <div class="account-footer" v-if="account.status !== 'confirmed'">
+                  <n-button 
+                    size="small" 
+                    type="primary"
+                    block
+                    @click="getWechatQrCode()" 
+                    :loading="pollingStatus"
+                  >
+                    重新授权
+                  </n-button>
+                </div>
+              </n-card>
+            </div>
+
+            <n-card class="glass-card polling-card" v-if="pollingStatus">
+              <div class="polling-content">
+                <n-icon :component="RefreshCw" :size="24" class="spin-icon" />
+                <div class="polling-text">
+                  <h4>正在等待扫码确认...</h4>
+                  <p>授权页面已在新标签页打开</p>
+                </div>
+                <a :href="qrCodeUrl" target="_blank" class="manual-link">
+                  手动打开授权页面
+                </a>
               </div>
             </n-card>
-
-            <n-card class="glass-card text-center" v-if="wechatBot.status !== 'confirmed'">
-              <div class="mb-4">
-                <h3 class="text-lg font-bold mb-2">微信登录授权</h3>
-                <p class="text-sm text-gray-500">点击下方按钮，将在新标签页打开微信授权页面，请使用手机微信扫码并确认登录。</p>
-              </div>
-
-              <div class="flex flex-col items-center justify-center mb-4 min-h-[120px]">
-                <n-button type="primary" size="large" @click="getWechatQrCode" :loading="pollingStatus">
-                  <template #icon><n-icon :component="RefreshCw" /></template>
-                  {{ pollingStatus ? '正在等待手机确认...' : '开始微信授权' }}
-                </n-button>
-                <div v-if="pollingStatus" class="mt-4 text-sm text-gray-400">
-                  授权页面已在新标签页打开。如果被拦截，请手动点击 <a :href="qrCodeUrl" target="_blank" class="text-blue-500 hover:underline">这里</a>
-                </div>
-              </div>
-            </n-card>          </section>
+          </section>
         </div>
       </n-tab-pane>
     </n-tabs>
@@ -1870,5 +1937,203 @@ async function setDefaultAgent(id: number) {
   font-size: 16px;
   font-weight: 600;
   color: var(--color-text);
+}
+
+/* 微信 Bot 账户管理样式 */
+.wechat-bot-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  padding: 16px 20px;
+  background: var(--color-glass-bg);
+  border-radius: 12px;
+  border: 1px solid var(--color-glass-border);
+}
+
+.section-desc {
+  font-size: 14px;
+  color: var(--color-text-dim);
+  margin: 0;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 48px 24px;
+  background: var(--color-glass-bg);
+  border-radius: 12px;
+  border: 1px dashed var(--color-outline);
+}
+
+.empty-icon {
+  color: var(--color-text-dim);
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.empty-state p {
+  margin: 0;
+  color: var(--color-text-dim);
+}
+
+.empty-state .hint {
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.accounts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.account-card {
+  background: var(--color-glass-bg) !important;
+  border: 1px solid var(--color-glass-border) !important;
+  border-radius: 12px !important;
+  transition: all 0.3s ease;
+}
+
+.account-card:hover {
+  border-color: var(--color-primary-dim) !important;
+}
+
+.account-card.account-active {
+  border-color: rgba(34, 197, 94, 0.3) !important;
+  background: rgba(34, 197, 94, 0.05) !important;
+}
+
+.account-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-outline);
+}
+
+.account-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+.status-dot.status-success {
+  background: #22c55e;
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+}
+
+.status-dot.status-warning {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.5);
+}
+
+.status-dot.status-error {
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.status-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.account-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.account-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.info-label {
+  font-size: 12px;
+  color: var(--color-text-dim);
+}
+
+.info-value {
+  font-size: 12px;
+  color: var(--color-text);
+  font-family: monospace;
+}
+
+.info-value.token {
+  color: var(--color-primary);
+}
+
+.account-footer {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-outline);
+}
+
+.polling-card {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1)) !important;
+  border-color: rgba(59, 130, 246, 0.2) !important;
+}
+
+.polling-content {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px;
+}
+
+.spin-icon {
+  color: var(--color-primary);
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.polling-text {
+  flex: 1;
+}
+
+.polling-text h4 {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.polling-text p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-dim);
+}
+
+.manual-link {
+  font-size: 12px;
+  color: var(--color-primary);
+  text-decoration: none;
+  padding: 6px 12px;
+  background: rgba(59, 130, 246, 0.1);
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.manual-link:hover {
+  background: rgba(59, 130, 246, 0.2);
 }
 </style>

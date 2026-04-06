@@ -158,6 +158,10 @@ public class MemoryServiceImpl implements MemoryService {
                 String triggerKeywords = (emotion != null && emotion.getKeywords() != null) ? String.join(", ", emotion.getKeywords()) : "";
                 Boolean needsComfort = emotion != null ? emotion.getNeedsComfort() : Boolean.FALSE;
 
+                LocalDateTime now = LocalDateTime.now();
+                String currentDateTime = now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                String currentDayOfWeek = now.getDayOfWeek().getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.CHINESE);
+
                 extractionResult = emotionAwareFactExtractor.analyzeWithEmotion(
                         messageSnapshot,
                         currentFactsBuilder.toString(),
@@ -165,7 +169,9 @@ public class MemoryServiceImpl implements MemoryService {
                         emotionIntensity,
                         "stable",
                         triggerKeywords,
-                        needsComfort);
+                        needsComfort,
+                        currentDateTime,
+                        currentDayOfWeek);
                 systemLogService.llmEnd(0, "FACT");
 
                 if (extractionResult != null) {
@@ -299,6 +305,8 @@ public class MemoryServiceImpl implements MemoryService {
         double confidence = extractedFact.getConfidence() != null ? extractedFact.getConfidence().getValue()
                 : semanticConfidence;
 
+        LocalDateTime eventTime = extractedFact.getEventTime();
+
         return FactNode.builder()
                 .content(factText)
                 .category(clusterKey)
@@ -306,6 +314,7 @@ public class MemoryServiceImpl implements MemoryService {
                 .subType(subType)
                 .clusterKey(clusterKey)
                 .observedAt(now)
+                .eventTime(eventTime)
                 .lastActivatedAt(now)
                 .importance(baseImportance)
                 .confidence(round(Math.max(0.72, confidence)))

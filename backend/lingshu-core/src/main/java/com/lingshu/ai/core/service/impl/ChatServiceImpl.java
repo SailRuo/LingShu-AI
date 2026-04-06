@@ -306,7 +306,7 @@ public class ChatServiceImpl implements ChatService {
                 .streamingChatModel(streamingModelToUse)
                 .chatMemoryProvider(chatMemoryProvider)
                 .toolArgumentsErrorHandler(this::handleToolArgumentsError)
-                .maxSequentialToolsInvocations(15);
+                .maxSequentialToolsInvocations(30);
 
         List<Object> enabledLocalTools = localTools.getEnabledTools(settingService.getLocalToolsSetting());
         if (!enabledLocalTools.isEmpty()) {

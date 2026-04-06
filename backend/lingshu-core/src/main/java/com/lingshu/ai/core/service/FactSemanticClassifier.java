@@ -9,13 +9,13 @@ public interface FactSemanticClassifier {
 
     @SystemMessage("""
             你是灵枢 AI 的记忆语义分类器。
-            你的任务是把一条记忆事实分类到最合适的主题轨道(topicKey)和事实子类型(subType)。
+            你的任务是把一条记忆事实分类到最合适的主题轨道(topicKey)和事实子类型。
 
             允许的 topicKey 只有：
-            interest, growth, goal, emotion, relationship, event, timeline, memory, health
+            interest, growth, goal, emotion, relationship, event, timeline, memory, health, todo
 
             允许的 subType 只有：
-            Preference, EmotionState, Person, Project, Goal, Event, TimeAnchor, Memory, HealthState
+            Preference, EmotionState, Person, Project, Goal, Event, TimeAnchor, Memory, HealthState, Todo
 
             分类要求：
             1. 只根据输入文本做语义分类，不要扩写事实。
@@ -26,9 +26,10 @@ public interface FactSemanticClassifier {
             6. 如果内容主要描述人际对象或关系，使用 relationship / Person。
             7. 如果内容主要描述工作、项目、学习任务，优先 growth / Project。
             8. 如果内容主要描述目标、打算、计划，优先 goal / Goal。
-            9. 如果内容主要描述时间锚点、最近安排、短期时间线，优先 timeline / TimeAnchor。
-            10. 如果内容主要描述某个发生过的事件，优先 event / Event。
-            11. 如果无法明确判断，返回 memory / Memory。
+            9. 如果内容主要描述待办事项、需要完成的任务、提醒事项（如"明天要交报告"、"记得买牛奶"），使用 todo / Todo。
+            10. 如果内容主要描述时间锚点、最近安排、短期时间线，优先 timeline / TimeAnchor。
+            11. 如果内容主要描述某个发生过的事件，优先 event / Event。
+            12. 如果无法明确判断，返回 memory / Memory。
 
             只返回合法 JSON：
             {

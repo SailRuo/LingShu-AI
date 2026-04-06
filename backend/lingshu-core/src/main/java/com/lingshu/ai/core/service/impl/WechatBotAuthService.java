@@ -1,7 +1,6 @@
 package com.lingshu.ai.core.service.impl;
 
 import com.lingshu.ai.core.service.SettingService;
-import com.lingshu.ai.infrastructure.entity.SystemSetting;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -10,10 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
-import java.util.Base64;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Random;
+import java.util.*;
 
 @Service
 public class WechatBotAuthService {
@@ -22,11 +18,12 @@ public class WechatBotAuthService {
     private final SettingService settingService;
     private final Random random = new Random();
 
+    private final Map<String, String> pendingAuthBaseUrl = new HashMap<>();
+
     public WechatBotAuthService(RestTemplate restTemplate, SettingService settingService) {
         this.restTemplate = restTemplate;
         this.settingService = settingService;
 
-        // Add interceptor/converter to handle application/octet-stream as JSON
         for (org.springframework.http.converter.HttpMessageConverter<?> converter : this.restTemplate.getMessageConverters()) {
             if (converter instanceof org.springframework.http.converter.json.MappingJackson2HttpMessageConverter) {
                 org.springframework.http.converter.json.MappingJackson2HttpMessageConverter jsonConverter =
@@ -39,9 +36,6 @@ public class WechatBotAuthService {
         }
     }
 
-    /**
-     * 生成动态的 X-WECHAT-UIN (无符号 32 位整数的 Base64)
-     */
     private String generateUin() {
         long uin = random.nextInt() & 0xFFFFFFFFL;
         return Base64.getEncoder().encodeToString(String.valueOf(uin).getBytes());
@@ -55,26 +49,37 @@ public class WechatBotAuthService {
         return headers;
     }
 
-    private String getBaseUrl() {
-        SystemSetting setting = settingService.getWechatBotSetting();
-        Map<String, Object> config = setting.getWechatBotConfig();
-        String baseUrl = (String) config.getOrDefault("baseUrl", "https://ilinkai.weixin.qq.com");
-        if (baseUrl != null && baseUrl.endsWith("/")) {
-            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
-        }
-        return baseUrl;
+    private String getDefaultBaseUrl() {
+        return "https://ilinkai.weixin.qq.com";
     }
 
     public Map<String, Object> getLoginQrCode() {
-        String url = getBaseUrl() + "/ilink/bot/get_bot_qrcode?bot_type=3";
+        String baseUrl = getDefaultBaseUrl();
+        
+        if (baseUrl != null && baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+
+        String url = baseUrl + "/ilink/bot/get_bot_qrcode?bot_type=3";
         HttpEntity<String> entity = new HttpEntity<>(createHeaders());
 
         ResponseEntity<Map> response = restTemplate.exchange(url, HttpMethod.GET, entity, Map.class);
-        return response.getBody();
+        Map<String, Object> result = response.getBody();
+        
+        if (result != null) {
+            String qrcode = (String) result.get("qrcode");
+            if (qrcode != null) {
+                pendingAuthBaseUrl.put(qrcode, baseUrl);
+            }
+        }
+        
+        return result;
     }
 
     public Map<String, Object> getLoginStatus(String qrcode) {
-        String url = getBaseUrl() + "/ilink/bot/get_qrcode_status?qrcode=" + qrcode;
+        String baseUrl = pendingAuthBaseUrl.getOrDefault(qrcode, getDefaultBaseUrl());
+        
+        String url = baseUrl + "/ilink/bot/get_qrcode_status?qrcode=" + qrcode;
         HttpEntity<String> entity = new HttpEntity<>(createHeaders());
 
         ResponseEntity<Map> response = restTemplate.exchange(url, HttpMethod.GET, entity, Map.class);
@@ -83,51 +88,68 @@ public class WechatBotAuthService {
         if (body != null) {
             Integer errcode = (Integer) body.get("errcode");
             if (errcode != null && errcode == -14) {
-                SystemSetting setting = settingService.getWechatBotSetting();
-                Map<String, Object> config = setting.getWechatBotConfig();
-                config.put("status", "session_timeout");
-                setting.setWechatBotConfig(config);
-                settingService.saveWechatBotSetting(setting);
+                pendingAuthBaseUrl.remove(qrcode);
                 return body;
             }
 
             String status = (String) body.get("status");
-            SystemSetting setting = settingService.getWechatBotSetting();
-            Map<String, Object> config = setting.getWechatBotConfig();
-            boolean updated = false;
-
+            
             if ("scaned_but_redirect".equals(status)) {
                 String redirectHost = (String) body.get("redirect_host");
                 if (redirectHost != null && !redirectHost.isEmpty()) {
                     String newBaseUrl = "https://" + redirectHost;
-                    config.put("baseUrl", newBaseUrl);
-                    updated = true;
+                    pendingAuthBaseUrl.put(qrcode, newBaseUrl);
                 }
             } else if ("confirmed".equals(status)) {
                 String token = (String) body.get("bot_token");
-                String baseUrl = (String) body.get("baseurl");
+                String ilinkUserId = (String) body.get("ilink_user_id");
+                String ilinkBotId = (String) body.get("ilink_bot_id");
+                String respBaseUrl = (String) body.get("baseurl");
 
                 if (token != null && !token.isEmpty()) {
-                    config.put("botToken", token);
-                    config.put("status", "confirmed");
-                    config.put("lastLoginTime", LocalDateTime.now().toString());
-                    updated = true;
-                }
-                if (baseUrl != null && !baseUrl.isEmpty()) {
-                    if (!baseUrl.startsWith("http")) {
-                        baseUrl = "https://" + baseUrl;
+                    String accountId = ilinkUserId != null && !ilinkUserId.isEmpty() 
+                        ? ilinkUserId 
+                        : generateAccountIdFromToken(token);
+                    
+                    Map<String, Object> account = new HashMap<>();
+                    account.put("accountId", accountId);
+                    account.put("botToken", token);
+                    account.put("status", "confirmed");
+                    account.put("lastLoginTime", LocalDateTime.now().toString());
+                    
+                    if (ilinkBotId != null) {
+                        account.put("ilinkBotId", ilinkBotId);
                     }
-                    config.put("baseUrl", baseUrl);
-                    updated = true;
+                    if (ilinkUserId != null) {
+                        account.put("ilinkUserId", ilinkUserId);
+                    }
+                    
+                    if (respBaseUrl != null && !respBaseUrl.isEmpty()) {
+                        if (!respBaseUrl.startsWith("http")) {
+                            respBaseUrl = "https://" + respBaseUrl;
+                        }
+                        account.put("baseUrl", respBaseUrl);
+                    } else {
+                        account.put("baseUrl", baseUrl);
+                    }
+                    
+                    settingService.saveWechatBotAccount(account);
+                    pendingAuthBaseUrl.remove(qrcode);
                 }
-            }
-
-            if (updated) {
-                setting.setWechatBotConfig(config);
-                settingService.saveWechatBotSetting(setting);
             }
         }
 
         return body;
+    }
+
+    private String generateAccountIdFromToken(String token) {
+        if (token == null || token.isEmpty()) {
+            return UUID.randomUUID().toString();
+        }
+        String cleanToken = token.replace("Bearer ", "").replace("bearer ", "");
+        if (cleanToken.length() >= 16) {
+            return cleanToken.substring(0, 16);
+        }
+        return cleanToken;
     }
 }

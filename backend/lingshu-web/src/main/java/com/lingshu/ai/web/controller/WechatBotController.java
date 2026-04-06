@@ -2,11 +2,10 @@ package com.lingshu.ai.web.controller;
 
 import com.lingshu.ai.core.service.SettingService;
 import com.lingshu.ai.core.service.impl.WechatBotAuthService;
-import com.lingshu.ai.infrastructure.entity.SystemSetting;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Map;
+import java.util.*;
 
 @RestController
 @RequestMapping("/api/settings/wechat-bot")
@@ -20,20 +19,33 @@ public class WechatBotController {
         this.settingService = settingService;
     }
 
-    @GetMapping
-    public ResponseEntity<Map<String, Object>> getConfig() {
-        SystemSetting setting = settingService.getWechatBotSetting();
-        Map<String, Object> config = setting.getWechatBotConfig();
-
-        // 脱敏处理 botToken
-        String token = (String) config.get("botToken");
-        if (token != null && token.length() > 10) {
-            String maskedToken = token.substring(0, 10) + "...";
-            config.put("botToken", maskedToken);
+    @GetMapping("/accounts")
+    public ResponseEntity<List<Map<String, Object>>> getAccounts() {
+        List<Map<String, Object>> accounts = settingService.getWechatBotAccounts();
+        List<Map<String, Object>> maskedAccounts = new ArrayList<>();
+        
+        for (Map<String, Object> account : accounts) {
+            Map<String, Object> masked = new HashMap<>(account);
+            String token = (String) masked.get("botToken");
+            if (token != null && token.length() > 10) {
+                masked.put("botToken", token.substring(0, 10) + "...");
+            }
+            maskedAccounts.add(masked);
         }
-
-        return ResponseEntity.ok(config);
+        
+        return ResponseEntity.ok(maskedAccounts);
     }
+
+    @DeleteMapping("/accounts/{accountId}")
+    public ResponseEntity<Map<String, Object>> removeAccount(@PathVariable String accountId) {
+        settingService.removeWechatBotAccount(accountId);
+        
+        Map<String, Object> result = new HashMap<>();
+        result.put("accountId", accountId);
+        result.put("message", "账户已删除");
+        return ResponseEntity.ok(result);
+    }
+
     @PostMapping("/qrcode")
     public ResponseEntity<Map<String, Object>> getQrCode() {
         Map<String, Object> response = wechatBotAuthService.getLoginQrCode();

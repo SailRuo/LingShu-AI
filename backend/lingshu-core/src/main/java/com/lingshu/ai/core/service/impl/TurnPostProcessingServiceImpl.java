@@ -1,12 +1,12 @@
 package com.lingshu.ai.core.service.impl;
 
 import com.lingshu.ai.core.dto.EmotionAnalysis;
+import com.lingshu.ai.core.model.DynamicMemoryModel;
 import com.lingshu.ai.core.service.AffinityService;
 import com.lingshu.ai.core.service.EmotionAnalyzer;
 import com.lingshu.ai.core.service.EmotionalEpisodeService;
 import com.lingshu.ai.core.service.MemoryService;
 import com.lingshu.ai.core.service.SystemLogService;
-import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.UserMessage;
@@ -23,20 +23,20 @@ public class TurnPostProcessingServiceImpl {
     private final MemoryService memoryService;
     private final AffinityService affinityService;
     private final SystemLogService systemLogService;
-    private final ChatModel chatLanguageModel;
+    private final DynamicMemoryModel dynamicMemoryModel;
     private final EmotionalEpisodeService emotionalEpisodeService;
 
     public TurnPostProcessingServiceImpl(EmotionAnalyzer emotionAnalyzer,
                                          MemoryService memoryService,
                                          AffinityService affinityService,
                                          SystemLogService systemLogService,
-                                         ChatModel chatLanguageModel,
+                                         DynamicMemoryModel dynamicMemoryModel,
                                          EmotionalEpisodeService emotionalEpisodeService) {
         this.emotionAnalyzer = emotionAnalyzer;
         this.memoryService = memoryService;
         this.affinityService = affinityService;
         this.systemLogService = systemLogService;
-        this.chatLanguageModel = chatLanguageModel;
+        this.dynamicMemoryModel = dynamicMemoryModel;
         this.emotionalEpisodeService = emotionalEpisodeService;
     }
 
@@ -159,7 +159,7 @@ public class TurnPostProcessingServiceImpl {
 
     private TurnDecisionClassifier buildDecisionClassifier() {
         return AiServices.builder(TurnDecisionClassifier.class)
-                .chatModel(chatLanguageModel)
+                .chatModel(dynamicMemoryModel)
                 .build();
     }
 

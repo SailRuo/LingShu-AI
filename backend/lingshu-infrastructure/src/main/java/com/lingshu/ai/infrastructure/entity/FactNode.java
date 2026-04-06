@@ -33,6 +33,8 @@ public class FactNode {
 
     private LocalDateTime observedAt;
 
+    private LocalDateTime eventTime;
+
     private LocalDateTime lastActivatedAt;
 
     private double importance; // 0.0 - 1.0

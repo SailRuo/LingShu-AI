@@ -3,7 +3,6 @@ package com.lingshu.ai.core.service.impl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lingshu.ai.core.service.ChatService;
 import com.lingshu.ai.core.service.SettingService;
-import com.lingshu.ai.infrastructure.entity.SystemSetting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpEntity;
@@ -27,11 +26,10 @@ public class WechatBotMessageService {
     private final ChatService chatService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    private String updateBuf = "";
+    private final Map<String, String> updateBufMap = new ConcurrentHashMap<>();
     private final Random random = new Random();
-    private boolean isPolling = false;
+    private final Set<String> pollingAccounts = ConcurrentHashMap.newKeySet();
 
-    // 缓存 typing_ticket，有效期理论上 24 小时
     private final Map<String, String> typingTicketCache = new ConcurrentHashMap<>();
 
     public WechatBotMessageService(RestTemplate restTemplate, SettingService settingService, ChatService chatService) {
@@ -39,7 +37,6 @@ public class WechatBotMessageService {
         this.settingService = settingService;
         this.chatService = chatService;
 
-        // Add support for application/octet-stream as JSON for iLink responses
         for (org.springframework.http.converter.HttpMessageConverter<?> converter : this.restTemplate.getMessageConverters()) {
             if (converter instanceof org.springframework.http.converter.json.MappingJackson2HttpMessageConverter) {
                 org.springframework.http.converter.json.MappingJackson2HttpMessageConverter jsonConverter =
@@ -72,26 +69,41 @@ public class WechatBotMessageService {
 
     @Scheduled(fixedDelay = 1000)
     public void pollMessages() {
-        if (isPolling) return;
-
-        SystemSetting setting = settingService.getWechatBotSetting();
-        Map<String, Object> config = setting.getWechatBotConfig();
-        String status = (String) config.get("status");
-        String botToken = (String) config.get("botToken");
-        String baseUrl = (String) config.get("baseUrl");
-        if (!"confirmed".equals(status) || botToken == null || botToken.isEmpty()) {
-            return;
+        List<Map<String, Object>> accounts = settingService.getWechatBotAccounts();
+        
+        for (Map<String, Object> account : accounts) {
+            String accountId = (String) account.get("accountId");
+            String status = (String) account.get("status");
+            String botToken = (String) account.get("botToken");
+            String baseUrl = (String) account.get("baseUrl");
+            
+            if (accountId == null || !"confirmed".equals(status) || botToken == null || botToken.isEmpty()) {
+                continue;
+            }
+            
+            if (pollingAccounts.contains(accountId)) {
+                continue;
+            }
+            
+            pollingAccounts.add(accountId);
+            
+            try {
+                pollAccountMessages(accountId, botToken, baseUrl);
+            } finally {
+                pollingAccounts.remove(accountId);
+            }
         }
+    }
 
+    private void pollAccountMessages(String accountId, String botToken, String baseUrl) {
         if (baseUrl != null && baseUrl.endsWith("/")) {
             baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
         }
 
-        isPolling = true;
         try {
             String url = baseUrl + "/ilink/bot/getupdates";
             Map<String, Object> body = new HashMap<>();
-            body.put("get_updates_buf", updateBuf);
+            body.put("get_updates_buf", updateBufMap.getOrDefault(accountId, ""));
             Map<String, Object> baseInfo = new HashMap<>();
             baseInfo.put("channel_version", "2.1.3");
             body.put("base_info", baseInfo);
@@ -102,45 +114,42 @@ public class WechatBotMessageService {
 
             if (response.getBody() != null) {
                 String responseBodyStr = new String(response.getBody(), StandardCharsets.UTF_8);
-                //log.debug("微信长轮询响应: {}", responseBodyStr);
                 Map<String, Object> responseBody = objectMapper.readValue(responseBodyStr, Map.class);
 
                 Integer errcode = (Integer) responseBody.get("errcode");
                 if (errcode != null && errcode == -14) {
-                    log.warn("微信会话已过期 (errcode: -14)，更新状态为 session_timeout");
-                    Map<String, Object> config1 = setting.getWechatBotConfig();
-                    config1.put("status", "session_timeout");
-                    setting.setWechatBotConfig(config1);
-                    settingService.saveWechatBotSetting(setting);
+                    log.warn("微信会话已过期 (errcode: -14)，账户: {}, 更新状态为 session_timeout", accountId);
+                    Map<String, Object> account = settingService.getWechatBotAccount(accountId);
+                    if (account != null) {
+                        account.put("status", "session_timeout");
+                        settingService.saveWechatBotAccount(account);
+                    }
                     return;
                 }
 
                 if (responseBody.containsKey("get_updates_buf")) {
-                    updateBuf = (String) responseBody.get("get_updates_buf");
+                    updateBufMap.put(accountId, (String) responseBody.get("get_updates_buf"));
                 }
                 if (responseBody.containsKey("msgs")) {
                     List<Map<String, Object>> msgs = (List<Map<String, Object>>) responseBody.get("msgs");
                     for (Map<String, Object> msg : msgs) {
-                        handleMessage(msg, botToken, baseUrl);
+                        handleMessage(msg, botToken, baseUrl, accountId);
                     }
                 }
             }
         } catch (Exception e) {
-            log.error("微信长轮询出错: {}", e.getMessage());
-            // 如果报错（比如超时），等待下一次循环
-        } finally {
-            isPolling = false;
+            log.error("微信长轮询出错，账户 {}: {}", accountId, e.getMessage());
         }
     }
 
-    private void handleMessage(Map<String, Object> messageItem, String botToken, String baseUrl) {
+    private void handleMessage(Map<String, Object> messageItem, String botToken, String baseUrl, String accountId) {
         try {
             String fromUserId = (String) messageItem.get("from_user_id");
             String toUserId = (String) messageItem.get("to_user_id");
             Integer messageType = (Integer) messageItem.get("message_type");
             String contextToken = (String) messageItem.get("context_token");
 
-            if (messageType == null || messageType != 1) { // 只处理类型为 1 的普通消息
+            if (messageType == null || messageType != 1) {
                 return;
             }
 
@@ -150,7 +159,7 @@ public class WechatBotMessageService {
             StringBuilder textBuilder = new StringBuilder();
             for (Map<String, Object> item : itemList) {
                 Integer itemType = (Integer) item.get("type");
-                if (itemType != null && itemType == 1) { // 文本项
+                if (itemType != null && itemType == 1) {
                     Map<String, Object> textItem = (Map<String, Object>) item.get("text_item");
                     if (textItem != null) {
                         String t = (String) textItem.get("text");
@@ -158,7 +167,7 @@ public class WechatBotMessageService {
                             textBuilder.append(t);
                         }
                     }
-                } else if (itemType != null && itemType == 3) { // 语音项
+                } else if (itemType != null && itemType == 3) {
                     Map<String, Object> voiceItem = (Map<String, Object>) item.get("voice_item");
                     if (voiceItem != null) {
                         String t = (String) voiceItem.get("text");
@@ -172,14 +181,13 @@ public class WechatBotMessageService {
             String text = textBuilder.toString();
             if (text.trim().isEmpty()) return;
 
-            log.info("收到微信用户 [{}] 的消息：{}", fromUserId, text);
+            String wechatUserId = "wechat:" + fromUserId;
+            log.info("收到微信用户 [{}] 的消息：{}, 使用 userId: {}", fromUserId, text, wechatUserId);
 
-            // 发送 "正在输入..."
             sendTyping(fromUserId, contextToken, botToken, baseUrl, 1);
 
-            // 聚合响应
-            log.info("开始调用 ChatService.streamChat, userId={}, message={}", "User", text);
-            chatService.streamChat(text, null, "User", null, null, null)
+            log.info("开始调用 ChatService.streamChat, userId={}, message={}", wechatUserId, text);
+            chatService.streamChat(text, null, wechatUserId, null, null, null)
                     .reduce("", String::concat)
                     .doOnNext(fullResponse -> {
                         log.info("收到 AI 完整响应，长度={}, 内容={}", fullResponse.length(),
@@ -208,7 +216,6 @@ public class WechatBotMessageService {
         try {
             String typingTicket = typingTicketCache.get(fromUserId);
             if (typingTicket == null) {
-                // 获取 typing_ticket
                 String url = baseUrl + "/ilink/bot/getconfig";
                 Map<String, Object> body = new HashMap<>();
                 body.put("ilink_user_id", fromUserId);
@@ -252,11 +259,11 @@ public class WechatBotMessageService {
             Map<String, Object> body = new HashMap<>();
 
             Map<String, Object> msg = new HashMap<>();
-            msg.put("from_user_id", ""); // 官方文档建议为空字符串
+            msg.put("from_user_id", "");
             msg.put("to_user_id", toUserId);
             msg.put("client_id", "openclaw-weixin-" + String.format("%08x", random.nextInt()));
-            msg.put("message_type", 2); // 2 表示由 Bot 发出
-            msg.put("message_state", 2); // 2 表示 FINISH
+            msg.put("message_type", 2);
+            msg.put("message_state", 2);
             msg.put("context_token", contextToken);
 
             List<Map<String, Object>> itemList = new ArrayList<>();

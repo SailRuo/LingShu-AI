@@ -6,6 +6,9 @@ import com.lingshu.ai.infrastructure.repository.SystemSettingRepository;
 import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+import java.util.Map;
+
 @Service
 public class SettingServiceImpl implements SettingService {
 
@@ -168,7 +171,9 @@ public class SettingServiceImpl implements SettingService {
             log.warn("数据库中未找到微信 Bot 设置，创建默认配置");
             SystemSetting defaultSetting = new SystemSetting();
             defaultSetting.setId(WECHAT_BOT_ID);
-            defaultSetting.setWechatBotConfig(defaultSetting.createDefaultWechatBotConfig());
+            Map<String, Object> settings = new java.util.HashMap<>();
+            settings.put("wechatBotAccounts", new java.util.ArrayList<>());
+            defaultSetting.setSettings(settings);
             return settingRepository.save(defaultSetting);
         });
 
@@ -209,5 +214,33 @@ public class SettingServiceImpl implements SettingService {
         } catch (Exception e) {
             log.error("更新微信 Bot Redis 缓存失败：{}", e.getMessage());
         }
+    }
+
+    @Override
+    public List<Map<String, Object>> getWechatBotAccounts() {
+        SystemSetting setting = getWechatBotSetting();
+        return setting.getWechatBotAccounts();
+    }
+
+    @Override
+    public void saveWechatBotAccount(Map<String, Object> account) {
+        SystemSetting setting = getWechatBotSetting();
+        setting.addWechatBotAccount(account);
+        saveWechatBotSetting(setting);
+        log.info("微信 Bot 账户已保存: accountId={}", account.get("accountId"));
+    }
+
+    @Override
+    public void removeWechatBotAccount(String accountId) {
+        SystemSetting setting = getWechatBotSetting();
+        setting.removeWechatBotAccount(accountId);
+        saveWechatBotSetting(setting);
+        log.info("微信 Bot 账户已删除: accountId={}", accountId);
+    }
+
+    @Override
+    public Map<String, Object> getWechatBotAccount(String accountId) {
+        SystemSetting setting = getWechatBotSetting();
+        return setting.getWechatBotAccount(accountId);
     }
 }

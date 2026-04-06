@@ -6,6 +6,7 @@ import lombok.*;
 import org.hibernate.annotations.Type;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -486,8 +487,10 @@ public class SystemSetting {
     }
 
     /**
-     * 获取微信 Bot 配置
+     * 获取微信 Bot 配置（单个账户，兼容旧数据）
+     * @deprecated 使用 getWechatBotAccounts() 代替
      */
+    @Deprecated
     @SuppressWarnings("unchecked")
     public Map<String, Object> getWechatBotConfig() {
         if (settings == null) {
@@ -501,8 +504,10 @@ public class SystemSetting {
     }
 
     /**
-     * 更新微信 Bot 配置
+     * 更新微信 Bot 配置（单个账户，兼容旧数据）
+     * @deprecated 使用 setWechatBotAccounts() 代替
      */
+    @Deprecated
     public void setWechatBotConfig(Map<String, Object> config) {
         if (this.settings == null) {
             this.settings = new java.util.HashMap<>();
@@ -511,14 +516,90 @@ public class SystemSetting {
     }
 
     /**
+     * 获取微信 Bot 账户列表
+     */
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> getWechatBotAccounts() {
+        if (settings == null) {
+            return new java.util.ArrayList<>();
+        }
+        Object accounts = settings.get("wechatBotAccounts");
+        if (accounts instanceof List) {
+            return (List<Map<String, Object>>) accounts;
+        }
+        List<Map<String, Object>> result = new java.util.ArrayList<>();
+        Map<String, Object> legacyConfig = getWechatBotConfig();
+        if (legacyConfig != null && legacyConfig.get("botToken") != null 
+                && !((String) legacyConfig.get("botToken")).isEmpty()) {
+            result.add(legacyConfig);
+        }
+        return result;
+    }
+
+    /**
+     * 设置微信 Bot 账户列表
+     */
+    public void setWechatBotAccounts(List<Map<String, Object>> accounts) {
+        if (this.settings == null) {
+            this.settings = new java.util.HashMap<>();
+        }
+        this.settings.put("wechatBotAccounts", accounts);
+    }
+
+    /**
+     * 添加微信 Bot 账户
+     */
+    public void addWechatBotAccount(Map<String, Object> account) {
+        List<Map<String, Object>> accounts = new java.util.ArrayList<>(getWechatBotAccounts());
+        String accountId = (String) account.get("accountId");
+        boolean found = false;
+        for (int i = 0; i < accounts.size(); i++) {
+            if (accountId != null && accountId.equals(accounts.get(i).get("accountId"))) {
+                accounts.set(i, account);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            accounts.add(account);
+        }
+        setWechatBotAccounts(accounts);
+    }
+
+    /**
+     * 删除微信 Bot 账户
+     */
+    public void removeWechatBotAccount(String accountId) {
+        List<Map<String, Object>> accounts = new java.util.ArrayList<>(getWechatBotAccounts());
+        accounts.removeIf(acc -> accountId != null && accountId.equals(acc.get("accountId")));
+        setWechatBotAccounts(accounts);
+    }
+
+    /**
+     * 根据 accountId 获取微信 Bot 账户
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getWechatBotAccount(String accountId) {
+        List<Map<String, Object>> accounts = getWechatBotAccounts();
+        for (Map<String, Object> acc : accounts) {
+            if (accountId != null && accountId.equals(acc.get("accountId"))) {
+                return acc;
+            }
+        }
+        return null;
+    }
+
+    /**
      * 创建默认微信 Bot 配置
      */
     public Map<String, Object> createDefaultWechatBotConfig() {
         Map<String, Object> config = new java.util.HashMap<>();
+        config.put("accountId", java.util.UUID.randomUUID().toString());
         config.put("botToken", "");
         config.put("baseUrl", "https://ilinkai.weixin.qq.com");
         config.put("status", "wait");
         config.put("lastLoginTime", "");
+        config.put("nickname", "");
         return config;
     }
 

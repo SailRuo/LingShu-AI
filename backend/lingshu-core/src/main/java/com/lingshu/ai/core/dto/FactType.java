@@ -8,6 +8,7 @@ public enum FactType {
     GOAL("目标事实", "用户的目标、计划、愿望等"),
     EVENT("事件事实", "用户经历的重要事件"),
     STATE("状态事实", "用户的当前状态，如正在做的事情"),
+    TODO("待办事项", "用户需要完成的任务、提醒事项，如明天要交报告、记得买牛奶"),
     VOLATILE("临时事实", "情绪激动时的极端表述，需要后续确认");
 
     private final String displayName;

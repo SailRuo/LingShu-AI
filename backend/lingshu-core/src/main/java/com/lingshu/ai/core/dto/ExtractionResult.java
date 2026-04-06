@@ -2,6 +2,7 @@ package com.lingshu.ai.core.dto;
 
 import lombok.Data;
 
+import java.time.LocalDateTime;
 import java.util.List;
 @Data
 public class ExtractionResult {
@@ -32,6 +33,7 @@ public class ExtractionResult {
         private boolean volatile_;
         private String emotionalContext;
         private List<String> triggerKeywords;
+        private LocalDateTime eventTime;
 
         public ExtractedFact() {}
 
@@ -54,5 +56,7 @@ public class ExtractionResult {
         public void setEmotionalContext(String emotionalContext) { this.emotionalContext = emotionalContext; }
         public List<String> getTriggerKeywords() { return triggerKeywords; }
         public void setTriggerKeywords(List<String> triggerKeywords) { this.triggerKeywords = triggerKeywords; }
+        public LocalDateTime getEventTime() { return eventTime; }
+        public void setEventTime(LocalDateTime eventTime) { this.eventTime = eventTime; }
     }
 }

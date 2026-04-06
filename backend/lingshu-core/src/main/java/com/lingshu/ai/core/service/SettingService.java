@@ -1,6 +1,8 @@
 package com.lingshu.ai.core.service;
 
 import com.lingshu.ai.infrastructure.entity.SystemSetting;
+import java.util.List;
+import java.util.Map;
 
 public interface SettingService {
     /**
@@ -32,4 +34,24 @@ public interface SettingService {
      * 保存微信 Bot 配置 (WECHAT_BOT)。
      */
     void saveWechatBotSetting(SystemSetting setting);
+
+    /**
+     * 获取所有微信 Bot 账户列表
+     */
+    List<Map<String, Object>> getWechatBotAccounts();
+
+    /**
+     * 添加或更新微信 Bot 账户
+     */
+    void saveWechatBotAccount(Map<String, Object> account);
+
+    /**
+     * 删除微信 Bot 账户
+     */
+    void removeWechatBotAccount(String accountId);
+
+    /**
+     * 根据 accountId 获取微信 Bot 账户
+     */
+    Map<String, Object> getWechatBotAccount(String accountId);
 }

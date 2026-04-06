@@ -330,19 +330,7 @@ function aggregateHistoryMessages(
 
     if (current.role === "assistant") {
       let segments: ChatMessageSegment[] = [];
-      let toolSteps: ChatToolStep[] =
-        mergeToolStepLists(
-          undefined,
-          current.toolSteps?.map(normalizeToolStep),
-        ) ?? [];
-
-      if (toolSteps.length) {
-        segments =
-          mergeSegments(
-            segments,
-            toolSteps.map((step) => ({ ...step, type: "tool" as const })),
-          ) ?? [];
-      }
+      let toolSteps: ChatToolStep[] = [];
 
       while (index < chronological.length) {
         const message = chronological[index];

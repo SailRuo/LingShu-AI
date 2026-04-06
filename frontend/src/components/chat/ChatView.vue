@@ -279,6 +279,7 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
       if (msg.text && msg.text.trim()) {
         inputMessage.value = msg.text
         handleSend()
+        stopAsrListening()
       }
       break
 

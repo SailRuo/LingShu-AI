@@ -129,7 +129,7 @@ public class AiConfig {
             public void onError(dev.langchain4j.model.chat.listener.ChatModelErrorContext errorContext) {
                 log.error("LLM Error Summary => {}", errorContext.error().getMessage());
             }
-
+            
             private String compact(String text) {
                 if (text == null || text.isBlank()) {
                     return "<empty>";
@@ -236,6 +236,8 @@ public class AiConfig {
                     return msgs;
                 }
 
+                msgs = removeOrphanedToolMessages(msgs);
+
                 java.util.List<dev.langchain4j.data.message.ChatMessage> result = new java.util.ArrayList<>();
                 boolean foundUserMessage = false;
                 for (dev.langchain4j.data.message.ChatMessage msg : msgs) {
@@ -248,7 +250,72 @@ public class AiConfig {
                         result.add(msg);
                     }
                 }
+
+                if (!foundUserMessage && !result.isEmpty()) {
+                    log.warn("ChatMemory 截断后未找到 UserMessage，添加占位符以避免模型报错");
+                    result.add(dev.langchain4j.data.message.UserMessage.from("[继续之前的对话上下文]"));
+                }
+
                 return result;
+            }
+
+            private java.util.List<dev.langchain4j.data.message.ChatMessage> removeOrphanedToolMessages(
+                    java.util.List<dev.langchain4j.data.message.ChatMessage> messages) {
+                if (messages == null || messages.isEmpty()) {
+                    return messages;
+                }
+
+                boolean modified = false;
+                java.util.List<dev.langchain4j.data.message.ChatMessage> result = new java.util.ArrayList<>();
+                int i = 0;
+
+                while (i < messages.size()) {
+                    dev.langchain4j.data.message.ChatMessage msg = messages.get(i);
+
+                    if (msg instanceof dev.langchain4j.data.message.AiMessage) {
+                        dev.langchain4j.data.message.AiMessage aiMsg = (dev.langchain4j.data.message.AiMessage) msg;
+                        if (aiMsg.hasToolExecutionRequests()) {
+                            int toolCallCount = aiMsg.toolExecutionRequests().size();
+                            int startIndex = result.size();
+                            result.add(aiMsg);
+                            i++;
+
+                            int toolResultCount = 0;
+                            while (i < messages.size() && toolResultCount < toolCallCount) {
+                                dev.langchain4j.data.message.ChatMessage nextMsg = messages.get(i);
+                                if (nextMsg instanceof dev.langchain4j.data.message.ToolExecutionResultMessage) {
+                                    result.add(nextMsg);
+                                    toolResultCount++;
+                                    i++;
+                                } else {
+                                    break;
+                                }
+                            }
+
+                            if (toolResultCount < toolCallCount) {
+                                log.warn("发现不完整的工具调用块，AiMessage 有 {} 个 tool_calls 但只有 {} 个结果，移除该块",
+                                        toolCallCount, toolResultCount);
+                                while (result.size() > startIndex) {
+                                    result.remove(result.size() - 1);
+                                }
+                                modified = true;
+                            }
+                            continue;
+                        } else {
+                            result.add(msg);
+                            i++;
+                        }
+                    } else if (msg instanceof dev.langchain4j.data.message.ToolExecutionResultMessage) {
+                        log.warn("发现孤立的 ToolExecutionResultMessage，移除");
+                        modified = true;
+                        i++;
+                    } else {
+                        result.add(msg);
+                        i++;
+                    }
+                }
+
+                return modified ? result : messages;
             }
 
             @Override

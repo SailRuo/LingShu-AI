@@ -86,14 +86,14 @@ const resolvedColors = ref({
   edge: '#94a3b8',
 })
 
-const sceneStyle = computed(() => ({ 
-  '--graph-primary': resolvedColors.value.primary, 
-  '--graph-accent': resolvedColors.value.accent, 
-  '--graph-core': resolvedColors.value.nodeUser, 
-  '--graph-fact': resolvedColors.value.nodeFact, 
-  '--graph-edge': resolvedColors.value.edge, 
-  '--graph-glow': resolvedColors.value.primary, 
-  '--graph-outline': 'rgba(255,255,255,0.1)' 
+const sceneStyle = computed(() => ({
+  '--graph-primary': resolvedColors.value.primary,
+  '--graph-accent': resolvedColors.value.accent,
+  '--graph-core': resolvedColors.value.nodeUser,
+  '--graph-fact': resolvedColors.value.nodeFact,
+  '--graph-edge': resolvedColors.value.edge,
+  '--graph-glow': resolvedColors.value.primary,
+  '--graph-outline': 'rgba(255,255,255,0.1)'
 }))
 
 const topicClusters = computed(() => graph.value.nodes.filter((n) => n.type === 'Topic').map((n) => ({ key: n.cluster || n.id, label: n.label, count: n.factCount || 0 })))
@@ -135,7 +135,7 @@ const filteredNodes = computed(() => {
 const visibleNodeIds = computed(() => new Set(filteredNodes.value.map((n) => n.id)))
 const filteredLinks = computed(() => graph.value.links.filter((l) => {
   if (!visibleNodeIds.value.has(l.source) || !visibleNodeIds.value.has(l.target)) return false
-  if (l.type === 'HAS_FACT' || l.type === 'BELONGS_TO_TOPIC') return true
+  if (l.type === 'HAS_FACT' || l.type === 'BELONGS_TO_TOPIC' || l.type === 'HAS_TOPIC') return true
   if (l.type === 'SUPERSEDES' || l.type === 'CONTRADICTS') return true
   if (l.type === 'RELATED_TO' && (l.weight || 0) >= 0.6) return true
   return false
@@ -148,13 +148,13 @@ const positionedNodes3D = computed<PositionedNode3D[]>(() => {
   const facts = filteredNodes.value.filter((n) => n.type === 'Fact')
   const users = filteredNodes.value.filter((n) => n.type === 'User')
   const pos = new Map<string, PositionedNode3D>()
-  
-  users.forEach((n) => pos.set(n.id, { 
-    ...n, x: 0, y: 0, z: 0, size: 24, color: resolvedColors.value.nodeUser, 
-    showLabel: true, faded: false, hiddenByReplay: false, 
-    isRecent: false, isHit: false, isFocus: selectedNode.value?.id === n.id, isBorn: false 
+
+  users.forEach((n) => pos.set(n.id, {
+    ...n, x: 0, y: 0, z: 0, size: 24, color: resolvedColors.value.nodeUser,
+    showLabel: true, faded: false, hiddenByReplay: false,
+    isRecent: false, isHit: false, isFocus: selectedNode.value?.id === n.id, isBorn: false
   }))
-  
+
   topics.forEach((n, i) => {
     const angle = (i / Math.max(1, topics.length)) * Math.PI * 2
     const radius = 120
@@ -164,51 +164,51 @@ const positionedNodes3D = computed<PositionedNode3D[]>(() => {
     const isRecent = activatedAt >= Date.now() - 86400000
     const isHit = !!searchKeyword.value && (n.label.toLowerCase().includes(searchKeyword.value) || (n.shortLabel || '').toLowerCase().includes(searchKeyword.value))
     const isFocus = selectedNode.value?.id === n.id || (!!selectedNode.value?.cluster && selectedNode.value.cluster === n.cluster)
-    
-    pos.set(n.id, { 
-      ...n, 
-      x: Math.cos(angle) * radius, 
+
+    pos.set(n.id, {
+      ...n,
+      x: Math.cos(angle) * radius,
       y: (Math.random() - 0.5) * 20,
-      z: Math.sin(angle) * radius, 
-      size: 10 + (n.importance || 0.5) * 12, 
-      color: resolvedColors.value.primary, 
-      showLabel: true, faded, hiddenByReplay, isRecent, isHit, isFocus, isBorn: birthFlashIds.value.has(n.id) 
+      z: Math.sin(angle) * radius,
+      size: 10 + (n.importance || 0.5) * 12,
+      color: resolvedColors.value.primary,
+      showLabel: true, faded, hiddenByReplay, isRecent, isHit, isFocus, isBorn: birthFlashIds.value.has(n.id)
     })
   })
-  
+
   const groups = new Map<string, GraphNode[]>()
   facts.forEach((f) => { const k = f.cluster || 'memory'; if (!groups.has(k)) groups.set(k, []); groups.get(k)!.push(f) })
-  
+
   Array.from(groups.entries()).forEach(([cluster, items], gi) => {
     const topic = topics.find((n) => n.cluster === cluster)
     const anchor = topic ? pos.get(topic.id) : { x:0, y:0, z:0 }
-    
+
     items.sort((a, b) => (b.importance || 0) - (a.importance || 0)).forEach((n, i) => {
       const level = n.orbitLevel || 2
       const radius = (level === 1 ? 30 : level === 2 ? 60 : 90) + (i % 5) * 4
       const angle = (i / items.length) * Math.PI * 2 + gi
       const zAngle = (Math.random() - 0.5) * Math.PI * 0.4
-      
+
       const faded = !!activeCluster.value && cluster !== activeCluster.value
       const activatedAt = n.lastActivatedAt ? new Date(n.lastActivatedAt).getTime() : 0
       const hiddenByReplay = replayEnabled.value && activatedAt > replayCutoff.value
       const isRecent = activatedAt >= Date.now() - 86400000
       const isHit = !!searchKeyword.value && (n.label.toLowerCase().includes(searchKeyword.value) || (n.shortLabel || '').toLowerCase().includes(searchKeyword.value))
       const isFocus = selectedNode.value?.id === n.id || (!!selectedNode.value?.cluster && selectedNode.value.cluster === n.cluster)
-      
-      pos.set(n.id, { 
-        ...n, 
-        x: anchor!.x + Math.cos(angle) * Math.cos(zAngle) * radius, 
-        y: anchor!.y + Math.sin(zAngle) * radius * 0.6, 
-        z: anchor!.z + Math.sin(angle) * Math.cos(zAngle) * radius, 
-        size: 3 + (n.importance || 0.5) * 6, 
-        color: n.status === 'active' ? resolvedColors.value.nodeFact : resolvedColors.value.accent, 
-        showLabel: (n.importance || 0) >= 0.76 || isRecent || isFocus, 
-        faded, hiddenByReplay, isRecent, isHit, isFocus, isBorn: birthFlashIds.value.has(n.id) 
+
+      pos.set(n.id, {
+        ...n,
+        x: anchor!.x + Math.cos(angle) * Math.cos(zAngle) * radius,
+        y: anchor!.y + Math.sin(zAngle) * radius * 0.6,
+        z: anchor!.z + Math.sin(angle) * Math.cos(zAngle) * radius,
+        size: 3 + (n.importance || 0.5) * 6,
+        color: n.status === 'active' ? resolvedColors.value.nodeFact : resolvedColors.value.accent,
+        showLabel: (n.importance || 0) >= 0.76 || isRecent || isFocus,
+        faded, hiddenByReplay, isRecent, isHit, isFocus, isBorn: birthFlashIds.value.has(n.id)
       })
     })
   })
-  
+
   return Array.from(pos.values()).filter(n => !n.hiddenByReplay)
 })
 
@@ -283,7 +283,7 @@ function handleSelectDropdown(key: string) {
 function openNodeDetail(node: GraphNode) {
   selectedNode.value = node
   if (node.type === 'Topic') activeCluster.value = activeCluster.value === node.cluster ? null : node.cluster || null
-  
+
   // Pivot camera to node
   if (controls && camera) {
     const p3d = positionedNodes3D.value.find(n => n.id === node.id)
@@ -297,7 +297,7 @@ function openNodeDetail(node: GraphNode) {
   }
 }
 
-function zoomGraph(direction: 'in' | 'out') { 
+function zoomGraph(direction: 'in' | 'out') {
   if (!camera || !controls) return
   const factor = direction === 'in' ? 0.7 : 1.3
   const target = controls.target.clone()
@@ -305,7 +305,7 @@ function zoomGraph(direction: 'in' | 'out') {
   controls.update()
 }
 
-function focusGraph() { 
+function focusGraph() {
   activeCluster.value = null
   if (camera && controls) {
     camera.position.set(0, 200, 300)
@@ -398,7 +398,7 @@ function onContextMenu(event: MouseEvent) {
 
 function renderLoop() {
   controls.update()
-  
+
   const time = Date.now() * 0.005
   for (const id of birthFlashIds.value) {
     const group = nodeMeshes.get(id)
@@ -459,7 +459,7 @@ function onWindowResize() {
 watch(positionedNodes3D, (nodes) => {
   if (!scene) return
   const currentIds = new Set(nodes.map(n => n.id))
-  
+
   for (const [id, group] of nodeMeshes.entries()) {
     if (!currentIds.has(id)) {
       const cssObject = group.children.find(c => c instanceof CSS2DObject) as CSS2DObject
@@ -470,18 +470,18 @@ watch(positionedNodes3D, (nodes) => {
       nodeMeshes.delete(id)
     }
   }
-  
+
   nodes.forEach(node => {
     let group = nodeMeshes.get(node.id)
     if (!group) {
       group = new THREE.Group()
       group.userData.nodeId = node.id
-      
+
       const spriteMat = new THREE.SpriteMaterial({ map: circleTexture, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })
       const sprite = new THREE.Sprite(spriteMat)
       sprite.userData.nodeId = node.id
       group.add(sprite)
-      
+
       const labelDiv = document.createElement('div')
       labelDiv.className = 'node-label'
       labelDiv.style.pointerEvents = 'auto'
@@ -489,22 +489,22 @@ watch(positionedNodes3D, (nodes) => {
       const cssObject = new CSS2DObject(labelDiv)
       cssObject.position.set(0, -10, 0)
       group.add(cssObject)
-      
+
       meshGroup.add(group)
       nodeMeshes.set(node.id, group)
     }
-    
+
     group.position.set(node.x, node.y, node.z)
-    
+
     const sprite = group.children[0] as THREE.Sprite
     if (!node.isBorn) sprite.scale.set(node.size, node.size, 1)
-    
+
     const mat = sprite.material as THREE.SpriteMaterial
     mat.color.set(node.color)
     mat.opacity = node.faded ? 0.15 : (node.isHit || node.isFocus ? 1.0 : 0.8)
-    
+
     if (node.isFocus || node.isHit) sprite.scale.set(node.size * 1.5, node.size * 1.5, 1)
-    
+
     const cssObject = group.children[1] as CSS2DObject
     const labelDiv = cssObject.element
     labelDiv.textContent = node.shortLabel || node.label
@@ -536,7 +536,7 @@ const computed3DLinks = computed(() => {
 
 watch(computed3DLinks, (links) => {
   if (!scene) return
-  
+
   const currentIds = new Set(links.map(l => l.id))
   for (const [id, line] of linkMeshes.entries()) {
     if (!currentIds.has(id)) {
@@ -545,33 +545,33 @@ watch(computed3DLinks, (links) => {
       linkMeshes.delete(id)
     }
   }
-  
+
   links.forEach(l => {
     let line = linkMeshes.get(l.id)
     if (!line) {
       const geo = new THREE.BufferGeometry()
       geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3))
-      
+
       let mat = defaultLineMat
       if (l.type === 'SUPERSEDES') mat = supersedesMat
       else if (l.type === 'CONTRADICTS') mat = contradictsMat
-      
+
       line = new THREE.Line(geo, mat)
       linkGroup.add(line)
       linkMeshes.set(l.id, line)
     }
-    
+
     const posAttribute = line.geometry.getAttribute('position') as THREE.BufferAttribute
     posAttribute.setXYZ(0, l.source.x, l.source.y, l.source.z)
     posAttribute.setXYZ(1, l.target.x, l.target.y, l.target.z)
     posAttribute.needsUpdate = true
-    
+
     let targetMat = defaultLineMat
     if (l.energized) targetMat = energizedLineMat
     else if (l.type === 'SUPERSEDES') targetMat = supersedesMat
     else if (l.type === 'CONTRADICTS') targetMat = contradictsMat
     line.material = targetMat
-    
+
     ;(line.material as THREE.LineBasicMaterial).opacity = l.faded ? 0.05 : (l.energized ? 0.9 : 0.4)
   })
 }, { deep: true })
@@ -583,7 +583,7 @@ function updateColors() {
   const nu = rs.getPropertyValue('--color-node-user').trim()
   const nf = rs.getPropertyValue('--color-node-fact').trim()
   const edge = rs.getPropertyValue('--color-edge').trim()
-  
+
   resolvedColors.value = {
     primary: prim || '#0f766e',
     accent: acc || '#ea580c',
@@ -596,12 +596,12 @@ function updateColors() {
 let themeObserver: MutationObserver | null = null
 let intersectionObserverStop: (() => void) | null = null
 
-onMounted(async () => { 
+onMounted(async () => {
   updateColors()
   themeObserver = new MutationObserver(() => updateColors())
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'class', 'data-theme'] })
   themeObserver.observe(document.body, { attributes: true, attributeFilter: ['style', 'class'] })
-  
+
   initThree()
 
   if (galaxyStageRef.value) {
@@ -621,7 +621,7 @@ onMounted(async () => {
     resizeObserver.value.observe(galaxyStageRef.value)
   }
 
-  await fetchGraph() 
+  await fetchGraph()
 })
 
 onBeforeUnmount(() => {
@@ -629,14 +629,14 @@ onBeforeUnmount(() => {
   resizeObserver.value?.disconnect()
   themeObserver?.disconnect()
   intersectionObserverStop?.()
-  
+
   for (const group of nodeMeshes.values()) {
     const cssObject = group.children.find(c => c instanceof CSS2DObject) as CSS2DObject
     if (cssObject && cssObject.element) {
       cssObject.element.remove()
     }
   }
-  
+
   renderer?.dispose()
   if (birthFlashTimer.value !== null) window.clearTimeout(birthFlashTimer.value)
   stopReplayPlayback()
@@ -831,11 +831,11 @@ function formatDateTime(value?: string | null) { if (!value) return '未知'; co
 <style scoped>
 .insight-view, .insight-content { height: 100%; box-sizing: border-box; }
 .insight-content { display: flex; gap: 16px; font-family: 'Inter', system-ui, sans-serif; }
-.graph-area { 
-  position: relative; flex: 1; min-width: 0; overflow: hidden; border-radius: 20px; 
-  border: 1px solid var(--color-glass-border); 
-  background: var(--color-background); 
-  box-shadow: 0 12px 48px var(--color-primary-dim); 
+.graph-area {
+  position: relative; flex: 1; min-width: 0; overflow: hidden; border-radius: 20px;
+  border: 1px solid var(--color-glass-border);
+  background: var(--color-background);
+  box-shadow: 0 12px 48px var(--color-primary-dim);
 }
 .stars, .nebula, .galaxy-stage, .loading-overlay { position: absolute; inset: 0; pointer-events: none; }
 .galaxy-stage { pointer-events: auto; }
@@ -846,11 +846,11 @@ function formatDateTime(value?: string | null) { if (!value) return '未知'; co
 .nebula { opacity: 0.22; filter: blur(36px); background: radial-gradient(circle at 18% 22%, color-mix(in srgb,var(--graph-primary) 22%,transparent), transparent 30%), radial-gradient(circle at 78% 28%, color-mix(in srgb,var(--graph-fact) 18%,transparent), transparent 30%), radial-gradient(circle at 52% 70%, color-mix(in srgb,var(--graph-core) 16%,transparent), transparent 34%); }
 
 /* Responsive Glass using theme vars */
-.glass { 
-  border: 1px solid var(--color-glass-border); 
-  background: var(--color-glass-bg); 
-  backdrop-filter: blur(20px); 
-  -webkit-backdrop-filter: blur(20px); 
+.glass {
+  border: 1px solid var(--color-glass-border);
+  background: var(--color-glass-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 .hud-panel { pointer-events: auto; border-radius: 16px; }
 
@@ -860,8 +860,8 @@ function formatDateTime(value?: string | null) { if (!value) return '未知'; co
   display: flex; justify-content: space-between; align-items: flex-start;
   pointer-events: none;
 }
-.stats-bar { 
-  display: flex; gap: 12px; align-items: center; padding: 10px 18px; 
+.stats-bar {
+  display: flex; gap: 12px; align-items: center; padding: 10px 18px;
   color: var(--color-text); font-size: 13px; font-weight: 500;
   border-radius: 100px; /* pill shape */
 }
@@ -888,18 +888,18 @@ function formatDateTime(value?: string | null) { if (!value) return '未知'; co
 .filter-label { font-size: 12px; color: var(--color-text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
 .pill-group { display: flex; gap: 6px; flex-wrap: wrap; }
 
-.pill { 
+.pill {
   padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 500;
   color: var(--color-text); background: var(--color-outline);
-  border: 1px solid transparent; cursor: pointer; transition: all 0.2s; 
+  border: 1px solid transparent; cursor: pointer; transition: all 0.2s;
 }
 .pill:hover { background: color-mix(in srgb, var(--color-outline) 80%, var(--color-primary-dim)); }
 .pill.active { color: var(--color-text-inverse); background: var(--color-primary); box-shadow: 0 0 12px var(--color-primary-dim); }
 .pill.clear { margin-left: auto; background: transparent; color: var(--color-text-dim); text-decoration: underline; padding: 6px; }
 .pill.clear:hover { background: transparent; color: var(--color-text); }
 
-.tool-btn { 
-  width: 34px; height: 34px; border-radius: 50%; color: var(--color-text); 
+.tool-btn {
+  width: 34px; height: 34px; border-radius: 50%; color: var(--color-text);
   background: transparent; border: 0; cursor: pointer; transition: all 0.2s;
   display: flex; align-items: center; justify-content: center;
 }
@@ -932,11 +932,11 @@ function formatDateTime(value?: string | null) { if (!value) return '未知'; co
 .legend-dot.contradicts { background: var(--color-error); }
 
 /* Detail panel */
-.detail-panel { 
-  width: 320px; border-radius: 20px; overflow: hidden; 
-  border: 1px solid var(--color-glass-border); 
-  background: var(--color-surface-elevated); 
-  box-shadow: 0 12px 48px rgba(0,0,0,0.1); 
+.detail-panel {
+  width: 320px; border-radius: 20px; overflow: hidden;
+  border: 1px solid var(--color-glass-border);
+  background: var(--color-surface-elevated);
+  box-shadow: 0 12px 48px rgba(0,0,0,0.1);
   display: flex; flex-direction: column;
 }
 .panel-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--color-outline); }
@@ -987,13 +987,13 @@ function formatDateTime(value?: string | null) { if (!value) return '未知'; co
 @media (max-width: 1100px) {
   .insight-content { flex-direction: column; }
   .detail-panel { width: 100%; min-height: 320px; }
-  .left-hud { 
-    position: static; 
-    width: 100%; 
-    max-height: none; 
-    display: grid; 
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); 
-    margin-bottom: 16px; 
+  .left-hud {
+    position: static;
+    width: 100%;
+    max-height: none;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    margin-bottom: 16px;
     overflow-y: visible;
   }
 }
