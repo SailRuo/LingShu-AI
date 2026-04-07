@@ -3,17 +3,23 @@ package com.lingshu.ai.core.service.impl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lingshu.ai.core.service.ChatService;
 import com.lingshu.ai.core.service.SettingService;
+import com.lingshu.ai.core.service.TurnTimelineService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import javax.crypto.Cipher;
+import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -28,6 +34,7 @@ public class WechatBotMessageService {
 
     private final Map<String, String> updateBufMap = new ConcurrentHashMap<>();
     private final Random random = new Random();
+    private final SecureRandom secureRandom = new SecureRandom();
     private final Set<String> pollingAccounts = ConcurrentHashMap.newKeySet();
 
     private final Map<String, String> typingTicketCache = new ConcurrentHashMap<>();
@@ -187,7 +194,23 @@ public class WechatBotMessageService {
             sendTyping(fromUserId, contextToken, botToken, baseUrl, 1);
 
             log.info("开始调用 ChatService.streamChat, userId={}, message={}", wechatUserId, text);
-            chatService.streamChat(text, null, wechatUserId, null, null, null)
+            chatService.streamChat(text, null, wechatUserId, null, null, null, null, new ChatService.ToolEventListener() {
+                @Override
+                public void onToolEnd(String toolCallId, String toolName, String arguments, 
+                                      String result, boolean isError, List<TurnTimelineService.ArtifactPayload> artifacts) {
+                    if (!artifacts.isEmpty()) {
+                        log.info("工具 {} 返回了 {} 个产物，准备发送给微信用户", toolName, artifacts.size());
+                        for (TurnTimelineService.ArtifactPayload artifact : artifacts) {
+                            if ("image".equals(artifact.artifactType())) {
+                                log.info("检测到图片产物，准备发送给微信用户 [{}]", fromUserId);
+                                sendImageMessage(fromUserId, toUserId, contextToken, 
+                                                artifact.base64Data(), artifact.mimeType(), 
+                                                botToken, baseUrl);
+                            }
+                        }
+                    }
+                }
+            })
                     .reduce("", String::concat)
                     .doOnNext(fullResponse -> {
                         log.info("收到 AI 完整响应，长度={}, 内容={}", fullResponse.length(),
@@ -288,5 +311,164 @@ public class WechatBotMessageService {
         } catch (Exception e) {
             log.error("发送微信消息失败: {}", e.getMessage());
         }
+    }
+
+    private void sendImageMessage(String toUserId, String botUserId, String contextToken,
+                                  String base64Data, String mimeType, String botToken, String baseUrl) {
+        try {
+            log.info("开始发送图片给微信用户 [{}], mimeType={}", toUserId, mimeType);
+            
+            byte[] imageData = Base64.getDecoder().decode(base64Data);
+            log.info("图片解码成功，大小: {} bytes", imageData.length);
+            
+            byte[] aesKey = new byte[16];
+            secureRandom.nextBytes(aesKey);
+            
+            byte[] encryptedData = encryptAES(imageData, aesKey);
+            log.info("图片加密成功，加密后大小: {} bytes", encryptedData.length);
+            
+            String fileKey = UUID.randomUUID().toString().replace("-", "");
+            String rawMd5 = getMD5(imageData);
+            String aesKeyHex = bytesToHex(aesKey);
+            
+            String uploadUrl = getUploadUrl(botToken, baseUrl, toUserId, imageData.length, 
+                                            encryptedData.length, fileKey, rawMd5, aesKeyHex);
+            
+            if (uploadUrl == null) {
+                log.error("获取上传 URL 失败");
+                return;
+            }
+            log.info("获取上传 URL 成功: {}", uploadUrl);
+            
+            String downloadParam = uploadToCdn(uploadUrl, encryptedData);
+            if (downloadParam == null) {
+                log.error("上传图片到 CDN 失败");
+                return;
+            }
+            log.info("上传图片成功，获得凭证: {}", downloadParam.substring(0, Math.min(30, downloadParam.length())));
+            
+            String aesKeyB64 = Base64.getEncoder().encodeToString(aesKeyHex.getBytes(StandardCharsets.UTF_8));
+            
+            sendImageMessageRequest(toUserId, contextToken, downloadParam, aesKeyB64, 
+                                    encryptedData.length, botToken, baseUrl);
+            
+            log.info("已发送图片给微信用户 [{}]", toUserId);
+        } catch (Exception e) {
+            log.error("发送图片失败: {}", e.getMessage(), e);
+        }
+    }
+
+    private byte[] encryptAES(byte[] data, byte[] key) throws Exception {
+        Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
+        SecretKeySpec keySpec = new SecretKeySpec(key, "AES");
+        cipher.init(Cipher.ENCRYPT_MODE, keySpec);
+        return cipher.doFinal(data);
+    }
+
+    private String getUploadUrl(String botToken, String baseUrl, String toUserId, 
+                                int rawSize, int encryptedSize, String fileKey, 
+                                String rawMd5, String aesKeyHex) throws Exception {
+        String url = baseUrl + "/ilink/bot/getuploadurl";
+        
+        Map<String, Object> body = new HashMap<>();
+        body.put("filekey", fileKey);
+        body.put("media_type", 1);
+        body.put("to_user_id", toUserId);
+        body.put("rawsize", rawSize);
+        body.put("rawfilemd5", rawMd5);
+        body.put("filesize", encryptedSize);
+        body.put("no_need_thumb", true);
+        body.put("aeskey", aesKeyHex);
+        
+        String jsonBody = objectMapper.writeValueAsString(body);
+        HttpEntity<String> entity = new HttpEntity<>(jsonBody, createHeaders(botToken));
+        ResponseEntity<Map> response = restTemplate.exchange(url, HttpMethod.POST, entity, Map.class);
+        
+        Map<String, Object> responseBody = response.getBody();
+        if (responseBody != null && responseBody.containsKey("upload_full_url")) {
+            return (String) responseBody.get("upload_full_url");
+        }
+        
+        log.warn("getuploadurl 响应: {}", responseBody);
+        return null;
+    }
+
+    private String uploadToCdn(String uploadUrl, byte[] encryptedData) throws Exception {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+        HttpEntity<byte[]> entity = new HttpEntity<>(encryptedData, headers);
+        
+        ResponseEntity<String> response = restTemplate.exchange(uploadUrl, HttpMethod.POST, entity, String.class);
+        
+        String downloadParam = response.getHeaders().getFirst("x-encrypted-param");
+        if (downloadParam != null) {
+            return downloadParam;
+        }
+        
+        try {
+            Map<String, Object> responseBody = objectMapper.readValue(response.getBody(), Map.class);
+            if (responseBody.containsKey("x-encrypted-param")) {
+                return (String) responseBody.get("x-encrypted-param");
+            }
+        } catch (Exception e) {
+            log.warn("解析 CDN 响应失败: {}", e.getMessage());
+        }
+        
+        log.warn("CDN 响应头: {}", response.getHeaders());
+        return null;
+    }
+
+    private void sendImageMessageRequest(String toUserId, String contextToken, 
+                                         String downloadParam, String aesKeyB64, 
+                                         int encryptedSize, String botToken, String baseUrl) throws Exception {
+        String url = baseUrl + "/ilink/bot/sendmessage";
+        
+        Map<String, Object> body = new HashMap<>();
+        Map<String, Object> msg = new HashMap<>();
+        msg.put("from_user_id", "");
+        msg.put("to_user_id", toUserId);
+        msg.put("client_id", "openclaw-weixin-" + String.format("%08x", random.nextInt()));
+        msg.put("message_type", 2);
+        msg.put("message_state", 2);
+        msg.put("context_token", contextToken);
+        
+        List<Map<String, Object>> itemList = new ArrayList<>();
+        Map<String, Object> imageItemWrapper = new HashMap<>();
+        imageItemWrapper.put("type", 2);
+        
+        Map<String, Object> imageItem = new HashMap<>();
+        Map<String, Object> media = new HashMap<>();
+        media.put("encrypt_query_param", downloadParam);
+        media.put("aes_key", aesKeyB64);
+        media.put("encrypt_type", 1);
+        imageItem.put("media", media);
+        imageItem.put("mid_size", encryptedSize);
+        
+        imageItemWrapper.put("image_item", imageItem);
+        itemList.add(imageItemWrapper);
+        msg.put("item_list", itemList);
+        
+        body.put("msg", msg);
+        body.put("base_info", Map.of("channel_version", "2.1.3"));
+        
+        String jsonBody = objectMapper.writeValueAsString(body);
+        HttpEntity<String> entity = new HttpEntity<>(jsonBody, createHeaders(botToken));
+        ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
+        
+        log.info("发送图片消息响应: {}", response.getBody());
+    }
+
+    private String getMD5(byte[] data) throws Exception {
+        MessageDigest md = MessageDigest.getInstance("MD5");
+        byte[] digest = md.digest(data);
+        return bytesToHex(digest);
+    }
+
+    private String bytesToHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder();
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
     }
 }

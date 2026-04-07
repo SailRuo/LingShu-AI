@@ -100,7 +100,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     }
 
     private void handleRegister(WebSocketSession session, Map<String, Object> data) throws IOException {
-        String userId = (String) data.getOrDefault("userId", "User");
+        String userId = resolveUserId(session, data.get("userId"));
         sessionUserMap.put(session.getId(), userId);
         
         //log.info("用户注册: {} -> {}", session.getId(), userId);
@@ -123,7 +123,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         List<String> images = (List<String>) data.get("images");
         Long agentId = data.get("agentId") != null ?
                 ((Number) data.get("agentId")).longValue() : null;
-        String userId = sessionUserMap.getOrDefault(session.getId(), "User");
+        String userId = sessionUserMap.getOrDefault(session.getId(), fallbackUserId(session));
         String model = (String) data.get("model");
         String apiKey = (String) data.get("apiKey");
         String baseUrl = (String) data.get("baseUrl");
@@ -219,7 +219,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     }
 
     private void handleHistory(WebSocketSession session, Map<String, Object> data) throws IOException {
-        String userId = sessionUserMap.getOrDefault(session.getId(), "User");
+        String userId = sessionUserMap.getOrDefault(session.getId(), fallbackUserId(session));
         int size = data.get("size") != null ? ((Number) data.get("size")).intValue() : 20;
         Long beforeId = data.get("beforeId") != null ? 
                 ((Number) data.get("beforeId")).longValue() : null;
@@ -314,6 +314,17 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                     }
                     return null;
                 });
+    }
+
+    private String resolveUserId(WebSocketSession session, Object rawUserId) {
+        if (rawUserId instanceof String str && !str.isBlank()) {
+            return str.trim();
+        }
+        return fallbackUserId(session);
+    }
+
+    private String fallbackUserId(WebSocketSession session) {
+        return "web-ws:" + session.getId();
     }
 
     private void sendMessage(WebSocketSession session, Map<String, Object> message) throws IOException {

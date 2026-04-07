@@ -7,6 +7,21 @@ import type {
   ChatToolStep,
 } from "@/types";
 
+function getClientUserId(): string {
+  const storageKey = "lingshu_user_id";
+  const existing = window.localStorage.getItem(storageKey);
+  if (existing && existing.trim()) {
+    return existing.trim();
+  }
+  const randomPart =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const generated = `web:${randomPart}`;
+  window.localStorage.setItem(storageKey, generated);
+  return generated;
+}
+
 interface TurnArtifact {
   artifactType: string;
   mimeType?: string;
@@ -293,6 +308,7 @@ function mapTurnsToMessages(turns: TurnHistoryItem[]): ChatMessage[] {
 }
 
 export function useChat() {
+  const clientUserId = getClientUserId();
   const messages = ref<ChatMessage[]>([]);
   const inputMessage = ref("");
   const inputImages = ref<string[]>([]);
@@ -510,7 +526,8 @@ export function useChat() {
 
   async function syncLatestAssistantMessage() {
     try {
-      const res = await fetch(getFullUrl("/api/chat/turns?size=1"));
+      const params = new URLSearchParams({ size: "1", userId: clientUserId });
+      const res = await fetch(getFullUrl(`/api/chat/turns?${params}`));
       if (!res.ok) throw new Error("History sync failed");
 
       const turns: TurnHistoryItem[] = await res.json();
@@ -566,7 +583,10 @@ export function useChat() {
     isLoadingHistory.value = true;
 
     try {
-      const params = new URLSearchParams({ size: size.toString() });
+      const params = new URLSearchParams({
+        size: size.toString(),
+        userId: clientUserId,
+      });
       if (oldestMessageId.value) {
         params.append("beforeId", oldestMessageId.value.toString());
       }
@@ -604,7 +624,8 @@ export function useChat() {
 
   async function initWelcome() {
     try {
-      const res = await fetch(getFullUrl("/api/chat/welcome"));
+      const welcomeParams = new URLSearchParams({ userId: clientUserId });
+      const res = await fetch(getFullUrl(`/api/chat/welcome?${welcomeParams}`));
       if (!res.ok) throw new Error("Welcome stream failed");
 
       const reader = res.body?.getReader();
@@ -665,7 +686,7 @@ export function useChat() {
     messages.value.push(assistantMessage);
 
     try {
-      const payload: Record<string, any> = { message: text };
+      const payload: Record<string, any> = { message: text, userId: clientUserId };
       if (currentImages.length > 0) {
         payload.images = currentImages;
       }
@@ -730,7 +751,8 @@ export function useChat() {
 
   async function clearHistory() {
     try {
-      const res = await fetch(getFullUrl("/api/chat/turns"), {
+      const params = new URLSearchParams({ userId: clientUserId });
+      const res = await fetch(getFullUrl(`/api/chat/turns?${params}`), {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Clear history failed");

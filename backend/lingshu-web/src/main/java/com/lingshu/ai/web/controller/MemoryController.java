@@ -19,17 +19,17 @@ public class MemoryController {
      * 获取记忆图谱数据，用于前端可视化展示。
      */
     @GetMapping("/graph")
-    public Object getGraph() {
+    public Object getGraph(@RequestParam(required = false) String userId) {
         // 目前默认使用 "User" 作为用户标识
-        return memoryService.getGraphData("User");
+        return memoryService.getGraphData(resolveUserId(userId));
     }
 
     /**
      * 手动触发记忆提取流程。
      */
     @PostMapping("/extract")
-    public void manualExtract(@RequestBody String text) {
-        memoryService.extractFacts("User", text);
+    public void manualExtract(@RequestParam(required = false) String userId, @RequestBody String text) {
+        memoryService.extractFacts(resolveUserId(userId), text);
     }
 
     /**
@@ -82,8 +82,9 @@ public class MemoryController {
     public Object getMemoryGovernanceList(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size,
-            @RequestParam(required = false, defaultValue = "all") String status) {
-        return memoryService.getMemoryGovernanceList(page, size, status);
+            @RequestParam(required = false, defaultValue = "all") String status,
+            @RequestParam(required = false) String userId) {
+        return memoryService.getMemoryGovernanceList(page, size, status, userId);
     }
 
     /**
@@ -102,5 +103,11 @@ public class MemoryController {
     public void restoreFact(@PathVariable Long id) {
         log.info("API 触发：手动恢复事实 #{}", id);
         memoryService.restoreFact(id);
+    }
+    private String resolveUserId(String userId) {
+        if (userId == null || userId.isBlank()) {
+            return "memory-debug:default";
+        }
+        return userId.trim();
     }
 }

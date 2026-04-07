@@ -165,7 +165,7 @@ public class TtsController {
                 return ResponseEntity.status(response.statusCode()).body(response.body());
             }
         } catch (Exception e) {
-            log.error("Failed to fetch TTS voices: {}", e.getMessage(), e);
+            log.error("Failed to fetch TTS voices: {}", e.getMessage());
             return ResponseEntity.internalServerError().body("{\"error\": \"" + e.getMessage() + "\"}");
         }
     }

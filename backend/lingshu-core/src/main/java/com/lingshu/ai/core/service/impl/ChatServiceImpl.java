@@ -106,9 +106,11 @@ public class ChatServiceImpl implements ChatService {
         this.mcpToolArtifactRegistry = mcpToolArtifactRegistry;
     }
 
-    private ChatSession getOrCreateSession() {
-        return sessionRepository.findAll().stream().findFirst().orElseGet(() -> {
+    private ChatSession getOrCreateSession(String userId) {
+        String normalizedUserId = (userId == null || userId.isBlank()) ? "User" : userId.trim();
+        return sessionRepository.findFirstByUserIdOrderByIdAsc(normalizedUserId).orElseGet(() -> {
             ChatSession session = ChatSession.builder()
+                    .userId(normalizedUserId)
                     .title("Default Conversation")
                     .createdAt(LocalDateTime.now())
                     .updatedAt(LocalDateTime.now())
@@ -188,17 +190,17 @@ public class ChatServiceImpl implements ChatService {
     @Override
     public Flux<String> streamChat(String message, List<String> images, Long agentId, String userId, String model, String apiKey, String baseUrl,
                                    Boolean enableThinking, ToolEventListener toolEventListener) {
-        ChatSession session = getOrCreateSession();
+        ChatSession session = getOrCreateSession(userId);
         AgentConfig agent = getAgent(agentId);
-        
+
         if (agent != null) {
-            log.info("处理聊天消息: agentId={}, 智能体 id={}, name={}, systemPrompt长度={}", 
-                    agentId, agent.getId(), agent.getName(), 
+            log.info("处理聊天消息: 智能体 name={}, systemPrompt长度={}",
+                    agent.getName(),
                     agent.getSystemPrompt() != null ? agent.getSystemPrompt().length() : 0);
         } else {
             log.warn("处理聊天消息: agentId={}, 未找到智能体", agentId);
         }
-        
+
         String safeMessage = message != null ? message : "";
 
         systemLogService.info("收到用户消息 (流式): " + (safeMessage.length() > 20 ? safeMessage.substring(0, 20) + "..." : safeMessage) + ", enableThinking=" + enableThinking + ", images=" + (images != null ? images.size() : 0), "CHAT");
@@ -220,7 +222,7 @@ public class ChatServiceImpl implements ChatService {
         String longTermContext = memoryService.retrieveContext(userId, safeMessage);
         String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
         String systemPrompt = promptBuilderService.buildMergedSystemPrompt(agent, relationshipPrompt, longTermContext);
-        
+
         if (!emotionPrompt.isEmpty()) {
             systemPrompt = systemPrompt + emotionPrompt;
         }
@@ -242,7 +244,7 @@ public class ChatServiceImpl implements ChatService {
                                     .version(java.net.http.HttpClient.Version.HTTP_1_1)
                                     .connectTimeout(Duration.ofSeconds(30))
                                     .executor(Executors.newCachedThreadPool()));
-            
+
             if ("ollama".equalsIgnoreCase(baseUrl) || baseUrl.contains("11434")) {
                 log.info("使用 Ollama 模式, baseUrl={}, model={}", baseUrl, model);
                 streamingModelToUse = dev.langchain4j.model.ollama.OllamaStreamingChatModel.builder()
@@ -263,7 +265,7 @@ public class ChatServiceImpl implements ChatService {
                         .timeout(java.time.Duration.ofMinutes(5))
                         .listeners(listeners)
                         .httpClientBuilder(httpClientBuilder);
-                
+
                 boolean isGemini = model != null && model.toLowerCase().contains("gemini");
                 if (Boolean.TRUE.equals(enableThinking)) {
                     if (isGemini) {
@@ -273,7 +275,7 @@ public class ChatServiceImpl implements ChatService {
                         log.info("启用 Thinking/Reasoning 模式: [{}]", model);
                     }
                 }
-                
+
                 streamingModelToUse = openAiBuilder.build();
             }
         }
@@ -293,7 +295,7 @@ public class ChatServiceImpl implements ChatService {
                 contents.add(ImageContent.from(base64Data, mimeType));
             }
         }
-        
+
         // 如果既没有文字也没有图片，添加一个默认文字避免报错
         if (contents.isEmpty()) {
             contents.add(TextContent.from(" "));
@@ -353,59 +355,59 @@ public class ChatServiceImpl implements ChatService {
 
         builder.build()
                 .chat(session.getId(), safeMessage.isBlank() ? " " : safeMessage, systemPrompt)
-            .onPartialThinking(thinking -> {
-                //systemLogService.thinking(thinking.text(), "LLM");
-                sink.tryEmitNext("\u0001REASONING\u0001" + thinking.text() + "\u0001/REASONING\u0001");
-            })
-            .beforeToolExecution(beforeToolExecution -> {
-                var request = beforeToolExecution.request();
-                flushPendingAssistantText(turnId, pendingAssistantText);
-                timelineToolListener.onToolStart(request.id(), request.name(), request.arguments());
-            })
-            .onPartialResponse(token -> {
-                if (assistantResponseStore.isEmpty()) {
-                    systemLogService.info("流式输出已开启，接收首个 token...", "LLM");
-                }
-                assistantResponseStore.append(token);
-                pendingAssistantText.append(token);
-                sink.tryEmitNext(token);
-            })
-            .onToolExecuted(toolExecution -> {
-                var request = toolExecution.request();
-                timelineToolListener.onToolEnd(
-                        request.id(),
-                        request.name(),
-                        request.arguments(),
-                        toolExecution.result(),
-                        toolExecution.hasFailed()
-                );
-            })
-            .onCompleteResponse(response -> {
-                int tokenCount = assistantResponseStore.length() / 4;
-                systemLogService.llmEnd(tokenCount, "LLM");
-                systemLogService.success("对话完成，回复长度 " + assistantResponseStore.length() + " 字符", "CHAT");
-                flushPendingAssistantText(turnId, pendingAssistantText);
-        turnTimelineService.completeTurn(turnId, assistantResponseStore.toString());
-                sink.tryEmitComplete();
-                postProcessAfterResponse(userId, safeMessage, assistantResponseStore.toString(), preAnalyzedEmotion);
-            })
-            .onError(error -> {
-                log.error("流式对话发生错误: {}", error.getMessage(), error);
-                systemLogService.error("LLM 调用失败: " + error.getMessage(), "LLM");
-                flushPendingAssistantText(turnId, pendingAssistantText);
-                turnTimelineService.failTurn(turnId, error.getMessage());
+                .onPartialThinking(thinking -> {
+                    //systemLogService.thinking(thinking.text(), "LLM");
+                    sink.tryEmitNext("\u0001REASONING\u0001" + thinking.text() + "\u0001/REASONING\u0001");
+                })
+                .beforeToolExecution(beforeToolExecution -> {
+                    var request = beforeToolExecution.request();
+                    flushPendingAssistantText(turnId, pendingAssistantText);
+                    timelineToolListener.onToolStart(request.id(), request.name(), request.arguments());
+                })
+                .onPartialResponse(token -> {
+                    if (assistantResponseStore.isEmpty()) {
+                        systemLogService.info("流式输出已开启，接收首个 token...", "LLM");
+                    }
+                    assistantResponseStore.append(token);
+                    pendingAssistantText.append(token);
+                    sink.tryEmitNext(token);
+                })
+                .onToolExecuted(toolExecution -> {
+                    var request = toolExecution.request();
+                    timelineToolListener.onToolEnd(
+                            request.id(),
+                            request.name(),
+                            request.arguments(),
+                            toolExecution.result(),
+                            toolExecution.hasFailed()
+                    );
+                })
+                .onCompleteResponse(response -> {
+                    int tokenCount = assistantResponseStore.length() / 4;
+                    systemLogService.llmEnd(tokenCount, "LLM");
+                    systemLogService.success("对话完成，回复长度 " + assistantResponseStore.length() + " 字符", "CHAT");
+                    flushPendingAssistantText(turnId, pendingAssistantText);
+                    turnTimelineService.completeTurn(turnId, assistantResponseStore.toString());
+                    sink.tryEmitComplete();
+                    postProcessAfterResponse(userId, safeMessage, assistantResponseStore.toString(), preAnalyzedEmotion);
+                })
+                .onError(error -> {
+                    log.error("流式对话发生错误: {}", error.getMessage(), error);
+                    systemLogService.error("LLM 调用失败: " + error.getMessage(), "LLM");
+                    flushPendingAssistantText(turnId, pendingAssistantText);
+                    turnTimelineService.failTurn(turnId, error.getMessage());
 
-                String errorMsg = error.getMessage() != null ? error.getMessage() : "";
+                    String errorMsg = error.getMessage() != null ? error.getMessage() : "";
 
-                if (errorMsg.contains("context length") || errorMsg.contains("n_ctx") || errorMsg.contains("n_keep")) {
-                    sink.tryEmitError(new RuntimeException("输入内容过长，超出模型上下文限制。请尝试：\n1. 减少图片数量或使用更小的图片\n2. 清除对话历史后重试\n3. 切换到支持更长上下文的模型"));
-                } else if (errorMsg.contains("image") || errorMsg.contains("vision") || errorMsg.contains("multimodal")) {
-                    sink.tryEmitError(new RuntimeException("当前模型不支持图像识别，请切换到支持视觉的模型（如Qwen-VL等）或移除图片后重试。"));
-                } else {
-                    sink.tryEmitError(error);
-                }
-            })
-            .start();
+                    if (errorMsg.contains("context length") || errorMsg.contains("n_ctx") || errorMsg.contains("n_keep")) {
+                        sink.tryEmitError(new RuntimeException("输入内容过长，超出模型上下文限制。请尝试：\n1. 减少图片数量或使用更小的图片\n2. 清除对话历史后重试\n3. 切换到支持更长上下文的模型"));
+                    } else if (errorMsg.contains("image") || errorMsg.contains("vision") || errorMsg.contains("multimodal")) {
+                        sink.tryEmitError(new RuntimeException("当前模型不支持图像识别，请切换到支持视觉的模型（如Qwen-VL等）或移除图片后重试。"));
+                    } else {
+                        sink.tryEmitError(error);
+                    }
+                })
+                .start();
 
         return sink.asFlux();
     }
@@ -421,7 +423,7 @@ public class ChatServiceImpl implements ChatService {
                                          com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion,
                                          Long turnId) {
         ChatMemory chatMemory = chatMemoryProvider.get(sessionId);
-        
+
         chatMemory.add(userMessage);
 
         List<dev.langchain4j.data.message.ChatMessage> messagesToSend = new ArrayList<>();
@@ -528,7 +530,7 @@ public class ChatServiceImpl implements ChatService {
 
     @Override
     public Flux<String> streamWelcome(String userId) {
-        ChatSession session = getOrCreateSession();
+        ChatSession session = getOrCreateSession(userId);
         systemLogService.info("生成欢迎消息...", "CHAT");
 
         AgentConfig defaultAgent = agentConfigService.getDefaultAgent().orElse(null);
@@ -651,16 +653,19 @@ public class ChatServiceImpl implements ChatService {
     public void clearHistory(Long sessionId) {
         Long idToClear = sessionId;
         if (idToClear == null) {
-            ChatSession session = getOrCreateSession();
+            ChatSession session = sessionRepository.findAll().stream().findFirst().orElse(null);
+            if (session == null) {
+                return;
+            }
             idToClear = session.getId();
         }
-        
+
         // 1. 从数据库物理删除记录
         turnTimelineService.clearTurnHistory(idToClear);
-        
+
         // 2. 清除 LangChain4j 的 ChatMemory 缓存（这会调用 store.deleteMessages）
         chatMemoryProvider.get(idToClear).clear();
-        
+
         systemLogService.info("已清空会话卷记录 sessionId=" + idToClear, "CHAT");
     }
 

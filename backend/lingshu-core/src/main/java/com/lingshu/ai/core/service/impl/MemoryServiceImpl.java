@@ -41,6 +41,8 @@ import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -58,6 +60,24 @@ public class MemoryServiceImpl implements MemoryService {
     private static final long SEMANTIC_CLASSIFY_TIMEOUT_SECONDS = 8;
     private static final long HISTORY_EMBED_TIMEOUT_SECONDS = 6;
     private static final long HISTORY_SEARCH_TIMEOUT_SECONDS = 4;
+    private static final Pattern[] NAME_INTENT_PATTERNS = new Pattern[]{
+            Pattern.compile("(?:\\u4f60\\u8bb0\\u9519\\u4e86)?(?:\\u6211\\u7684\\u540d\\u5b57(?:\\u662f)?|\\u6211\\u53eb|\\u53eb\\u6211|\\u6211\\u662f)\\s*([\\p{IsHan}A-Za-z][\\p{IsHan}A-Za-z0-9_\\-]{0,15})")
+    };
+    private static final Pattern[] STORED_NAME_PATTERNS = new Pattern[]{
+            Pattern.compile("(?:\\u7528\\u6237(?:\\u7684)?\\u540d\\u5b57\\u662f|\\u540d\\u5b57\\u662f|\\u6211\\u53eb|\\u6211\\u662f)\\s*([\\p{IsHan}A-Za-z][\\p{IsHan}A-Za-z0-9_\\-]{0,15})")
+    };
+    private static final Set<String> INVALID_NAME_VALUES = Set.of(
+            "\u6211",
+            "\u6211\u7684\u540d\u5b57",
+            "\u540d\u5b57",
+            "\u59d3\u540d",
+            "\u7528\u6237\u540d\u5b57",
+            "\u7528\u6237\u7684\u540d\u5b57",
+            "\u4f60\u8bb0\u9519\u4e86",
+            "\u53eb\u6211",
+            "\u6211\u53eb",
+            "\u6211\u662f"
+    );
     private static final java.util.Set<String> STOP_WORDS = java.util.Set.of(
             "的", "了", "是", "在", "我", "你", "他", "她", "它", "们",
             "这", "那", "有", "和", "与", "或", "但", "如果", "因为",
@@ -195,6 +215,7 @@ public class MemoryServiceImpl implements MemoryService {
 
     private void processExtractionResult(String userId, String messageSnapshot, UserNode user,
                                          ExtractionResult result, com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
+        normalizeNameFactsForIdentityIntent(messageSnapshot, user, result);
         log.debug("提取结果已收到: {} 新事实, {} 请求删除",
                 result.getNewFacts() != null ? result.getNewFacts().size() : 0,
                 result.getDeletedFactIds() != null ? result.getDeletedFactIds().size() : 0);
@@ -252,6 +273,165 @@ public class MemoryServiceImpl implements MemoryService {
             user.setLastSeen(LocalDateTime.now());
             userRepository.save(user);
         }
+    }
+
+
+    private void normalizeNameFactsForIdentityIntent(String messageSnapshot, UserNode user, ExtractionResult result) {
+        if (result == null || messageSnapshot == null || messageSnapshot.isBlank()) {
+            return;
+        }
+
+        String candidateName = extractNameCandidate(messageSnapshot);
+        if (candidateName == null || candidateName.isBlank()) {
+            return;
+        }
+        String canonicalNameFact = buildCanonicalNameFact(candidateName);
+
+        List<ExtractionResult.ExtractedFact> newFacts = result.getNewFacts();
+        if (newFacts == null) {
+            newFacts = new ArrayList<>();
+            result.setNewFacts(newFacts);
+        }
+
+        boolean hasIdentityName = false;
+        for (ExtractionResult.ExtractedFact fact : newFacts) {
+            if (fact == null || fact.getContent() == null) {
+                continue;
+            }
+            if (!fact.getContent().contains(candidateName)) {
+                continue;
+            }
+            fact.setType(FactType.IDENTITY);
+            fact.setContent(canonicalNameFact);
+            if (fact.getConfidence() == null || fact.getConfidence().getValue() < ConfidenceLevel.HIGH.getValue()) {
+                fact.setConfidence(ConfidenceLevel.HIGH);
+            }
+            hasIdentityName = true;
+        }
+
+        if (!hasIdentityName) {
+            ExtractionResult.ExtractedFact identityFact = new ExtractionResult.ExtractedFact();
+            identityFact.setType(FactType.IDENTITY);
+            identityFact.setContent(canonicalNameFact);
+            identityFact.setConfidence(ConfidenceLevel.HIGH);
+            identityFact.setVolatile(false);
+            newFacts.add(identityFact);
+        }
+
+        List<Long> deletedFactIds = result.getDeletedFactIds();
+        if (deletedFactIds == null) {
+            deletedFactIds = new ArrayList<>();
+            result.setDeletedFactIds(deletedFactIds);
+        }
+
+        if (user == null || user.getFacts() == null) {
+            return;
+        }
+        for (FactNode existingFact : user.getFacts()) {
+            if (existingFact == null || existingFact.getId() == null || existingFact.getContent() == null) {
+                continue;
+            }
+            String existingContent = existingFact.getContent();
+            String existingName = extractStoredNameCandidate(existingContent);
+            boolean isRelationshipNameNoise = isRelationshipFact(existingFact)
+                    && existingContent.contains(candidateName)
+                    && existingContent.contains("\u5173\u7cfb");
+            boolean isDuplicateNameVariant = existingName != null
+                    && existingName.equalsIgnoreCase(candidateName)
+                    && !canonicalNameFact.equals(existingContent);
+            boolean isConflictingIdentity = existingName != null
+                    && !existingName.equalsIgnoreCase(candidateName)
+                    && isIdentityFact(existingFact);
+            if ((isRelationshipNameNoise || isDuplicateNameVariant || isConflictingIdentity)
+                    && !deletedFactIds.contains(existingFact.getId())) {
+                deletedFactIds.add(existingFact.getId());
+            }
+        }
+    }
+
+    private String extractNameCandidate(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        String normalized = text.replace('\u3002', ' ')
+                .replace('\uFF0C', ' ')
+                .replace(',', ' ')
+                .trim();
+        for (Pattern pattern : NAME_INTENT_PATTERNS) {
+            Matcher matcher = pattern.matcher(normalized);
+            if (!matcher.find()) {
+                continue;
+            }
+            String candidate = cleanupNameCandidate(matcher.group(1));
+            if (candidate != null) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private String extractStoredNameCandidate(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        String normalized = text.replace('\u3002', ' ')
+                .replace('\uFF0C', ' ')
+                .replace(',', ' ')
+                .trim();
+        for (Pattern pattern : STORED_NAME_PATTERNS) {
+            Matcher matcher = pattern.matcher(normalized);
+            if (!matcher.find()) {
+                continue;
+            }
+            String candidate = cleanupNameCandidate(matcher.group(1));
+            if (candidate != null) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private String buildCanonicalNameFact(String candidateName) {
+        return "\u7528\u6237\u540d\u5b57\u662f" + candidateName;
+    }
+
+    private boolean isRelationshipFact(FactNode fact) {
+        return hasFactLabel(fact, "relationship")
+                || hasFactLabel(fact, "person");
+    }
+
+    private boolean isIdentityFact(FactNode fact) {
+        return hasFactLabel(fact, "identity")
+                || extractStoredNameCandidate(fact.getContent()) != null;
+    }
+
+    private boolean hasFactLabel(FactNode fact, String expected) {
+        return expected.equalsIgnoreCase(fact.getCategory())
+                || expected.equalsIgnoreCase(fact.getSubType())
+                || expected.equalsIgnoreCase(fact.getClusterKey());
+    }
+
+    private String cleanupNameCandidate(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String cleaned = raw.trim()
+                .replaceAll("^[\\s\\uFF1A:\\u662F]+", "")
+                .replaceAll("[\\s\\u3002\\uFF0C,\\u3001\\u5462\\u5417\\u5427\\u554A\\u5440].*$", "")
+                .trim();
+        if (cleaned.isBlank()) {
+            return null;
+        }
+        if (INVALID_NAME_VALUES.contains(cleaned)) {
+            return null;
+        }
+        if (cleaned.length() <= 1 && cleaned.codePoints().allMatch(Character::isIdeographic)) {
+            return null;
+        }
+        if (cleaned.length() > 16) {
+            cleaned = cleaned.substring(0, 16);
+        }
+        return cleaned;
     }
 
 
@@ -1965,10 +2145,24 @@ public class MemoryServiceImpl implements MemoryService {
     }
 
     @Override
-    public Object getMemoryGovernanceList(int page, int size, String status) {
+    public Object getMemoryGovernanceList(int page, int size, String status, String userId) {
         org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, size,
                 org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC,
                         "lastActivatedAt"));
+        if (userId != null && !userId.isBlank()) {
+            UserNode user = userRepository.findByName(userId.trim()).orElse(null);
+            List<FactNode> facts = user == null || user.getFacts() == null
+                    ? List.of()
+                    : user.getFacts().stream()
+                            .filter(fact -> status == null || status.isBlank() || "all".equalsIgnoreCase(status)
+                                    || status.equalsIgnoreCase(fact.getStatus()))
+                            .sorted(Comparator.comparing(FactNode::getLastActivatedAt,
+                                    Comparator.nullsLast(Comparator.reverseOrder())))
+                            .toList();
+            int start = Math.min(page * size, facts.size());
+            int end = Math.min(start + size, facts.size());
+            return new org.springframework.data.domain.PageImpl<>(facts.subList(start, end), pageable, facts.size());
+        }
         if (status == null || status.isBlank() || "all".equalsIgnoreCase(status)) {
             return factRepository.findAll(pageable);
         } else {

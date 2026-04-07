@@ -8,11 +8,25 @@ export interface WebSocketMessage {
 
 export type MessageHandler = (message: WebSocketMessage) => void
 
+function getClientUserId(): string {
+  const storageKey = 'lingshu_user_id'
+  const existing = window.localStorage.getItem(storageKey)
+  if (existing && existing.trim()) {
+    return existing.trim()
+  }
+  const randomPart = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  const generated = `web:${randomPart}`
+  window.localStorage.setItem(storageKey, generated)
+  return generated
+}
+
 export function useWebSocket() {
   const ws = ref<WebSocket | null>(null)
   const isConnected = ref(false)
   const sessionId = ref<string | null>(null)
-  const userId = ref<string>('User')
+  const userId = ref<string>(getClientUserId())
   const reconnectAttempts = ref(0)
   const maxReconnectAttempts = 5
   

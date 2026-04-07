@@ -76,11 +76,12 @@ public class ChatController {
 
     @GetMapping("/turns")
     public List<TurnTimelineService.TurnView> getTurnHistory(
+            @RequestParam(name = "userId", defaultValue = "User") String userId,
             @RequestParam(name = "sessionId", required = false) Long sessionId,
             @RequestParam(name = "beforeId", required = false) Long beforeId,
             @RequestParam(name = "size", defaultValue = "20") int size) {
 
-        Long effectiveSessionId = resolveSessionId(sessionId);
+        Long effectiveSessionId = resolveSessionId(userId, sessionId);
         if (effectiveSessionId == null) {
             return List.of();
         }
@@ -89,8 +90,10 @@ public class ChatController {
     }
 
     @DeleteMapping("/turns")
-    public void clearHistory(@RequestParam(name = "sessionId", required = false) Long sessionId) {
-        chatService.clearHistory(sessionId);
+    public void clearHistory(@RequestParam(name = "userId", defaultValue = "User") String userId,
+                             @RequestParam(name = "sessionId", required = false) Long sessionId) {
+        Long effectiveSessionId = resolveSessionId(userId, sessionId);
+        chatService.clearHistory(effectiveSessionId);
     }
 
     public record ChatRequest(String message, Long agentId, String model, String apiKey, String baseUrl, String userId) {
@@ -131,9 +134,30 @@ public class ChatController {
                 });
     }
 
-    private Long resolveSessionId(Long sessionId) {
+    private Long resolveSessionId(String userId, Long sessionId) {
         if (sessionId != null) {
             return sessionId;
+        }
+        String normalizedUserId = userId == null || userId.isBlank() ? "User" : userId.trim();
+        Long byUser = chatSessionRepository.findFirstByUserIdOrderByIdAsc(normalizedUserId)
+                .map(com.lingshu.ai.infrastructure.entity.ChatSession::getId)
+                .orElse(null);
+        if (byUser != null) {
+            return byUser;
+        }
+        if ("User".equals(normalizedUserId)) {
+            Long legacyWs = chatSessionRepository.findFirstByUserIdOrderByIdAsc("web-ws:User")
+                    .map(com.lingshu.ai.infrastructure.entity.ChatSession::getId)
+                    .orElse(null);
+            if (legacyWs != null) {
+                return legacyWs;
+            }
+            Long legacyHttp = chatSessionRepository.findFirstByUserIdOrderByIdAsc("web-http:User")
+                    .map(com.lingshu.ai.infrastructure.entity.ChatSession::getId)
+                    .orElse(null);
+            if (legacyHttp != null) {
+                return legacyHttp;
+            }
         }
         return chatSessionRepository.findAll()
                 .stream()

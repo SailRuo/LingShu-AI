@@ -40,7 +40,7 @@ public interface MemoryService {
     /**
      * P2: 记忆治理 - 获取所有事实列表（包含已归档等），支持分页或治理。
      */
-    Object getMemoryGovernanceList(int page, int size, String status);
+    Object getMemoryGovernanceList(int page, int size, String status, String userId);
 
     /**
      * P2: 记忆治理 - 手动将记忆归档到冷库

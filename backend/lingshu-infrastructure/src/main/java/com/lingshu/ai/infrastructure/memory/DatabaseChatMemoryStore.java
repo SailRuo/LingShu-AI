@@ -50,7 +50,11 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
         }
 
         PageRequest pageable = PageRequest.of(0, 20, Sort.by("id").descending());
-        List<ChatTurn> turnsDesc = turnRepository.findBySessionIdOrderByIdDesc(sessionId, pageable);
+        List<ChatTurn> turnsDesc = turnRepository.findBySessionIdAndStatusInOrderByIdDesc(
+                sessionId,
+                List.of("completed", "failed"),
+                pageable
+        );
         if (turnsDesc == null || turnsDesc.isEmpty()) {
             return messages;
         }
@@ -210,4 +214,3 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
         return value == null ? "" : value;
     }
 }
-
