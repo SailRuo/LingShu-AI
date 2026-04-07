@@ -1,20 +1,22 @@
 package com.lingshu.ai.core.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lingshu.ai.core.dto.EmotionAnalysis;
 import com.lingshu.ai.core.dto.EmotionContext;
 import com.lingshu.ai.core.dto.EmotionContextResult;
 import com.lingshu.ai.core.model.DynamicMemoryModel;
-import com.lingshu.ai.infrastructure.entity.ChatMessage;
-import com.lingshu.ai.infrastructure.repository.ChatMessageRepository;
+import com.lingshu.ai.infrastructure.entity.ChatTurn;
+import com.lingshu.ai.infrastructure.repository.ChatTurnRepository;
 import dev.langchain4j.service.AiServices;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 public class EmotionPreAnalysisService {
@@ -24,22 +26,19 @@ public class EmotionPreAnalysisService {
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
 
     private final EmotionContextCache contextCache;
-    private final ChatMessageRepository messageRepository;
+    private final ChatTurnRepository turnRepository;
     private final DynamicMemoryModel dynamicMemoryModel;
     private final SystemLogService systemLogService;
-    private final ObjectMapper objectMapper;
     private EmotionContextAnalyzer emotionContextAnalyzer;
 
     public EmotionPreAnalysisService(EmotionContextCache contextCache,
-                                     ChatMessageRepository messageRepository,
+                                     ChatTurnRepository turnRepository,
                                      DynamicMemoryModel dynamicMemoryModel,
-                                     SystemLogService systemLogService,
-                                     ObjectMapper objectMapper) {
+                                     SystemLogService systemLogService) {
         this.contextCache = contextCache;
-        this.messageRepository = messageRepository;
+        this.turnRepository = turnRepository;
         this.dynamicMemoryModel = dynamicMemoryModel;
         this.systemLogService = systemLogService;
-        this.objectMapper = objectMapper;
     }
 
     private EmotionContextAnalyzer getAnalyzer() {
@@ -54,7 +53,7 @@ public class EmotionPreAnalysisService {
     public EmotionContextResult analyzeBeforeResponse(String userId, String currentMessage, Long sessionId) {
         try {
             String modelName = dynamicMemoryModel.getModelName();
-            systemLogService.info(String.format("情感前置分析: 开始分析用户消息 (模型: %s)", modelName), "EMOTION");
+            systemLogService.info(String.format("Emotion pre-analysis started (model: %s)", modelName), "EMOTION");
             systemLogService.startTimer("emotion_pre_analysis");
 
             String conversationHistory = buildConversationHistory(sessionId);
@@ -68,22 +67,22 @@ public class EmotionPreAnalysisService {
 
             if (result != null) {
                 contextCache.updateContext(userId, result.toSnapshot());
-                
+
                 systemLogService.info(String.format(
-                        "情感前置分析完成: emotion=%s, intensity=%.2f, trend=%s, needsComfort=%s",
+                        "Emotion pre-analysis done: emotion=%s, intensity=%.2f, trend=%s, needsComfort=%s",
                         result.getEmotion(),
                         result.getIntensity() != null ? result.getIntensity() : 0.0,
                         result.getTrend(),
                         result.getNeedsComfort()
                 ), "EMOTION");
-                
-                systemLogService.endTimer("emotion_pre_analysis", "情感前置分析完成", "EMOTION");
+
+                systemLogService.endTimer("emotion_pre_analysis", "Emotion pre-analysis completed", "EMOTION");
             }
 
             return result;
         } catch (Exception e) {
-            log.warn("情感前置分析失败: {}", e.getMessage(), e);
-            systemLogService.error("情感前置分析失败: " + e.getMessage(), "EMOTION");
+            log.warn("Emotion pre-analysis failed: {}", e.getMessage(), e);
+            systemLogService.error("Emotion pre-analysis failed: " + e.getMessage(), "EMOTION");
             return null;
         }
     }
@@ -93,99 +92,90 @@ public class EmotionPreAnalysisService {
             EmotionAnalyzer simpleAnalyzer = AiServices.builder(EmotionAnalyzer.class)
                     .chatModel(dynamicMemoryModel)
                     .build();
-            
+
             EmotionAnalysis result = simpleAnalyzer.analyze(message);
-            
+
             if (result != null) {
                 contextCache.updateContext(userId, result);
             }
-            
+
             return result;
         } catch (Exception e) {
-            log.warn("简单情感分析失败: {}", e.getMessage(), e);
+            log.warn("Simple emotion analysis failed: {}", e.getMessage(), e);
             return null;
         }
     }
 
     private String buildConversationHistory(Long sessionId) {
         if (sessionId == null) {
-            return "无历史对话记录";
+            return "No conversation history";
         }
 
         try {
-            org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(0, HISTORY_LIMIT);
-            List<ChatMessage> messages = messageRepository.findBySessionIdOrderByCreatedAtDesc(sessionId, pageable).getContent();
-            
-            if (messages.isEmpty()) {
-                return "无历史对话记录";
+            PageRequest pageRequest = PageRequest.of(0, HISTORY_LIMIT, Sort.by("id").descending());
+            List<ChatTurn> turnsDesc = turnRepository.findBySessionIdOrderByIdDesc(sessionId, pageRequest);
+            if (turnsDesc.isEmpty()) {
+                return "No conversation history";
             }
 
-            List<ChatMessage> recentMessages = messages.stream()
-                    .limit(HISTORY_LIMIT)
-                    .collect(Collectors.toList());
-            
-            java.util.Collections.reverse(recentMessages);
+            List<ChatTurn> turns = new ArrayList<>(turnsDesc);
+            Collections.reverse(turns);
 
             StringBuilder sb = new StringBuilder();
-            for (ChatMessage msg : recentMessages) {
-                String time = msg.getCreatedAt() != null ? 
-                    msg.getCreatedAt().format(TIME_FORMATTER) : "";
-                String role = "user".equals(msg.getRole()) ? "用户" : "灵枢";
-                
-                String content = msg.getContent();
-                String textOnly = content;
-                
-                // 处理多模态 JSON 存储格式
-                if (content != null && content.trim().startsWith("{") && content.trim().endsWith("}")) {
-                    try {
-                        com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(content);
-                        if (node.has("text")) {
-                            textOnly = node.get("text").asText();
-                        } else if (node.has("content") && node.get("content").isTextual()) {
-                             textOnly = node.get("content").asText();
-                        }
-                    } catch (Exception e) {
-                        // 解析失败则按原样截断处理
-                        log.debug("Failed to pre-parse history message content as JSON, using raw text");
-                    }
+            for (ChatTurn turn : turns) {
+                String time = turn.getCreatedAt() != null ? turn.getCreatedAt().format(TIME_FORMATTER) : "";
+
+                String userText = abbreviate(turn.getUserMessage());
+                if (!userText.isBlank()) {
+                    sb.append(String.format("[%s] User: %s\n", time, userText));
                 }
 
-                if (textOnly != null && textOnly.length() > 200) {
-                    textOnly = textOnly.substring(0, 200) + "...";
+                String assistantText = abbreviate(turn.getAssistantMessage());
+                if (!assistantText.isBlank()) {
+                    sb.append(String.format("[%s] Assistant: %s\n", time, assistantText));
                 }
-                
-                sb.append(String.format("[%s] %s: %s\n", time, role, textOnly));
             }
-            
-            return sb.toString();
+
+            return sb.isEmpty() ? "No conversation history" : sb.toString();
         } catch (Exception e) {
-            log.debug("获取对话历史失败: {}", e.getMessage());
-            return "无法获取历史对话记录";
+            log.debug("Failed to fetch conversation history: {}", e.getMessage());
+            return "Failed to load conversation history";
         }
+    }
+
+    private String abbreviate(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String trimmed = value.trim();
+        if (trimmed.length() > 200) {
+            return trimmed.substring(0, 200) + "...";
+        }
+        return trimmed;
     }
 
     private String buildPreviousEmotionState(String userId) {
         EmotionContext context = contextCache.getContext(userId);
-        
+
         if (context == null || context.isEmpty()) {
-            return "无之前的情感状态记录";
+            return "No previous emotion state";
         }
 
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("最近情感趋势: %s\n", translateTrend(context.getEmotionTrend())));
-        sb.append(String.format("累积情绪强度: %.2f\n", context.getCumulativeIntensity()));
-        sb.append("\n最近情感历史:\n");
+        sb.append(String.format("Recent trend: %s\n", translateTrend(context.getEmotionTrend())));
+        sb.append(String.format("Cumulative intensity: %.2f\n", context.getCumulativeIntensity()));
+        sb.append("\nRecent emotion history:\n");
         sb.append(context.toHistoryString());
-        
+
         return sb.toString();
     }
 
     private String translateTrend(String trend) {
-        if (trend == null) return "稳定";
+        if (trend == null) return "stable";
         return switch (trend.toLowerCase()) {
-            case "improving" -> "好转中";
-            case "declining" -> "有所下降";
-            default -> "稳定";
+            case "improving" -> "improving";
+            case "declining" -> "declining";
+            default -> "stable";
         };
     }
 

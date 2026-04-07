@@ -1,332 +1,213 @@
 package com.lingshu.ai.infrastructure.memory;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.lingshu.ai.infrastructure.entity.ChatSession;
-import com.lingshu.ai.infrastructure.repository.ChatMessageRepository;
-import com.lingshu.ai.infrastructure.repository.ChatSessionRepository;
+import com.lingshu.ai.infrastructure.entity.ChatTurn;
+import com.lingshu.ai.infrastructure.entity.ChatTurnEvent;
+import com.lingshu.ai.infrastructure.repository.ChatTurnEventRepository;
+import com.lingshu.ai.infrastructure.repository.ChatTurnRepository;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.ToolExecutionResultMessage;
-import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.data.message.*;
 import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
 
 /**
- * 实现 LangChain4j 的 ChatMemoryStore，将对话历史持久化到数据库。
- * 完整支持工具调用消息链（AiMessage with toolExecutionRequests + ToolExecutionResultMessage）。
+ * ChatMemoryStore migrated to turn/event persistence.
+ * It now reads model context from chat_turns + chat_turn_events
+ * and no longer persists to chat_messages.
  */
 @Slf4j
 @Component("databaseChatMemoryStore")
 public class DatabaseChatMemoryStore implements ChatMemoryStore {
 
-    private final ChatMessageRepository messageRepository;
-    private final ChatSessionRepository sessionRepository;
+    private final ChatTurnRepository turnRepository;
+    private final ChatTurnEventRepository eventRepository;
     private final ConcurrentMap<Long, SystemMessage> sessionSystemMessages = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public DatabaseChatMemoryStore(ChatMessageRepository messageRepository,
-                                   ChatSessionRepository sessionRepository) {
-        this.messageRepository = messageRepository;
-        this.sessionRepository = sessionRepository;
+    public DatabaseChatMemoryStore(ChatTurnRepository turnRepository,
+                                   ChatTurnEventRepository eventRepository) {
+        this.turnRepository = turnRepository;
+        this.eventRepository = eventRepository;
     }
 
     @Override
-    public List<ChatMessage> getMessages(Object memoryId) {
-        log.debug("Memory retrieval: 正在加载会话 {} 的历史记录", memoryId);
+    public List<dev.langchain4j.data.message.ChatMessage> getMessages(Object memoryId) {
         Long sessionId = parseId(memoryId);
-
-        // 分页获取最近的 20 条消息（增大窗口以容纳工具调用链）
-        org.springframework.data.domain.Pageable pageable =
-                org.springframework.data.domain.PageRequest.of(0, 20,
-                        org.springframework.data.domain.Sort.by("createdAt").descending());
-        List<com.lingshu.ai.infrastructure.entity.ChatMessage> dbMessages =
-                new ArrayList<>(messageRepository.findBySessionIdOrderByCreatedAtDesc(sessionId, pageable).getContent());
-
-        // 翻转回正序供 LangChain4j 使用
-        Collections.reverse(dbMessages);
-
-        List<ChatMessage> messages = dbMessages.stream()
-                .map(this::toLangChain4jMessage)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
+        List<dev.langchain4j.data.message.ChatMessage> messages = new ArrayList<>();
 
         SystemMessage systemMessage = sessionSystemMessages.get(sessionId);
         if (systemMessage != null) {
-            messages.add(0, systemMessage);
+            messages.add(systemMessage);
+        }
+
+        PageRequest pageable = PageRequest.of(0, 20, Sort.by("id").descending());
+        List<ChatTurn> turnsDesc = turnRepository.findBySessionIdOrderByIdDesc(sessionId, pageable);
+        if (turnsDesc == null || turnsDesc.isEmpty()) {
+            return messages;
+        }
+
+        List<ChatTurn> turns = new ArrayList<>(turnsDesc);
+        Collections.reverse(turns);
+
+        List<Long> turnIds = turns.stream().map(ChatTurn::getId).toList();
+        List<ChatTurnEvent> events = eventRepository.findByTurnIdInOrderByTurnIdAscSequenceNoAsc(turnIds);
+        Map<Long, List<ChatTurnEvent>> eventsByTurnId = events.stream()
+                .collect(Collectors.groupingBy(e -> e.getTurn().getId(), LinkedHashMap::new, Collectors.toList()));
+
+        for (ChatTurn turn : turns) {
+            UserMessage userMessage = toUserMessage(turn);
+            if (userMessage != null) {
+                messages.add(userMessage);
+            }
+
+            List<ChatTurnEvent> turnEvents = eventsByTurnId.getOrDefault(turn.getId(), List.of());
+            boolean hasAssistantTextEvent = false;
+
+            for (ChatTurnEvent event : turnEvents) {
+                String eventType = safe(event.getEventType());
+                if ("tool_start".equals(eventType)) {
+                    ToolExecutionRequest req = ToolExecutionRequest.builder()
+                            .id(safe(event.getToolCallId()))
+                            .name(safe(event.getToolName()))
+                            .arguments(safe(event.getArguments()))
+                            .build();
+                    messages.add(AiMessage.from(List.of(req)));
+                    continue;
+                }
+                if ("tool_end".equals(eventType)) {
+                    messages.add(ToolExecutionResultMessage.from(
+                            safe(event.getToolCallId()),
+                            safe(event.getToolName()),
+                            safe(event.getContent())
+                    ));
+                    continue;
+                }
+                if ("assistant_text".equals(eventType)) {
+                    String text = safe(event.getContent());
+                    if (!text.isBlank()) {
+                        messages.add(AiMessage.from(text));
+                        hasAssistantTextEvent = true;
+                    }
+                }
+            }
+
+            // Compatibility fallback for turns created before assistant_text event migration.
+            if (!hasAssistantTextEvent) {
+                String assistant = safe(turn.getAssistantMessage());
+                if (!assistant.isBlank()) {
+                    messages.add(AiMessage.from(assistant));
+                }
+            }
         }
 
         return messages;
     }
 
     @Override
-    public void updateMessages(Object memoryId, List<ChatMessage> messages) {
-        if (messages == null || messages.isEmpty()) return;
+    public void updateMessages(Object memoryId, List<dev.langchain4j.data.message.ChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return;
+        }
 
         Long sessionId = parseId(memoryId);
-
         Optional<SystemMessage> systemMessage = messages.stream()
                 .filter(SystemMessage.class::isInstance)
                 .map(SystemMessage.class::cast)
                 .reduce((first, second) -> second);
+
         if (systemMessage.isPresent()) {
             sessionSystemMessages.put(sessionId, systemMessage.get());
         } else {
             sessionSystemMessages.remove(sessionId);
         }
 
-        // 过滤掉 SystemMessage，因为 system prompt 由 ChatServiceImpl 每次动态注入，不应持久化
-        List<ChatMessage> persistableMessages = messages.stream()
-                .filter(m -> !(m instanceof SystemMessage))
-                .toList();
-        if (persistableMessages.isEmpty()) return;
-
-        log.debug("Memory update: 正在同步 {} 条消息到会话 {}", messages.size(), memoryId);
-        ChatSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
-
-        // 获取数据库中已有的最后一条消息
-        org.springframework.data.domain.Pageable pageable =
-                org.springframework.data.domain.PageRequest.of(0, 1,
-                        org.springframework.data.domain.Sort.by("id").descending());
-        List<com.lingshu.ai.infrastructure.entity.ChatMessage> lastInDbList =
-                messageRepository.findBySessionIdOrderByCreatedAtDesc(sessionId, pageable).getContent();
-
-        if (lastInDbList.isEmpty()) {
-            // 数据库为空，保存所有（已过滤 SystemMessage）
-            for (ChatMessage msg : persistableMessages) {
-                saveMessage(session, msg);
-            }
-            return;
-        }
-
-        com.lingshu.ai.infrastructure.entity.ChatMessage lastDbMsg = lastInDbList.get(0);
-
-        // 找到内存列表中哪些是新消息
-        int newMessagesStartIndex = -1;
-        for (int i = persistableMessages.size() - 1; i >= 0; i--) {
-            ChatMessage currentMemMsg = persistableMessages.get(i);
-            String currentRole = getRole(currentMemMsg);
-            String currentContent = getContentForComparison(currentMemMsg);
-            String dbContent = lastDbMsg.getContent() != null ? lastDbMsg.getContent() : "";
-
-            if (currentRole != null && currentRole.equals(lastDbMsg.getRole())
-                    && currentContent.equals(dbContent)) {
-                newMessagesStartIndex = i + 1;
-                break;
-            }
-        }
-
-        if (newMessagesStartIndex == -1) {
-            ChatMessage lastMemMsg = persistableMessages.get(persistableMessages.size() - 1);
-            String lastMemContent = getContentForComparison(lastMemMsg);
-            if (!Objects.equals(lastMemContent, lastDbMsg.getContent())) {
-                saveMessage(session, lastMemMsg);
-            }
-        } else {
-            for (int i = newMessagesStartIndex; i < persistableMessages.size(); i++) {
-                saveMessage(session, persistableMessages.get(i));
-            }
-        }
-    }
-
-    /**
-     * 获取用于对比的内容文本。
-     */
-    private String getContentForComparison(ChatMessage msg) {
-        if (msg instanceof UserMessage) {
-            UserMessage um = (UserMessage) msg;
-            if (um.hasSingleText()) {
-                return um.singleText();
-            } else {
-                StringBuilder sb = new StringBuilder();
-                for (dev.langchain4j.data.message.Content content : um.contents()) {
-                    if (content instanceof dev.langchain4j.data.message.TextContent) {
-                        sb.append(((dev.langchain4j.data.message.TextContent) content).text());
-                    } else if (content instanceof dev.langchain4j.data.message.ImageContent) {
-                        sb.append("[Image]");
-                    }
-                }
-                return sb.toString();
-            }
-        } else if (msg instanceof AiMessage aiMessage) {
-            String text = aiMessage.text();
-            return text != null ? text : "";
-        } else if (msg instanceof ToolExecutionResultMessage toolResult) {
-            String text = toolResult.text();
-            return text != null ? text : "";
-        }
-        return "";
+        // Persistence migrated to chat_turns/chat_turn_events by TurnTimelineService.
+        // Keep this method side-effect free for non-system messages to avoid duplicate writes.
     }
 
     @Override
     public void deleteMessages(Object memoryId) {
-        log.debug("Memory deletion: 正在清除会话 {} 的历史记录", memoryId);
         Long sessionId = parseId(memoryId);
         sessionSystemMessages.remove(sessionId);
     }
 
-    /**
-     * 保存消息到数据库。支持 UserMessage、AiMessage（含工具调用请求）、ToolExecutionResultMessage。
-     */
-    private void saveMessage(ChatSession session, ChatMessage msg) {
-        String role = getRole(msg);
-        if (role == null) return;
+    private UserMessage toUserMessage(ChatTurn turn) {
+        String text = safe(turn.getUserMessage());
+        List<String> images = parseImages(turn.getUserImagesJson());
 
-        com.lingshu.ai.infrastructure.entity.ChatMessage.ChatMessageBuilder builder =
-                com.lingshu.ai.infrastructure.entity.ChatMessage.builder()
-                        .session(session)
-                        .role(role)
-                        .createdAt(LocalDateTime.now());
+        if ((text == null || text.isBlank()) && images.isEmpty()) {
+            return null;
+        }
 
-        if (msg instanceof UserMessage userMsg) {
-            if (userMsg.hasSingleText()) {
-                builder.content(userMsg.singleText());
-            } else {
-                // 序列化多模态内容
-                try {
-                    List<java.util.Map<String, String>> contents = new ArrayList<>();
-                    for (dev.langchain4j.data.message.Content content : userMsg.contents()) {
-                        java.util.Map<String, String> map = new java.util.HashMap<>();
-                        if (content instanceof dev.langchain4j.data.message.TextContent tc) {
-                            map.put("type", "text");
-                            map.put("text", tc.text());
-                        } else if (content instanceof dev.langchain4j.data.message.ImageContent ic) {
-                            map.put("type", "image");
-                            if (ic.image().base64Data() != null) {
-                                map.put("base64", ic.image().base64Data());
-                                map.put("mimeType", ic.image().mimeType());
-                            } else if (ic.image().url() != null) {
-                                map.put("url", ic.image().url().toString());
-                            }
-                        }
-                        contents.add(map);
-                    }
-                    builder.content(objectMapper.writeValueAsString(contents));
-                } catch (Exception e) {
-                    log.error("序列化多模态 UserMessage 失败", e);
-                    builder.content("[Multi-modal Content]");
-                }
-            }
-        } else if (msg instanceof AiMessage aiMessage) {
-            // AiMessage 可能包含 text 和/或 toolExecutionRequests
-            builder.content(aiMessage.text() != null ? aiMessage.text() : "");
+        List<Content> contents = new ArrayList<>();
+        if (text != null && !text.isBlank()) {
+            contents.add(TextContent.from(text));
+        }
+        for (String image : images) {
+            addImageContent(contents, image);
+        }
 
-            if (aiMessage.hasToolExecutionRequests()) {
-                try {
-                    List<ToolCallData> toolCallDataList = aiMessage.toolExecutionRequests().stream()
-                            .map(req -> new ToolCallData(req.id(), req.name(), req.arguments()))
-                            .collect(Collectors.toList());
-                    builder.toolCalls(objectMapper.writeValueAsString(toolCallDataList));
-                    log.debug("保存 AiMessage 包含 {} 个工具调用请求", toolCallDataList.size());
-                } catch (JsonProcessingException e) {
-                    log.warn("序列化工具调用请求失败: {}", e.getMessage());
-                }
-            }
-        } else if (msg instanceof ToolExecutionResultMessage toolResult) {
-            builder.content(toolResult.text() != null ? toolResult.text() : "");
-            builder.toolCallId(toolResult.id());
-            builder.toolName(toolResult.toolName());
-            log.debug("保存 ToolExecutionResultMessage: toolName={}, id={}", toolResult.toolName(), toolResult.id());
-        } else {
+        if (contents.isEmpty()) {
+            return null;
+        }
+        return UserMessage.from(contents);
+    }
+
+    private void addImageContent(List<Content> contents, String image) {
+        if (image == null || image.isBlank()) {
             return;
         }
-
-        messageRepository.save(builder.build());
-    }
-
-    private String getRole(ChatMessage msg) {
-        if (msg instanceof SystemMessage) return "system";
-        if (msg instanceof UserMessage) return "user";
-        if (msg instanceof AiMessage) return "assistant";
-        if (msg instanceof ToolExecutionResultMessage) return "tool";
-        return null;
-    }
-
-    /**
-     * 从数据库记录还原为 LangChain4j ChatMessage。
-     * 支持还原带有 toolExecutionRequests 的 AiMessage 和 ToolExecutionResultMessage。
-     */
-    private ChatMessage toLangChain4jMessage(com.lingshu.ai.infrastructure.entity.ChatMessage dbMsg) {
-        String role = dbMsg.getRole();
-        String content = dbMsg.getContent() != null ? dbMsg.getContent() : "";
-
-        if ("user".equalsIgnoreCase(role)) {
-            if (content.trim().startsWith("[") && content.trim().endsWith("]")) {
-                try {
-                    List<Map<String, String>> parsedContents = objectMapper.readValue(content, new TypeReference<List<Map<String, String>>>() {});
-                    List<dev.langchain4j.data.message.Content> lcContents = new ArrayList<>();
-                    for (Map<String, String> map : parsedContents) {
-                        if ("text".equals(map.get("type"))) {
-                            lcContents.add(dev.langchain4j.data.message.TextContent.from(map.get("text")));
-                        } else if ("image".equals(map.get("type"))) {
-                            if (map.containsKey("base64")) {
-                                lcContents.add(dev.langchain4j.data.message.ImageContent.from(map.get("base64"), map.get("mimeType")));
-                            } else if (map.containsKey("url")) {
-                                lcContents.add(dev.langchain4j.data.message.ImageContent.from(map.get("url")));
-                            }
-                        }
-                    }
-                    if (!lcContents.isEmpty()) {
-                        return UserMessage.from(lcContents);
-                    }
-                } catch (Exception e) {
-                    log.warn("反序列化多模态 UserMessage 失败，回退为纯文本: {}", e.getMessage());
-                }
+        String trimmed = image.trim();
+        try {
+            if (trimmed.startsWith("data:") && trimmed.contains(",")) {
+                int sep = trimmed.indexOf(',');
+                String header = trimmed.substring(5, sep);
+                String mime = header.contains(";") ? header.substring(0, header.indexOf(';')) : "image/jpeg";
+                String base64 = trimmed.substring(sep + 1);
+                contents.add(ImageContent.from(base64, mime));
+                return;
             }
-            return UserMessage.from(content);
-        } else if ("assistant".equalsIgnoreCase(role)) {
-            // 检查是否包含工具调用请求
-            if (dbMsg.getToolCalls() != null && !dbMsg.getToolCalls().isBlank()) {
-                try {
-                    List<ToolCallData> toolCallDataList = objectMapper.readValue(
-                            dbMsg.getToolCalls(), new TypeReference<List<ToolCallData>>() {});
-                    List<ToolExecutionRequest> requests = toolCallDataList.stream()
-                            .map(data -> ToolExecutionRequest.builder()
-                                    .id(data.id())
-                                    .name(data.name())
-                                    .arguments(data.arguments())
-                                    .build())
-                            .collect(Collectors.toList());
-                    if (content.isBlank()) {
-                        return AiMessage.from(requests);
-                    } else {
-                        return AiMessage.from(content, requests);
-                    }
-                } catch (JsonProcessingException e) {
-                    log.warn("反序列化工具调用请求失败: {}", e.getMessage());
-                    return content.isBlank() ? null : AiMessage.from(content);
-                }
+            if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+                contents.add(ImageContent.from(trimmed));
+                return;
             }
-            return content.isBlank() ? null : AiMessage.from(content);
-        } else if ("tool".equalsIgnoreCase(role)) {
-            String toolCallId = dbMsg.getToolCallId() != null ? dbMsg.getToolCallId() : "";
-            String toolName = dbMsg.getToolName() != null ? dbMsg.getToolName() : "";
-            return ToolExecutionResultMessage.from(toolCallId, toolName, content);
+            // Treat as raw base64.
+            contents.add(ImageContent.from(trimmed, "image/jpeg"));
+        } catch (Exception e) {
+            log.debug("Skip invalid image payload in turn context: {}", e.getMessage());
         }
+    }
 
-        // 不再加载数据库中的 System 消息
-        return null;
+    private List<String> parseImages(String userImagesJson) {
+        if (userImagesJson == null || userImagesJson.isBlank()) {
+            return List.of();
+        }
+        try {
+            List<String> parsed = objectMapper.readValue(userImagesJson, new TypeReference<List<String>>() {
+            });
+            return parsed == null ? List.of() : parsed;
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     private Long parseId(Object memoryId) {
         if (memoryId instanceof Long) return (Long) memoryId;
         if (memoryId instanceof String) return Long.parseLong((String) memoryId);
-        return 1L; // Fallback
+        return 1L;
     }
 
-    /**
-     * 用于 JSON 序列化/反序列化工具调用请求的 record。
-     */
-    private record ToolCallData(String id, String name, String arguments) {}
+    private String safe(String value) {
+        return value == null ? "" : value;
+    }
 }
+

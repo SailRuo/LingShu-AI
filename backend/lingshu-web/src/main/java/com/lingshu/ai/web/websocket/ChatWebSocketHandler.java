@@ -157,16 +157,17 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                         @Override
                         public void onToolStart(String toolCallId, String toolName, String arguments) {
                             try {
-                                sendToolEvent(session, "toolCallStart", toolCallId, toolName, arguments, null, false);
+                                sendToolEvent(session, "toolCallStart", toolCallId, toolName, arguments, null, false, java.util.List.of());
                             } catch (IOException e) {
                                 log.error("发送工具开始事件失败: {}", e.getMessage());
                             }
                         }
 
                         @Override
-                        public void onToolEnd(String toolCallId, String toolName, String arguments, String result, boolean isError) {
+                        public void onToolEnd(String toolCallId, String toolName, String arguments, String result, boolean isError,
+                                              java.util.List<com.lingshu.ai.core.service.TurnTimelineService.ArtifactPayload> artifacts) {
                             try {
-                                sendToolEvent(session, "toolCallEnd", toolCallId, toolName, arguments, result, isError);
+                                sendToolEvent(session, "toolCallEnd", toolCallId, toolName, arguments, result, isError, artifacts);
                             } catch (IOException e) {
                                 log.error("发送工具完成事件失败: {}", e.getMessage());
                             }
@@ -328,7 +329,8 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                                String toolName,
                                String arguments,
                                String result,
-                               boolean isError) throws IOException {
+                               boolean isError,
+                               java.util.List<com.lingshu.ai.core.service.TurnTimelineService.ArtifactPayload> artifacts) throws IOException {
         Map<String, Object> payload = new HashMap<>();
         payload.put("type", type);
         payload.put("toolCallId", toolCallId != null ? toolCallId : "");
@@ -337,6 +339,9 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         payload.put("isError", isError);
         if (result != null) {
             payload.put("result", result);
+        }
+        if (artifacts != null && !artifacts.isEmpty()) {
+            payload.put("artifacts", artifacts);
         }
         sendMessage(session, payload);
     }

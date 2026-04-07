@@ -216,6 +216,7 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
         arguments: msg.arguments,
         result: msg.result,
         output: msg.result,
+        artifacts: msg.artifacts,
         status: msg.isError ? 'error' : 'success',
         isError: !!msg.isError
       })

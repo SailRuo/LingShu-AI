@@ -12,6 +12,12 @@ export interface ChatToolStep {
   isError?: boolean;
   status?: "running" | "success" | "error";
   timestamp?: number;
+  artifacts?: Array<{
+    artifactType: string;
+    mimeType?: string;
+    url?: string;
+    base64Data?: string;
+  }>;
 }
 
 export interface ChatTextSegment {

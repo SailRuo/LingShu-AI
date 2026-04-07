@@ -1,4 +1,4 @@
-import { ref } from "vue";
+﻿import { ref } from "vue";
 import { getFullUrl } from "@/utils/request";
 import type {
   ChatMessage,
@@ -7,130 +7,41 @@ import type {
   ChatToolStep,
 } from "@/types";
 
-interface HistoryToolStep {
-  id?: string;
-  name?: string;
-  toolName?: string;
-  toolCallId?: string;
-  arguments?: string;
-  command?: string;
-  input?: string;
-  result?: string;
-  output?: string;
-  isError?: boolean;
+interface TurnArtifact {
+  artifactType: string;
+  mimeType?: string;
+  url?: string;
+  base64Data?: string;
 }
 
-interface HistoryMessage {
-  id: number;
-  role: string;
-  content: string;
-  timestamp: string;
-  toolSteps?: HistoryToolStep[];
-  toolCalls?: string;
+interface TurnToolStep {
   toolCallId?: string;
   toolName?: string;
+  arguments?: string;
+  result?: string;
+  isError?: boolean;
+  artifacts?: TurnArtifact[];
+}
+
+interface TurnHistoryItem {
+  id: number;
+  timestamp: number;
+  status: string;
+  userMessage?: string;
+  userImages?: string[];
+  assistantMessage?: string;
+  errorMessage?: string;
+  toolSteps?: TurnToolStep[];
   segments?: Array<{
     type: string;
-    content?: string;
-    id?: string;
-    name?: string;
+    toolCallId?: string;
+    toolName?: string;
     arguments?: string;
     result?: string;
+    isError?: boolean;
+    content?: string;
+    artifacts?: TurnArtifact[];
   }>;
-}
-
-function toTimestamp(value?: string): number {
-  if (!value) {
-    return Date.now();
-  }
-
-  const timestamp = new Date(value).getTime();
-  return Number.isNaN(timestamp) ? Date.now() : timestamp;
-}
-
-function normalizeToolStep(step: HistoryToolStep): ChatToolStep {
-  const result = step.result ?? step.output;
-  const isError = step.isError ?? false;
-  return {
-    id: step.id ?? step.toolCallId,
-    toolCallId: step.toolCallId ?? step.id,
-    toolName: step.toolName ?? step.name ?? "",
-    arguments: step.arguments ?? step.command ?? step.input,
-    command: step.command,
-    input: step.input,
-    result,
-    output: step.output ?? step.result,
-    isError,
-    status: isError ? "error" : result ? "success" : "running",
-  };
-}
-
-function parseToolCalls(toolCalls?: string): ChatToolStep[] {
-  if (!toolCalls?.trim()) {
-    return [];
-  }
-
-  try {
-    const parsed = JSON.parse(toolCalls);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    return parsed.map((call) =>
-      normalizeToolStep({
-        id: typeof call?.id === "string" ? call.id : undefined,
-        name: typeof call?.name === "string" ? call.name : undefined,
-        arguments:
-          typeof call?.arguments === "string" ? call.arguments : undefined,
-      }),
-    );
-  } catch {
-    return [];
-  }
-}
-
-function attachToolResult(toolSteps: ChatToolStep[], message: HistoryMessage) {
-  const toolCallId = message.toolCallId ?? "";
-  const fallbackStep: ChatToolStep = {
-    id: toolCallId || undefined,
-    toolCallId: toolCallId || undefined,
-    toolName: message.toolName ?? "",
-    result: message.content ?? "",
-    output: message.content ?? "",
-    status: "success",
-  };
-
-  if (!toolSteps.length) {
-    toolSteps.push(fallbackStep);
-    return;
-  }
-
-  if (toolCallId) {
-    for (let i = toolSteps.length - 1; i >= 0; i--) {
-      const step = toolSteps[i];
-      if (step.id === toolCallId || step.toolCallId === toolCallId) {
-        toolSteps[i] = {
-          ...step,
-          result: message.content ?? "",
-          output: message.content ?? "",
-          toolName: step.toolName || message.toolName || "",
-          status: message.content ? "success" : (step.status ?? "running"),
-        };
-        return;
-      }
-    }
-  }
-
-  const lastIndex = toolSteps.length - 1;
-  toolSteps[lastIndex] = {
-    ...toolSteps[lastIndex],
-    result: message.content ?? "",
-    output: message.content ?? "",
-    toolName: toolSteps[lastIndex].toolName || message.toolName || "",
-    status: message.content
-      ? "success"
-      : (toolSteps[lastIndex].status ?? "running"),
-  };
 }
 
 function getToolStepKey(
@@ -171,20 +82,12 @@ function mergeToolStepLists(
       isError: step.isError ?? previous?.isError ?? false,
       status: step.status ?? previous?.status,
       timestamp: step.timestamp ?? previous?.timestamp,
+      artifacts: step.artifacts ?? previous?.artifacts,
     });
   });
 
   const result = Array.from(merged.values());
   return result.length ? result : undefined;
-}
-
-function buildToolStepsFromSegments(
-  segments?: ChatMessageSegment[],
-): ChatToolStep[] | undefined {
-  const toolSteps = segments?.filter(
-    (segment): segment is ChatToolSegment => segment.type === "tool",
-  );
-  return mergeToolStepLists(undefined, toolSteps);
 }
 
 function mergeSegments(
@@ -198,9 +101,7 @@ function mergeSegments(
     (segment, index) => {
       if (segment.type === "text") {
         const content = segment.content ?? "";
-        if (!content) {
-          return;
-        }
+        if (!content) return;
 
         const last = merged[merged.length - 1];
         if (last?.type === "text") {
@@ -271,6 +172,7 @@ function mergeSegments(
         isError: toolSegment.isError ?? previous.isError ?? false,
         status: toolSegment.status ?? previous.status,
         timestamp: toolSegment.timestamp ?? previous.timestamp,
+        artifacts: toolSegment.artifacts ?? previous.artifacts,
       };
     },
   );
@@ -278,276 +180,116 @@ function mergeSegments(
   return merged.length ? merged : undefined;
 }
 
-function aggregateHistoryMessages(
-  historyMessages: HistoryMessage[],
-): ChatMessage[] {
-  const chronological = [...historyMessages].reverse();
-  const aggregated: ChatMessage[] = [];
+function mapTurnsToMessages(turns: TurnHistoryItem[]): ChatMessage[] {
+  const chronologicalTurns = [...turns].reverse();
+  const mapped: ChatMessage[] = [];
 
-  let index = 0;
-  while (index < chronological.length) {
-    const current = chronological[index];
+  chronologicalTurns.forEach((turn) => {
+    mapped.push({
+      id: turn.id * 2,
+      role: "user",
+      content: turn.userMessage ?? "",
+      timestamp: turn.timestamp ?? Date.now(),
+      images: turn.userImages?.length ? turn.userImages : undefined,
+    });
 
-    if (current.role === "user") {
-      let content = current.content ?? "";
-      let images: string[] | undefined = undefined;
+    const toolSegments: ChatToolSegment[] = (turn.toolSteps ?? []).map((step) => ({
+      type: "tool",
+      id: step.toolCallId,
+      toolCallId: step.toolCallId,
+      toolName: step.toolName ?? "",
+      arguments: step.arguments,
+      result: step.result,
+      output: step.result,
+      isError: !!step.isError,
+      status: step.isError ? "error" : step.result ? "success" : "running",
+      timestamp: turn.timestamp,
+      artifacts: step.artifacts?.map((artifact) => ({
+        artifactType: artifact.artifactType,
+        mimeType: artifact.mimeType,
+        url: artifact.url,
+        base64Data: artifact.base64Data,
+      })),
+    }));
 
-      // 如果内容是 JSON 数组（多模态格式），进行解析
-      if (content.trim().startsWith("[")) {
-        try {
-          const parsed = JSON.parse(content);
-          if (
-            Array.isArray(parsed) &&
-            parsed.some((p: any) => p.type === "text" || p.type === "image")
-          ) {
-            let extractedContent = "";
-            let extractedImages: string[] = [];
-            for (const part of parsed) {
-              if (part.type === "text") {
-                extractedContent += part.text || part.content || "";
-              } else if (part.type === "image") {
-                if (part.base64) {
-                  extractedImages.push(
-                    `data:${part.mimeType || "image/jpeg"};base64,${part.base64}`,
-                  );
-                } else if (part.url) {
-                  extractedImages.push(part.url);
-                }
-              }
-            }
-            content = extractedContent;
-            if (extractedImages.length > 0) {
-              images = extractedImages;
-            }
-          }
-        } catch (e) {
-          // 如果解析失败，保持原样
+    const finalText =
+      turn.status === "failed"
+        ? `⚠️ ${turn.errorMessage || "请求失败"}`
+        : (turn.assistantMessage ?? "");
+
+    const orderedSegments: ChatMessageSegment[] = (turn.segments ?? [])
+      .map((segment) => {
+        if (segment.type === "text") {
+          return {
+            type: "text" as const,
+            content: segment.content ?? "",
+            timestamp: turn.timestamp,
+          };
         }
-      }
-
-      aggregated.push({
-        id: current.id,
-        role: "user",
-        content: content,
-        timestamp: toTimestamp(current.timestamp),
-        images: images,
-      });
-      index++;
-      continue;
-    }
-
-    if (current.role === "assistant") {
-      if (current.segments && current.segments.length > 0) {
-        const serverSegments: ChatMessageSegment[] = current.segments
-          .map((seg) => {
-            if (seg.type === "text" && seg.content) {
-              return {
-                type: "text" as const,
-                content: seg.content,
-                timestamp: toTimestamp(current.timestamp),
-              };
-            }
-            if (seg.type === "tool") {
-              return {
-                type: "tool" as const,
-                id: seg.id,
-                toolCallId: seg.id,
-                toolName: seg.name || "",
-                arguments: seg.arguments,
-                result: seg.result,
-                output: seg.result,
-                status: seg.result ? "success" : "running",
-                timestamp: toTimestamp(current.timestamp),
-              };
-            }
-            return null;
-          })
-          .filter((s): s is ChatMessageSegment => s !== null);
-
-        aggregated.push({
-          id: current.id,
-          role: "assistant",
-          content: serverSegments
-            .filter(
-              (
-                segment,
-              ): segment is Extract<ChatMessageSegment, { type: "text" }> =>
-                segment.type === "text",
-            )
-            .map((segment) => segment.content)
-            .join(""),
-          timestamp: toTimestamp(current.timestamp),
-          segments: serverSegments.length ? serverSegments : undefined,
-          toolSteps:
-            buildToolStepsFromSegments(serverSegments) ??
-            (current.toolSteps?.length
-              ? current.toolSteps.map(normalizeToolStep)
-              : undefined),
-          isToolStepsExpanded: false,
-        });
-        index++;
-        continue;
-      }
-
-      let segments: ChatMessageSegment[] = [];
-      let toolSteps: ChatToolStep[] = [];
-
-      while (index < chronological.length) {
-        const message = chronological[index];
-
-        if (message.role !== "assistant" && message.role !== "tool") {
-          break;
+        if (segment.type === "tool") {
+          return {
+            type: "tool" as const,
+            id: segment.toolCallId,
+            toolCallId: segment.toolCallId,
+            toolName: segment.toolName ?? "",
+            arguments: segment.arguments,
+            result: segment.result,
+            output: segment.result,
+            isError: !!segment.isError,
+            status: segment.isError ? "error" : segment.result ? "success" : "running",
+            timestamp: turn.timestamp,
+            artifacts: segment.artifacts?.map((artifact) => ({
+              artifactType: artifact.artifactType,
+              mimeType: artifact.mimeType,
+              url: artifact.url,
+              base64Data: artifact.base64Data,
+            })),
+          };
         }
+        return null;
+      })
+      .filter((segment): segment is ChatMessageSegment => segment !== null);
 
-        if (message.role === "assistant") {
-          const content = message.content?.trim();
-          if (content) {
-            segments =
-              mergeSegments(segments, [
+    const segments: ChatMessageSegment[] = orderedSegments.length
+      ? orderedSegments
+      : [
+          ...toolSegments,
+          ...(finalText
+            ? [
                 {
-                  type: "text",
-                  content: content,
-                  timestamp: toTimestamp(message.timestamp),
+                  type: "text" as const,
+                  content: finalText,
+                  timestamp: turn.timestamp,
                 },
-              ]) ?? [];
-          }
+              ]
+            : []),
+        ];
 
-          if (message.toolSteps?.length) {
-            const nextToolSteps = message.toolSteps.map(normalizeToolStep);
-            toolSteps = mergeToolStepLists(toolSteps, nextToolSteps) ?? [];
-            segments =
-              mergeSegments(
-                segments,
-                nextToolSteps.map((step) => ({
-                  ...step,
-                  type: "tool" as const,
-                })),
-              ) ?? [];
-          } else if (message.toolCalls) {
-            const nextToolSteps = parseToolCalls(message.toolCalls);
-            toolSteps = mergeToolStepLists(toolSteps, nextToolSteps) ?? [];
-            segments =
-              mergeSegments(
-                segments,
-                nextToolSteps.map((step) => ({
-                  ...step,
-                  type: "tool" as const,
-                })),
-              ) ?? [];
-          }
-
-          index++;
-          continue;
-        }
-
-        attachToolResult(toolSteps, message);
-        segments =
-          mergeSegments(
-            segments,
-            toolSteps.map((step) => ({ ...step, type: "tool" as const })),
-          ) ?? [];
-        index++;
-      }
-
-      aggregated.push({
-        id: current.id,
-        role: "assistant",
-        content: segments
-          .filter(
-            (
-              segment,
-            ): segment is Extract<ChatMessageSegment, { type: "text" }> =>
-              segment.type === "text",
-          )
-          .map((segment) => segment.content)
-          .join(""),
-        timestamp: toTimestamp(current.timestamp),
-        segments: segments.length ? segments : undefined,
-        toolSteps:
-          buildToolStepsFromSegments(segments) ??
-          (toolSteps.length ? toolSteps : undefined),
-        isToolStepsExpanded: false,
-      });
-      continue;
-    }
-
-    if (current.role === "tool") {
-      const toolSteps: ChatToolStep[] = [];
-
-      while (
-        index < chronological.length &&
-        chronological[index].role === "tool"
-      ) {
-        attachToolResult(toolSteps, chronological[index]);
-        index++;
-      }
-
-      const segments = mergeSegments(
-        undefined,
-        toolSteps.map((step) => ({ ...step, type: "tool" as const })),
-      );
-
-      aggregated.push({
-        id: current.id,
-        role: "assistant",
-        content: "",
-        timestamp: toTimestamp(current.timestamp),
-        segments,
-        toolSteps:
-          buildToolStepsFromSegments(segments) ??
-          (toolSteps.length ? toolSteps : undefined),
-        isToolStepsExpanded: false,
-      });
-      continue;
-    }
-
-    index++;
-  }
-
-  return aggregated;
-}
-
-function mergeToolSteps(
-  previousSteps?: ChatToolStep[],
-  nextSteps?: ChatToolStep[],
-): ChatToolStep[] | undefined {
-  return mergeToolStepLists(previousSteps, nextSteps);
-}
-
-function mergeMessageBatches(
-  olderMessages: ChatMessage[],
-  currentMessages: ChatMessage[],
-): ChatMessage[] {
-  if (!olderMessages.length) {
-    return currentMessages;
-  }
-
-  if (!currentMessages.length) {
-    return olderMessages;
-  }
-
-  const lastOlder = olderMessages[olderMessages.length - 1];
-  const firstCurrent = currentMessages[0];
-
-  if (lastOlder.role !== "assistant" || firstCurrent.role !== "assistant") {
-    return [...olderMessages, ...currentMessages];
-  }
-
-  return [
-    ...olderMessages.slice(0, -1),
-    {
-      id: firstCurrent.id ?? lastOlder.id,
+    mapped.push({
+      id: turn.id * 2 + 1,
       role: "assistant",
-      content: [lastOlder.content, firstCurrent.content]
-        .filter((part) => part?.trim())
-        .join("\n\n"),
-      timestamp: lastOlder.timestamp,
-      segments: mergeSegments(lastOlder.segments, firstCurrent.segments),
-      toolSteps: mergeToolSteps(lastOlder.toolSteps, firstCurrent.toolSteps),
+      content: finalText,
+      timestamp: (turn.timestamp ?? Date.now()) + 1,
+      segments: segments.length ? segments : undefined,
+      toolSteps: toolSegments.length
+        ? toolSegments.map((segment) => ({
+            id: segment.id,
+            toolCallId: segment.toolCallId,
+            toolName: segment.toolName,
+            arguments: segment.arguments,
+            result: segment.result,
+            output: segment.output,
+            isError: segment.isError,
+            status: segment.status,
+            timestamp: segment.timestamp,
+            artifacts: segment.artifacts,
+          }))
+        : undefined,
       isToolStepsExpanded: false,
-    },
-    ...currentMessages.slice(1),
-  ];
+    });
+  });
+
+  return mapped;
 }
 
 export function useChat() {
@@ -573,7 +315,7 @@ export function useChat() {
       segments: [],
       toolSteps: [],
       isToolStepsExpanded: true,
-      isLoading: true, // 标记为加载状态
+      isLoading: true,
     };
     messages.value.push(assistantMessage);
     return assistantMessage;
@@ -585,9 +327,7 @@ export function useChat() {
     messages.value[lastIndex] = updater({
       ...assistantMessage,
       segments: assistantMessage.segments ? [...assistantMessage.segments] : [],
-      toolSteps: assistantMessage.toolSteps
-        ? [...assistantMessage.toolSteps]
-        : [],
+      toolSteps: assistantMessage.toolSteps ? [...assistantMessage.toolSteps] : [],
     });
   }
 
@@ -647,8 +387,7 @@ export function useChat() {
       const targetId = toolStep.toolCallId ?? toolStep.id ?? "";
       const targetIndex = nextSteps.findIndex(
         (step) =>
-          (!!targetId &&
-            (step.toolCallId === targetId || step.id === targetId)) ||
+          (!!targetId && (step.toolCallId === targetId || step.id === targetId)) ||
           (!!toolStep.toolName &&
             !targetId &&
             step.toolName === toolStep.toolName &&
@@ -658,9 +397,7 @@ export function useChat() {
       const previous = targetIndex >= 0 ? nextSteps[targetIndex] : undefined;
       const merged: ChatToolStep = {
         id: (toolStep.id ?? previous?.id ?? targetId) || undefined,
-        toolCallId:
-          (toolStep.toolCallId ?? previous?.toolCallId ?? targetId) ||
-          undefined,
+        toolCallId: (toolStep.toolCallId ?? previous?.toolCallId ?? targetId) || undefined,
         toolName: toolStep.toolName ?? previous?.toolName ?? "",
         arguments: toolStep.arguments ?? previous?.arguments,
         command: toolStep.command ?? previous?.command,
@@ -668,6 +405,7 @@ export function useChat() {
         result: toolStep.result ?? previous?.result,
         output: toolStep.output ?? previous?.output,
         isError: toolStep.isError ?? previous?.isError ?? false,
+        artifacts: toolStep.artifacts ?? previous?.artifacts,
         status:
           toolStep.status ??
           (toolStep.isError
@@ -705,24 +443,19 @@ export function useChat() {
     updateLastAssistant((message) => {
       let normalizedError = (errorMessage ?? "").trim() || "发生错误";
 
-      // 尝试解析 JSON 格式的错误消息
       if (normalizedError.includes("{")) {
         try {
-          // 提取 JSON 部分
           const jsonMatch = normalizedError.match(/\{.*\}/);
           if (jsonMatch) {
             const errorObj = JSON.parse(jsonMatch[0]);
             const innerMessage = errorObj.error?.message || errorObj.message;
-            if (innerMessage) {
-              normalizedError = innerMessage;
-            }
+            if (innerMessage) normalizedError = innerMessage;
           }
-        } catch (e) {
-          // 解析失败则保持原样
+        } catch {
+          // no-op
         }
       }
 
-      // 针对特定错误的友好提示
       if (
         normalizedError.toLowerCase().includes("context size") ||
         normalizedError.toLowerCase().includes("context_length_exceeded") ||
@@ -734,10 +467,7 @@ export function useChat() {
       }
 
       const nextToolSteps = (message.toolSteps ?? []).map((step) => {
-        if (step.status !== "running") {
-          return step;
-        }
-
+        if (step.status !== "running") return step;
         return {
           ...step,
           isError: true,
@@ -748,10 +478,7 @@ export function useChat() {
       });
 
       const nextSegments = (message.segments ?? []).map((segment) => {
-        if (segment.type !== "tool" || segment.status !== "running") {
-          return segment;
-        }
-
+        if (segment.type !== "tool" || segment.status !== "running") return segment;
         return {
           ...segment,
           isError: true,
@@ -783,20 +510,16 @@ export function useChat() {
 
   async function syncLatestAssistantMessage() {
     try {
-      const res = await fetch(getFullUrl("/api/chat/history?size=6"));
-      if (!res.ok) {
-        throw new Error("History sync failed");
-      }
+      const res = await fetch(getFullUrl("/api/chat/turns?size=1"));
+      if (!res.ok) throw new Error("History sync failed");
 
-      const historyMessages: HistoryMessage[] = await res.json();
-      const formattedMessages = aggregateHistoryMessages(historyMessages);
-      const latestAssistant = [...formattedMessages]
-        .reverse()
-        .find((message) => message.role === "assistant");
+      const turns: TurnHistoryItem[] = await res.json();
+      const formattedMessages = mapTurnsToMessages(turns);
+      const latestAssistant = formattedMessages.find(
+        (message) => message.role === "assistant",
+      );
 
-      if (!latestAssistant) {
-        return null;
-      }
+      if (!latestAssistant) return null;
 
       const lastAssistantIndex = [...messages.value]
         .map((message, index) => ({ message, index }))
@@ -848,29 +571,28 @@ export function useChat() {
         params.append("beforeId", oldestMessageId.value.toString());
       }
 
-      const res = await fetch(getFullUrl(`/api/chat/history?${params}`));
+      const res = await fetch(getFullUrl(`/api/chat/turns?${params}`));
       if (!res.ok) throw new Error("History fetch failed");
 
-      const historyMessages: HistoryMessage[] = await res.json();
+      const turns: TurnHistoryItem[] = await res.json();
 
-      if (historyMessages.length === 0) {
+      if (turns.length === 0) {
         hasMoreHistory.value = false;
         return false;
       }
 
-      const formattedMessages = aggregateHistoryMessages(historyMessages);
+      const formattedMessages = mapTurnsToMessages(turns);
 
-      if (historyMessages.length < size) {
+      if (turns.length < size) {
         hasMoreHistory.value = false;
       }
 
-      const oldestMsg = historyMessages[historyMessages.length - 1];
-      if (oldestMsg) {
-        oldestMessageId.value = oldestMsg.id;
+      const oldestTurn = turns[turns.length - 1];
+      if (oldestTurn) {
+        oldestMessageId.value = oldestTurn.id;
       }
 
-      messages.value = mergeMessageBatches(formattedMessages, messages.value);
-
+      messages.value = [...formattedMessages, ...messages.value];
       return true;
     } catch (err) {
       console.error("Load history error:", err);
@@ -898,12 +620,12 @@ export function useChat() {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        let lines = buffer.split("\n");
+        const lines = buffer.split("\n");
         buffer = lines.pop() || "";
 
         for (const line of lines) {
           if (line.trim().startsWith("data:")) {
-            let content = line.replace(/^data:\s?/, "");
+            const content = line.replace(/^data:\s?/, "");
             welcomeGreeting.value += content;
           }
         }
@@ -968,10 +690,10 @@ export function useChat() {
 
         buffer += decoder.decode(value, { stream: true });
 
-        let lines = buffer.split("\n");
+        const lines = buffer.split("\n");
         buffer = lines.pop() || "";
 
-        for (let line of lines) {
+        for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed) continue;
 
@@ -982,10 +704,7 @@ export function useChat() {
               const content = line.slice(prefixLen).replace(/\r$/, "");
 
               const targetIdx = messages.value.length - 1;
-              if (
-                targetIdx >= 0 &&
-                messages.value[targetIdx].role === "assistant"
-              ) {
+              if (targetIdx >= 0 && messages.value[targetIdx].role === "assistant") {
                 messages.value[targetIdx] = {
                   ...messages.value[targetIdx],
                   content: messages.value[targetIdx].content + content,
@@ -1011,7 +730,7 @@ export function useChat() {
 
   async function clearHistory() {
     try {
-      const res = await fetch(getFullUrl("/api/chat/history"), {
+      const res = await fetch(getFullUrl("/api/chat/turns"), {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Clear history failed");

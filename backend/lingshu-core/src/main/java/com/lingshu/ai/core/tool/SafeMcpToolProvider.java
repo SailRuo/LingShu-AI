@@ -39,16 +39,19 @@ public class SafeMcpToolProvider implements ToolProvider {
     private final ToolResultSummarizer summarizer;
     private final Supplier<String> userIntentSupplier;
     private final ChatMemoryProvider chatMemoryProvider;
+    private final McpToolArtifactRegistry artifactRegistry;
 
     public SafeMcpToolProvider(
             List<RawMcpClient> mcpClients,
             ToolResultSummarizer summarizer,
             Supplier<String> userIntentSupplier,
-            ChatMemoryProvider chatMemoryProvider) {
+            ChatMemoryProvider chatMemoryProvider,
+            McpToolArtifactRegistry artifactRegistry) {
         this.mcpClients = mcpClients;
         this.summarizer = summarizer;
         this.userIntentSupplier = userIntentSupplier;
         this.chatMemoryProvider = chatMemoryProvider;
+        this.artifactRegistry = artifactRegistry;
     }
 
     @Override
@@ -102,6 +105,13 @@ public class SafeMcpToolProvider implements ToolProvider {
                 // 将图像直接注入到 ChatMemory 让 LLM 能够访问
                 if (!images.isEmpty() && chatMemoryProvider != null && memoryId != null) {
                     injectImagesToMemory(images, memoryId, toolSpec.name());
+                }
+
+                if (!images.isEmpty() && artifactRegistry != null) {
+                    List<McpToolArtifact> artifacts = images.stream()
+                            .map(img -> new McpToolArtifact("image", img.mimeType(), img.data(), null))
+                            .toList();
+                    artifactRegistry.put(toolExecutionRequest.id(), artifacts);
                 }
 
                 // 进行摘要处理并合并成提示返回给 LLM

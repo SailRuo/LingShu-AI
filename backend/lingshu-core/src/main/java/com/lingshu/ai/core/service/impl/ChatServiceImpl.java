@@ -3,13 +3,12 @@ package com.lingshu.ai.core.service.impl;
 import com.lingshu.ai.core.config.AiConfig;
 import com.lingshu.ai.core.service.*;
 import com.lingshu.ai.core.tool.LocalTools;
+import com.lingshu.ai.core.tool.McpToolArtifactRegistry;
 import com.lingshu.ai.core.tool.RawMcpClient;
 import com.lingshu.ai.core.tool.SafeMcpToolProvider;
 import com.lingshu.ai.core.dto.EmotionContextResult;
 import com.lingshu.ai.infrastructure.entity.AgentConfig;
-import com.lingshu.ai.infrastructure.entity.ChatMessage;
 import com.lingshu.ai.infrastructure.entity.ChatSession;
-import com.lingshu.ai.infrastructure.repository.ChatMessageRepository;
 import com.lingshu.ai.infrastructure.repository.ChatSessionRepository;
 import dev.langchain4j.data.message.Content;
 import dev.langchain4j.data.message.ImageContent;
@@ -50,7 +49,6 @@ public class ChatServiceImpl implements ChatService {
     private final MemoryService memoryService;
     private final AgentConfigService agentConfigService;
     private final ChatSessionRepository sessionRepository;
-    private final ChatMessageRepository messageRepository;
     private final StreamingChatModel streamingChatLanguageModel;
     private final RestTemplate restTemplate;
     private final SettingService settingService;
@@ -64,6 +62,8 @@ public class ChatServiceImpl implements ChatService {
     private final TurnPostProcessingServiceImpl turnPostProcessingService;
     private final ToolResultSummarizer toolResultSummarizer;
     private final EmotionPreAnalysisService emotionPreAnalysisService;
+    private final TurnTimelineService turnTimelineService;
+    private final McpToolArtifactRegistry mcpToolArtifactRegistry;
 
     @Value("${lingshu.ollama.base-url:http://localhost:11434}")
     private String baseUrl;
@@ -71,7 +71,6 @@ public class ChatServiceImpl implements ChatService {
     public ChatServiceImpl(MemoryService memoryService,
                            AgentConfigService agentConfigService,
                            ChatSessionRepository sessionRepository,
-                           ChatMessageRepository messageRepository,
                            StreamingChatModel streamingChatLanguageModel,
                            RestTemplate restTemplate,
                            SettingService settingService,
@@ -84,11 +83,12 @@ public class ChatServiceImpl implements ChatService {
                            List<ChatModelListener> listeners,
                            TurnPostProcessingServiceImpl turnPostProcessingService,
                            ToolResultSummarizer toolResultSummarizer,
-                           EmotionPreAnalysisService emotionPreAnalysisService) {
+                           EmotionPreAnalysisService emotionPreAnalysisService,
+                           TurnTimelineService turnTimelineService,
+                           McpToolArtifactRegistry mcpToolArtifactRegistry) {
         this.memoryService = memoryService;
         this.agentConfigService = agentConfigService;
         this.sessionRepository = sessionRepository;
-        this.messageRepository = messageRepository;
         this.streamingChatLanguageModel = streamingChatLanguageModel;
         this.restTemplate = restTemplate;
         this.settingService = settingService;
@@ -102,6 +102,8 @@ public class ChatServiceImpl implements ChatService {
         this.turnPostProcessingService = turnPostProcessingService;
         this.toolResultSummarizer = toolResultSummarizer;
         this.emotionPreAnalysisService = emotionPreAnalysisService;
+        this.turnTimelineService = turnTimelineService;
+        this.mcpToolArtifactRegistry = mcpToolArtifactRegistry;
     }
 
     private ChatSession getOrCreateSession() {
@@ -132,11 +134,11 @@ public class ChatServiceImpl implements ChatService {
                     preAnalyzedEmotion
             );
         } catch (Exception e) {
-            log.warn("提交回合后处理任务失败: {}", e.getMessage(), e);
+            log.warn("鎻愪氦鍥炲悎鍚庡鐞嗕换鍔″け璐? {}", e.getMessage(), e);
             try {
                 affinityService.recordInteraction(userId);
             } catch (Exception ex) {
-                log.warn("记录互动失败: {}", ex.getMessage(), ex);
+                log.warn("璁板綍浜掑姩澶辫触: {}", ex.getMessage(), ex);
             }
         }
     }
@@ -190,7 +192,7 @@ public class ChatServiceImpl implements ChatService {
         AgentConfig agent = getAgent(agentId);
         
         if (agent != null) {
-            log.info("处理聊天消息: agentId={}, 使用智能体: id={}, name={}, systemPrompt长度={}", 
+            log.info("处理聊天消息: agentId={}, 智能体 id={}, name={}, systemPrompt长度={}", 
                     agentId, agent.getId(), agent.getName(), 
                     agent.getSystemPrompt() != null ? agent.getSystemPrompt().length() : 0);
         } else {
@@ -203,6 +205,8 @@ public class ChatServiceImpl implements ChatService {
 
         Sinks.Many<String> sink = Sinks.many().unicast().onBackpressureBuffer();
         StringBuilder assistantResponseStore = new StringBuilder();
+        StringBuilder pendingAssistantText = new StringBuilder();
+        Long turnId = turnTimelineService.startTurn(session.getId(), safeMessage, images == null ? List.of() : images);
 
         com.lingshu.ai.core.dto.EmotionContextResult emotionResult = emotionPreAnalysisService.analyzeBeforeResponse(userId, safeMessage, session.getId());
         com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion = emotionResult != null ? emotionResult.toEmotionAnalysis() : null;
@@ -210,7 +214,7 @@ public class ChatServiceImpl implements ChatService {
         if (emotionResult != null) {
             emotionPrompt = emotionPreAnalysisService.getEmotionPromptInjection(userId);
             String abbreviated = emotionPrompt.length() > 100 ? emotionPrompt.substring(0, 100) + "..." : emotionPrompt;
-            systemLogService.info("情感前置分析完成，已注入情感状态到 Prompt: " + abbreviated, "EMOTION");
+            systemLogService.info("情感前置分析完成，已记录情感状态到 Prompt: " + abbreviated, "EMOTION");
         }
 
         String longTermContext = memoryService.retrieveContext(userId, safeMessage);
@@ -263,7 +267,7 @@ public class ChatServiceImpl implements ChatService {
                 boolean isGemini = model != null && model.toLowerCase().contains("gemini");
                 if (Boolean.TRUE.equals(enableThinking)) {
                     if (isGemini) {
-                        log.warn("检测到 Gemini 模型 [{}]，切换到普通模式（由于当前版本暂不支持推理模式下的工具调用）。", model);
+                        log.warn("检测到 Gemini 模型 [{}]，切换到普通模式（因为当前版本不支持流式输出中的工具调用）。", model);
                     } else {
                         openAiBuilder.returnThinking(true);
                         log.info("启用 Thinking/Reasoning 模式: [{}]", model);
@@ -290,7 +294,7 @@ public class ChatServiceImpl implements ChatService {
             }
         }
         
-        // 如果既没有文本也没有图片，添加一个默认文本避免报错
+        // 如果既没有文字也没有图片，添加一个默认文字避免报错
         if (contents.isEmpty()) {
             contents.add(TextContent.from(" "));
         }
@@ -299,7 +303,7 @@ public class ChatServiceImpl implements ChatService {
 
         if (images != null && !images.isEmpty()) {
             streamMultimodalRequest(streamingModelToUse, session.getId(), systemPrompt, userMessageObj,
-                    userId, safeMessage, assistantResponseStore, sink, preAnalyzedEmotion);
+                    userId, safeMessage, assistantResponseStore, sink, preAnalyzedEmotion, turnId);
             return sink.asFlux();
         }
 
@@ -318,8 +322,34 @@ public class ChatServiceImpl implements ChatService {
         if (!mcpClients.isEmpty()) {
             String userIntent = safeMessage;
             builder.toolProvider(new SafeMcpToolProvider(
-                    mcpClients, toolResultSummarizer, () -> userIntent, chatMemoryProvider));
+                    mcpClients, toolResultSummarizer, () -> userIntent, chatMemoryProvider, mcpToolArtifactRegistry));
         }
+
+        ToolEventListener timelineToolListener = new ToolEventListener() {
+            @Override
+            public void onToolStart(String toolCallId, String toolName, String arguments) {
+                turnTimelineService.recordToolStart(turnId, toolCallId, toolName, arguments);
+                if (toolEventListener != null) {
+                    toolEventListener.onToolStart(toolCallId, toolName, arguments);
+                }
+            }
+
+            @Override
+            public void onToolEnd(String toolCallId, String toolName, String arguments, String result, boolean isError) {
+                List<TurnTimelineService.ArtifactPayload> artifacts = mcpToolArtifactRegistry.pop(toolCallId).stream()
+                        .map(artifact -> new TurnTimelineService.ArtifactPayload(
+                                artifact.artifactType(),
+                                artifact.mimeType(),
+                                artifact.url(),
+                                artifact.base64Data()
+                        ))
+                        .toList();
+                turnTimelineService.recordToolEnd(turnId, toolCallId, toolName, arguments, result, isError, artifacts);
+                if (toolEventListener != null) {
+                    toolEventListener.onToolEnd(toolCallId, toolName, arguments, result, isError, artifacts);
+                }
+            }
+        };
 
         builder.build()
                 .chat(session.getId(), safeMessage.isBlank() ? " " : safeMessage, systemPrompt)
@@ -328,25 +358,21 @@ public class ChatServiceImpl implements ChatService {
                 sink.tryEmitNext("\u0001REASONING\u0001" + thinking.text() + "\u0001/REASONING\u0001");
             })
             .beforeToolExecution(beforeToolExecution -> {
-                if (toolEventListener == null) {
-                    return;
-                }
                 var request = beforeToolExecution.request();
-                toolEventListener.onToolStart(request.id(), request.name(), request.arguments());
+                flushPendingAssistantText(turnId, pendingAssistantText);
+                timelineToolListener.onToolStart(request.id(), request.name(), request.arguments());
             })
             .onPartialResponse(token -> {
                 if (assistantResponseStore.isEmpty()) {
                     systemLogService.info("流式输出已开启，接收首个 token...", "LLM");
                 }
                 assistantResponseStore.append(token);
+                pendingAssistantText.append(token);
                 sink.tryEmitNext(token);
             })
             .onToolExecuted(toolExecution -> {
-                if (toolEventListener == null) {
-                    return;
-                }
                 var request = toolExecution.request();
-                toolEventListener.onToolEnd(
+                timelineToolListener.onToolEnd(
                         request.id(),
                         request.name(),
                         request.arguments(),
@@ -357,20 +383,24 @@ public class ChatServiceImpl implements ChatService {
             .onCompleteResponse(response -> {
                 int tokenCount = assistantResponseStore.length() / 4;
                 systemLogService.llmEnd(tokenCount, "LLM");
-                systemLogService.success("对话完成，回复长度: " + assistantResponseStore.length() + " 字符", "CHAT");
+                systemLogService.success("对话完成，回复长度 " + assistantResponseStore.length() + " 字符", "CHAT");
+                flushPendingAssistantText(turnId, pendingAssistantText);
+        turnTimelineService.completeTurn(turnId, assistantResponseStore.toString());
                 sink.tryEmitComplete();
                 postProcessAfterResponse(userId, safeMessage, assistantResponseStore.toString(), preAnalyzedEmotion);
             })
             .onError(error -> {
                 log.error("流式对话发生错误: {}", error.getMessage(), error);
                 systemLogService.error("LLM 调用失败: " + error.getMessage(), "LLM");
+                flushPendingAssistantText(turnId, pendingAssistantText);
+                turnTimelineService.failTurn(turnId, error.getMessage());
 
                 String errorMsg = error.getMessage() != null ? error.getMessage() : "";
 
                 if (errorMsg.contains("context length") || errorMsg.contains("n_ctx") || errorMsg.contains("n_keep")) {
                     sink.tryEmitError(new RuntimeException("输入内容过长，超出模型上下文限制。请尝试：\n1. 减少图片数量或使用更小的图片\n2. 清除对话历史后重试\n3. 切换到支持更长上下文的模型"));
                 } else if (errorMsg.contains("image") || errorMsg.contains("vision") || errorMsg.contains("multimodal")) {
-                    sink.tryEmitError(new RuntimeException("当前模型不支持图像识别，请切换到支持视觉的模型（如 Qwen-VL 等）或移除图片后重试。"));
+                    sink.tryEmitError(new RuntimeException("当前模型不支持图像识别，请切换到支持视觉的模型（如Qwen-VL等）或移除图片后重试。"));
                 } else {
                     sink.tryEmitError(error);
                 }
@@ -388,7 +418,8 @@ public class ChatServiceImpl implements ChatService {
                                          String safeMessage,
                                          StringBuilder assistantResponseStore,
                                          Sinks.Many<String> sink,
-                                         com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion) {
+                                         com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion,
+                                         Long turnId) {
         ChatMemory chatMemory = chatMemoryProvider.get(sessionId);
         
         chatMemory.add(userMessage);
@@ -418,12 +449,12 @@ public class ChatServiceImpl implements ChatService {
                 if (response != null && response.aiMessage() != null) {
                     chatMemory.add(response.aiMessage());
                 }
-                completeStreamingResponse(userId, safeMessage, assistantResponseStore, sink, preAnalyzedEmotion);
+                completeStreamingResponse(userId, safeMessage, assistantResponseStore, sink, preAnalyzedEmotion, turnId);
             }
 
             @Override
             public void onError(Throwable error) {
-                handleStreamingError(error, sink);
+                handleStreamingError(error, sink, turnId);
             }
         });
     }
@@ -438,27 +469,39 @@ public class ChatServiceImpl implements ChatService {
         sink.tryEmitNext(token);
     }
 
+    private void flushPendingAssistantText(Long turnId, StringBuilder pendingAssistantText) {
+        if (pendingAssistantText == null || pendingAssistantText.isEmpty()) {
+            return;
+        }
+        turnTimelineService.recordAssistantText(turnId, pendingAssistantText.toString());
+        pendingAssistantText.setLength(0);
+    }
+
     private void completeStreamingResponse(String userId,
                                            String safeMessage,
                                            StringBuilder assistantResponseStore,
                                            Sinks.Many<String> sink,
-                                           com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion) {
+                                           com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion,
+                                           Long turnId) {
         int tokenCount = assistantResponseStore.length() / 4;
         systemLogService.llmEnd(tokenCount, "LLM");
-        systemLogService.success("对话完成，回复长度: " + assistantResponseStore.length() + " 字符", "CHAT");
+        systemLogService.success("对话完成，回复长度 " + assistantResponseStore.length() + " 字符", "CHAT");
+        turnTimelineService.recordAssistantText(turnId, assistantResponseStore.toString());
+        turnTimelineService.completeTurn(turnId, assistantResponseStore.toString());
         sink.tryEmitComplete();
         postProcessAfterResponse(userId, safeMessage, assistantResponseStore.toString(), preAnalyzedEmotion);
     }
 
-    private void handleStreamingError(Throwable error, Sinks.Many<String> sink) {
+    private void handleStreamingError(Throwable error, Sinks.Many<String> sink, Long turnId) {
         log.error("流式对话发生错误: {}", error.getMessage(), error);
         systemLogService.error("LLM 调用失败: " + error.getMessage(), "LLM");
+        turnTimelineService.failTurn(turnId, error.getMessage());
 
         String errorMsg = error.getMessage() != null ? error.getMessage() : "";
         if (errorMsg.contains("context length") || errorMsg.contains("n_ctx") || errorMsg.contains("n_keep")) {
             sink.tryEmitError(new RuntimeException("输入内容过长，超出模型上下文限制。请尝试：\n1. 减少图片数量或使用更小的图片\n2. 清除对话历史后重试\n3. 切换到支持更长上下文的模型"));
         } else if (errorMsg.contains("image") || errorMsg.contains("vision") || errorMsg.contains("multimodal")) {
-            sink.tryEmitError(new RuntimeException("当前模型不支持图像识别，请切换到支持视觉的模型（如 Qwen-VL 等）或移除图片后重试。"));
+            sink.tryEmitError(new RuntimeException("当前模型不支持图像识别，请切换到支持视觉的模型（如Qwen-VL等）或移除图片后重试。"));
         } else {
             sink.tryEmitError(error);
         }
@@ -489,7 +532,7 @@ public class ChatServiceImpl implements ChatService {
         systemLogService.info("生成欢迎消息...", "CHAT");
 
         AgentConfig defaultAgent = agentConfigService.getDefaultAgent().orElse(null);
-        String memoryContext = memoryService.retrieveContext(userId, "用户身份与基本事实");
+        String memoryContext = memoryService.retrieveContext(userId, "用户身份与基本信息");
         String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
         String systemPrompt = promptBuilderService.buildMergedSystemPrompt(defaultAgent, relationshipPrompt, memoryContext);
 
@@ -512,18 +555,13 @@ public class ChatServiceImpl implements ChatService {
                 })
                 .onCompleteResponse(response -> {
                     log.info("欢迎语生成完成，正在手动保存到数据库...");
-                    ChatMessage welcomeMsg =
-                            ChatMessage.builder()
-                                    .session(session)
-                                    .role("assistant")
-                                    .content(welcomeBuilder.toString())
-                                    .createdAt(LocalDateTime.now())
-                                    .build();
-                    messageRepository.save(welcomeMsg);
+                    Long turnId = turnTimelineService.startTurn(session.getId(), "", List.of());
+                    turnTimelineService.recordAssistantText(turnId, welcomeBuilder.toString());
+                    turnTimelineService.completeTurn(turnId, welcomeBuilder.toString());
                     sink.tryEmitComplete();
                 })
                 .onError(err -> {
-                    sink.tryEmitNext("欢迎回来。系统已就绪，随时准备与你共同探索。");
+                    sink.tryEmitNext("欢迎回来。系统已话化，随时准备与您共赴时光。");
                     sink.tryEmitComplete();
                 })
                 .start();
@@ -554,15 +592,13 @@ public class ChatServiceImpl implements ChatService {
 
                 String url = (base.contains("/v1") || base.endsWith("/v1")) ? base + "/models" : base + "/v1/models";
 
-                systemLogService.debug("请求OpenAI模型列表: " + url, "SYSTEM");
-
                 Object responseObj;
                 try {
                     responseObj = restTemplate.exchange(url, org.springframework.http.HttpMethod.GET, entity, Object.class).getBody();
                 } catch (Exception e) {
                     if (!base.contains("/v1")) {
                         String fallbackUrl = base + "/models";
-                        systemLogService.debug("重试备用端点: " + fallbackUrl, "SYSTEM");
+                        systemLogService.debug("重试备用 endpoints: " + fallbackUrl, "SYSTEM");
                         responseObj = restTemplate.exchange(fallbackUrl, org.springframework.http.HttpMethod.GET, entity, Object.class).getBody();
                     } else {
                         throw e;
@@ -574,14 +610,14 @@ public class ChatServiceImpl implements ChatService {
                         List<String> models = list.stream()
                                 .map(m -> (String) ((java.util.Map<?, ?>) m).get("id"))
                                 .collect(java.util.stream.Collectors.toList());
-                        //log.debug("获取到 " + models.size() + " 个OpenAI兼容模型");
+                        //log.debug("获取到" + models.size() + " 个OpenAI兼容模型");
                         return models;
                     }
                 } else if (responseObj instanceof java.util.List<?> list) {
                     List<String> models = list.stream()
                             .map(m -> (String) ((java.util.Map<?, ?>) m).get("id"))
                             .collect(java.util.stream.Collectors.toList());
-                    //log.debug("获取到 " + models.size() + " 个OpenAI兼容模型");
+                    //log.debug("获取到" + models.size() + " 个OpenAI兼容模型");
                     return models;
                 }
 
@@ -602,7 +638,7 @@ public class ChatServiceImpl implements ChatService {
                 List<String> modelNames = models.stream()
                         .map(m -> (String) m.get("name"))
                         .collect(java.util.stream.Collectors.toList());
-                systemLogService.info("获取到 " + modelNames.size() + " 个Ollama模型", "SYSTEM");
+                systemLogService.info("获取到" + modelNames.size() + " 个Ollama模型", "SYSTEM");
                 return modelNames;
             }
         } catch (Exception e) {
@@ -620,12 +656,12 @@ public class ChatServiceImpl implements ChatService {
         }
         
         // 1. 从数据库物理删除记录
-        messageRepository.deleteBySessionId(idToClear);
+        turnTimelineService.clearTurnHistory(idToClear);
         
-        // 2. 清除 LangChain4j 的 ChatMemory 缓存（这会触发 store.deleteMessages）
+        // 2. 清除 LangChain4j 的 ChatMemory 缓存（这会调用 store.deleteMessages）
         chatMemoryProvider.get(idToClear).clear();
         
-        systemLogService.info("已清空会话历史记录: sessionId=" + idToClear, "CHAT");
+        systemLogService.info("已清空会话卷记录 sessionId=" + idToClear, "CHAT");
     }
 
     private ToolErrorHandlerResult handleToolArgumentsError(Throwable error, ToolErrorContext errorContext) {

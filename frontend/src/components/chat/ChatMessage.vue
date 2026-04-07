@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import MarkdownIt from 'markdown-it'
 import { FileText, Brain, ChevronDown, ChevronRight, Volume2, VolumeX } from 'lucide-vue-next'
@@ -14,6 +14,7 @@ const props = defineProps<{
 const { isPlaying, currentPlayingId, speak } = useTts()
 
 const reasoningExpanded = ref(false)
+const expandedToolKeys = ref<Set<string>>(new Set())
 
 watch(
   () => {
@@ -59,6 +60,25 @@ function toggleReasoning() {
   reasoningExpanded.value = !reasoningExpanded.value
 }
 
+function toolStepKey(segment: ChatToolSegment, index: number): string {
+  return segment.toolCallId || segment.id || `${segment.toolName || 'tool'}-${index}`
+}
+
+function isToolExpanded(segment: ChatToolSegment, index: number): boolean {
+  return expandedToolKeys.value.has(toolStepKey(segment, index))
+}
+
+function toggleToolStep(segment: ChatToolSegment, index: number) {
+  const key = toolStepKey(segment, index)
+  const next = new Set(expandedToolKeys.value)
+  if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
+  }
+  expandedToolKeys.value = next
+}
+
 const md = new MarkdownIt({
   html: true,
   breaks: true,
@@ -76,9 +96,9 @@ function processContent(content: string): string {
 }
 
 function safeToolName(name?: string): string {
-  if (!name) return '工具调用'
-  if (name === 'executeCommand') return '命令执行'
-  if (name === 'readLocalFile') return '文件读取'
+  if (!name) return '宸ュ叿璋冪敤'
+  if (name === 'executeCommand') return '鍛戒护鎵ц'
+  if (name === 'readLocalFile') return '鏂囦欢璇诲彇'
   return name
 }
 
@@ -98,8 +118,27 @@ function formatToolArguments(raw?: string): string {
   }
 }
 
+function toolArgumentsPreview(raw?: string): string {
+  const text = formatToolArguments(raw).replace(/\s+/g, ' ').trim()
+  if (!text) return ''
+  return text.length > 72 ? `${text.slice(0, 72)}...` : text
+}
+
 function formatToolResult(raw?: string): string {
-  return raw?.trim() || ''
+  return raw?.trim() || ""
+}
+
+function toolArtifactImages(step: ChatToolSegment): string[] {
+  return (step.artifacts || [])
+    .filter((artifact) => artifact.artifactType === "image")
+    .map((artifact) => {
+      if (artifact.url) return artifact.url
+      if (artifact.base64Data) {
+        return `data:${artifact.mimeType || "image/png"};base64,${artifact.base64Data}`
+      }
+      return ""
+    })
+    .filter(Boolean)
 }
 
 function getToolStepStatus(step: ChatToolSegment): 'running' | 'success' | 'error' {
@@ -124,7 +163,7 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
     return props.message.segments
   }
 
-  // 如果是加载状态且没有内容，返回空数组
+  // 濡傛灉鏄姞杞界姸鎬佷笖娌℃湁鍐呭锛岃繑鍥炵┖鏁扮粍
   if (props.message.isLoading && !props.message.content) {
     return []
   }
@@ -139,11 +178,12 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
 
   return []
 })
+
 </script>
 
 <template>
   <div class="message-row" :class="[message.role, { 'is-loading': message.role === 'assistant' && message.isLoading && !message.content && !displaySegments.length }]">
-    <!-- AI 加载状态：只显示加载动画，不显示气泡框 -->
+    <!-- AI 鍔犺浇鐘舵€侊細鍙樉绀哄姞杞藉姩鐢伙紝涓嶆樉绀烘皵娉℃ -->
     <div v-if="message.role === 'assistant' && message.isLoading && !message.content && !displaySegments.length" class="assistant-loading-container">
       <div class="loading-stars">
         <span></span>
@@ -152,9 +192,9 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
       </div>
     </div>
 
-    <!-- 正常消息气泡框 -->
+    <!-- 姝ｅ父娑堟伅姘旀场妗?-->
     <div v-else class="message-bubble">
-      <!-- 渲染用户发送的图片 -->
+      <!-- 娓叉煋鐢ㄦ埛鍙戦€佺殑鍥剧墖 -->
       <div v-if="message.role === 'user' && message.images && message.images.length > 0" class="message-images">
         <img v-for="(img, index) in message.images" :key="index" :src="img" alt="User uploaded image" class="message-image" />
       </div>
@@ -179,25 +219,48 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
             <div v-show="reasoningExpanded" class="reasoning-content" v-html="renderContent(segment.content)"></div>
           </div>
 
-          <div v-else-if="segment.type === 'tool'" class="tool-step">
-            <div class="tool-step-header">
-              <div class="tool-step-title">
-                <FileText :size="14" />
-                <span>{{ index + 1 }}. {{ safeToolName(segment.toolName) }}</span>
+          <div
+            v-else-if="segment.type === 'tool'"
+            class="tool-step"
+            :class="{ expanded: isToolExpanded(segment, index), running: getToolStepStatus(segment) === 'running' }"
+          >
+            <div class="tool-step-header tool-step-toggle" @click="toggleToolStep(segment, index)">
+              <div class="tool-step-main">
+                <div class="tool-step-title">
+                  <FileText :size="14" />
+                  <span>{{ safeToolName(segment.toolName) }}</span>
+                </div>
+                <div v-if="!isToolExpanded(segment, index) && toolArgumentsPreview(segment.arguments)" class="tool-step-preview">
+                  {{ toolArgumentsPreview(segment.arguments) }}
+                </div>
               </div>
-              <span v-if="getToolStepStatus(segment) === 'error'" class="tool-step-status error">失败</span>
-              <span v-else-if="getToolStepStatus(segment) === 'running'" class="tool-step-status running">运行中</span>
-              <span v-else class="tool-step-status success">完成</span>
+              <div class="tool-step-header-right">
+                <span v-if="getToolStepStatus(segment) === 'error'" class="tool-step-status error">失败</span>
+                <span v-else-if="getToolStepStatus(segment) === 'running'" class="tool-step-status running">运行中</span>
+                <span v-else class="tool-step-status success">完成</span>
+                <ChevronDown v-if="isToolExpanded(segment, index)" :size="16" />
+                <ChevronRight v-else :size="16" />
+              </div>
             </div>
 
-            <div v-if="formatToolArguments(segment.arguments)" class="tool-block">
+            <div v-if="isToolExpanded(segment, index) && formatToolArguments(segment.arguments)" class="tool-block">
               <div class="tool-block-label">命令 / 参数</div>
               <pre class="tool-block-content"><code>{{ formatToolArguments(segment.arguments) }}</code></pre>
             </div>
 
-            <div v-if="formatToolResult(segment.result)" class="tool-block">
+            <div v-if="isToolExpanded(segment, index) && formatToolResult(segment.result)" class="tool-block">
               <div class="tool-block-label">结果</div>
               <pre class="tool-block-content" :class="{ error: segment.isError }"><code>{{ formatToolResult(segment.result) }}</code></pre>
+
+            <div v-if="isToolExpanded(segment, index) && toolArtifactImages(segment).length" class="tool-images">
+              <img
+                v-for="(img, imgIndex) in toolArtifactImages(segment)"
+                :key="`tool-image-${imgIndex}`"
+                :src="img"
+                alt="Tool artifact"
+                class="tool-image"
+              />
+            </div>
             </div>
           </div>
 
@@ -214,7 +277,6 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
 
     <div class="message-meta">
       <span class="meta-role">{{ message.role === 'assistant' ? '灵枢' : '你' }}</span>
-      <span class="meta-dot">·</span>
       <span class="meta-time">{{ timeLabel }}</span>
       <button
         v-if="message.role === 'assistant' && messageText && !message.isLoading"
@@ -246,12 +308,12 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
   align-items: flex-end;
 }
 
-/* 用户消息入场动画 */
+/* 鐢ㄦ埛娑堟伅鍏ュ満鍔ㄧ敾 */
 .message-row.user {
   animation: message-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* AI 消息入场动画（加载完成后） */
+/* AI 娑堟伅鍏ュ満鍔ㄧ敾锛堝姞杞藉畬鎴愬悗锛?*/
 .message-row.assistant:not(.is-loading) {
   animation: message-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -267,7 +329,7 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
   }
 }
 
-/* AI 加载容器 */
+/* AI 鍔犺浇瀹瑰櫒 */
 .assistant-loading-container {
   display: flex;
   align-items: center;
@@ -514,6 +576,19 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
   margin: 0;
 }
 
+.tool-step-toggle {
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.tool-step-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--color-text-dim);
+}
+
 .tool-steps-panel {
   margin-bottom: 14px;
   border-bottom: 1px solid var(--color-outline);
@@ -567,34 +642,70 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
 }
 
 .tool-step {
-  background: rgba(0, 0, 0, 0.03);
+  background: color-mix(in srgb, var(--color-surface) 65%, transparent);
   border: 1px solid var(--color-outline);
-  border-radius: 12px;
-  padding: 12px;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.tool-step.expanded {
+  padding: 10px 12px;
+}
+
+.tool-step.running {
+  border-color: color-mix(in srgb, var(--color-warning) 35%, var(--color-outline));
 }
 
 .tool-step-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
+  margin-bottom: 0;
+  border-radius: 8px;
+  padding: 2px 4px;
+}
+
+.tool-step.expanded .tool-step-header {
   margin-bottom: 10px;
+}
+
+.tool-step-header:hover {
+  background: color-mix(in srgb, var(--color-surface) 75%, transparent);
+}
+
+.tool-step-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
 .tool-step-title {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
+  gap: 7px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text);
 }
 
-.tool-step-status {
+.tool-step-preview {
   font-size: 11px;
-  padding: 2px 8px;
+  color: var(--color-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 440px;
+}
+
+.tool-step-status {
+  font-size: 10px;
+  padding: 1px 8px;
   border-radius: 999px;
   border: 1px solid transparent;
+  line-height: 1.7;
+  font-weight: 600;
 }
 
 .tool-step-status.success {
@@ -616,13 +727,13 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
 }
 
 .tool-block + .tool-block {
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .tool-block-label {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-dim);
-  margin-bottom: 6px;
+  margin-bottom: 5px;
 }
 
 .tool-block-content {
@@ -630,9 +741,9 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
   background: var(--color-surface);
   border: 1px solid var(--color-outline);
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   overflow-x: auto;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.5;
   font-family: 'Fira Code', monospace;
   white-space: pre-wrap;
@@ -706,7 +817,7 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
   100% { transform: scale(1); opacity: 0.7; }
 }
 
-/* AI 加载动画 */
+/* AI 鍔犺浇鍔ㄧ敾 */
 .loading-stars {
   display: flex;
   gap: 8px;
@@ -753,5 +864,23 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
     animation: none !important;
     box-shadow: none;
   }
+}
+</style>
+
+
+<style scoped>
+.tool-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.tool-image {
+  max-width: 320px;
+  max-height: 320px;
+  border-radius: 8px;
+  object-fit: contain;
+  border: 1px solid var(--color-outline);
 }
 </style>

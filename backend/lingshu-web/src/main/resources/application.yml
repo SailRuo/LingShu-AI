@@ -58,3 +58,5 @@ logging:
   level:
     com.lingshu.ai: DEBUG
     org.springframework.data.neo4j.cypher: ERROR
+  file:
+    encoding: UTF-8

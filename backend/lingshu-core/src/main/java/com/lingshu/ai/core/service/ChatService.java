@@ -11,6 +11,11 @@ public interface ChatService {
         }
 
         default void onToolEnd(String toolCallId, String toolName, String arguments, String result, boolean isError) {
+            onToolEnd(toolCallId, toolName, arguments, result, isError, List.of());
+        }
+
+        default void onToolEnd(String toolCallId, String toolName, String arguments, String result, boolean isError,
+                               List<TurnTimelineService.ArtifactPayload> artifacts) {
         }
     }
 
