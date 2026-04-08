@@ -2,6 +2,7 @@ package com.lingshu.ai.core.service.impl;
 
 import com.lingshu.ai.core.config.AiConfig;
 import com.lingshu.ai.core.service.*;
+import com.lingshu.ai.core.tool.CliSkillProvider;
 import com.lingshu.ai.core.tool.LocalTools;
 import com.lingshu.ai.core.tool.McpToolArtifactRegistry;
 import com.lingshu.ai.core.tool.RawMcpClient;
@@ -29,17 +30,25 @@ import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.tool.ToolErrorContext;
 import dev.langchain4j.service.tool.ToolErrorHandlerResult;
+import dev.langchain4j.service.tool.ToolProvider;
+import dev.langchain4j.service.tool.ToolProviderResult;
+import dev.langchain4j.skills.FileSystemSkill;
+import dev.langchain4j.skills.FileSystemSkillLoader;
+import dev.langchain4j.skills.Skills;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
 @Service
 public class ChatServiceImpl implements ChatService {
@@ -321,10 +330,70 @@ public class ChatServiceImpl implements ChatService {
         }
 
         List<RawMcpClient> mcpClients = mcpService.getActiveClients();
-        if (!mcpClients.isEmpty()) {
-            String userIntent = safeMessage;
-            builder.toolProvider(new SafeMcpToolProvider(
-                    mcpClients, toolResultSummarizer, () -> userIntent, chatMemoryProvider, mcpToolArtifactRegistry));
+        String userIntent = safeMessage;
+
+        // 加载 Skills
+        Path skillsPath = Paths.get(System.getProperty("user.dir"), ".lingshu", "skills");
+        List<FileSystemSkill> skillList = new ArrayList<>();
+        try {
+            if (java.nio.file.Files.exists(skillsPath)) {
+                skillList = FileSystemSkillLoader.loadSkills(skillsPath);
+            }
+        } catch (Exception e) {
+            log.error("加载 Skills 失败: {}", e.getMessage());
+        }
+
+        if (!mcpClients.isEmpty() || !skillList.isEmpty()) {
+            // 创建 MCP ToolProvider
+            ToolProvider mcpProvider = mcpClients.isEmpty() ? null : 
+                new SafeMcpToolProvider(mcpClients, toolResultSummarizer, () -> userIntent, chatMemoryProvider, mcpToolArtifactRegistry);
+
+            // 创建 Skills ToolProvider
+            ToolProvider skillsProvider = null;
+            if (!skillList.isEmpty()) {
+                // 直接使用 CliSkillProvider 作为 ToolProvider
+                // 由于 langchain4j 1.12.1 的 Skills API 可能不支持 toolProviders，我们直接组合
+                List<ToolProvider> skillProviders = skillList.stream()
+                        .map(fsSkill -> CliSkillProvider.fromSkill(fsSkill))
+                        .collect(Collectors.toList());
+                
+                // 创建一个组合的 Skills ToolProvider
+                final List<ToolProvider> finalSkillProviders = skillProviders;
+                skillsProvider = request -> {
+                    ToolProviderResult.Builder resultBuilder = ToolProviderResult.builder();
+                    for (ToolProvider provider : finalSkillProviders) {
+                        ToolProviderResult result = provider.provideTools(request);
+                        if (result != null && result.tools() != null) {
+                            resultBuilder.addAll(result.tools());
+                        }
+                    }
+                    return resultBuilder.build();
+                };
+            }
+
+            final ToolProvider finalMcpProvider = mcpProvider;
+            final ToolProvider finalSkillsProvider = skillsProvider;
+
+            // 组合 ToolProvider
+            builder.toolProvider(request -> {
+                ToolProviderResult.Builder resultBuilder = ToolProviderResult.builder();
+                
+                if (finalMcpProvider != null) {
+                    ToolProviderResult mcpResult = finalMcpProvider.provideTools(request);
+                    if (mcpResult != null && mcpResult.tools() != null) {
+                        resultBuilder.addAll(mcpResult.tools());
+                    }
+                }
+                
+                if (finalSkillsProvider != null) {
+                    ToolProviderResult skillsResult = finalSkillsProvider.provideTools(request);
+                    if (skillsResult != null && skillsResult.tools() != null) {
+                        resultBuilder.addAll(skillsResult.tools());
+                    }
+                }
+                
+                return resultBuilder.build();
+            });
         }
 
         ToolEventListener timelineToolListener = new ToolEventListener() {
