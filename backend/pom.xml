@@ -22,7 +22,7 @@
         <java.version>21</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <spring-boot.version>3.2.4</spring-boot.version>
-        <langchain4j.version>1.12.1</langchain4j.version>
+        <langchain4j.version>1.12.2</langchain4j.version>
         <lombok.version>1.18.34</lombok.version>
     </properties>
 
@@ -50,7 +50,7 @@
             <dependency>
                 <groupId>dev.langchain4j</groupId>
                 <artifactId>langchain4j-community-bom</artifactId>
-                <version>${langchain4j.version}-beta21</version>
+                <version>1.12.2-beta22</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
