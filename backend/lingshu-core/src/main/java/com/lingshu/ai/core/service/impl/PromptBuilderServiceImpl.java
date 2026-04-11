@@ -1,23 +1,16 @@
 package com.lingshu.ai.core.service.impl;
 
 import com.lingshu.ai.core.service.PromptBuilderService;
-import com.lingshu.ai.core.service.SettingService;
 import com.lingshu.ai.infrastructure.entity.AgentConfig;
-import com.lingshu.ai.infrastructure.entity.SystemSetting;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 @Service
 public class PromptBuilderServiceImpl implements PromptBuilderService {
 
-    private final SettingService settingService;
-
-    public PromptBuilderServiceImpl(SettingService settingService) {
-        this.settingService = settingService;
+    public PromptBuilderServiceImpl() {
     }
 
     @Override
@@ -37,56 +30,13 @@ public class PromptBuilderServiceImpl implements PromptBuilderService {
         appendSection(prompt, "自主决策机制", config.getDecisionMechanism());
         
         // 动态生成工具调用规则
-        String dynamicToolRules = buildDynamicToolRules();
-        if (StringUtils.hasText(dynamicToolRules)) {
-            appendSection(prompt, "工具调用规则", dynamicToolRules);
-        } else {
-            appendSection(prompt, "工具调用规则", config.getToolCallRules());
-        }
+        appendSection(prompt, "工具调用规则", config.getToolCallRules());
         
         appendSection(prompt, "情感陪伴策略", config.getEmotionalStrategy());
         appendSection(prompt, "主动问候机制", config.getGreetingTriggers());
         appendSection(prompt, "隐性规则", config.getHiddenRules());
 
         return prompt.toString();
-    }
-
-    @SuppressWarnings("unchecked")
-    private String buildDynamicToolRules() {
-        try {
-            SystemSetting localToolsSetting = settingService.getLocalToolsSetting();
-            if (localToolsSetting == null || localToolsSetting.getSettings() == null) {
-                return null;
-            }
-
-            List<Map<String, Object>> tools = (List<Map<String, Object>>) localToolsSetting.getSettings().get("tools");
-            if (tools == null || tools.isEmpty()) {
-                return null;
-            }
-
-            StringBuilder rules = new StringBuilder("工具是你感知与操作世界的\"延伸\"（Senses & Limbs）：\n");
-            boolean hasEnabledTools = false;
-
-            for (Map<String, Object> tool : tools) {
-                Boolean enabled = (Boolean) tool.get("enabled");
-                if (Boolean.TRUE.equals(enabled)) {
-                    hasEnabledTools = true;
-                    String name = (String) tool.get("name");
-                    String prompt = (String) tool.get("prompt");
-                    rules.append("- ").append(name).append("：").append(prompt).append("\n");
-                }
-            }
-
-            if (!hasEnabledTools) {
-                return null;
-            }
-
-            rules.append("- 交互规范：调用前需拟人化说明意图（如：\"等我检索一下我们的过往记录...\"）。");
-            rules.append("\n- Use only tool names explicitly listed above. Never invent tool names such as Memory.");
-            return rules.toString();
-        } catch (Exception e) {
-            return null;
-        }
     }
 
     @Override

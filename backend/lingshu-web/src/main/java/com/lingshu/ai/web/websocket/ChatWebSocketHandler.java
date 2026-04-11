@@ -5,6 +5,7 @@ import com.lingshu.ai.core.service.ChatService;
 import com.lingshu.ai.core.service.ProactiveService;
 import com.lingshu.ai.core.service.AffinityService;
 import com.lingshu.ai.core.service.AsrService;
+import com.lingshu.ai.core.util.SkillNameResolver;
 import com.lingshu.ai.infrastructure.entity.SystemSetting;
 import com.lingshu.ai.infrastructure.entity.UserState;
 import com.lingshu.ai.core.service.SettingService;
@@ -51,7 +52,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         String sessionId = session.getId();
         sessions.put(sessionId, session);
-        log.info("WebSocket 连接建立: {}", sessionId);
+        //log.info("WebSocket 连接建立: {}", sessionId);
         
         sendMessage(session, Map.of(
             "type", "connected",
@@ -91,7 +92,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         String sessionId = session.getId();
         sessions.remove(sessionId);
         sessionUserMap.remove(sessionId);
-        log.info("WebSocket 连接关闭: {}, 状态: {}", sessionId, status);
+        //log.info("WebSocket 连接关闭: {}, 状态: {}", sessionId, status);
     }
 
     @Override
@@ -157,7 +158,8 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                         @Override
                         public void onToolStart(String toolCallId, String toolName, String arguments) {
                             try {
-                                sendToolEvent(session, "toolCallStart", toolCallId, toolName, arguments, null, false, java.util.List.of());
+                                String skillName = SkillNameResolver.resolve(toolName, arguments, objectMapper);
+                                sendToolEvent(session, "toolCallStart", toolCallId, toolName, skillName, arguments, null, false, java.util.List.of());
                             } catch (IOException e) {
                                 log.error("发送工具开始事件失败: {}", e.getMessage());
                             }
@@ -167,7 +169,8 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                         public void onToolEnd(String toolCallId, String toolName, String arguments, String result, boolean isError,
                                               java.util.List<com.lingshu.ai.core.service.TurnTimelineService.ArtifactPayload> artifacts) {
                             try {
-                                sendToolEvent(session, "toolCallEnd", toolCallId, toolName, arguments, result, isError, artifacts);
+                                String skillName = SkillNameResolver.resolve(toolName, arguments, objectMapper);
+                                sendToolEvent(session, "toolCallEnd", toolCallId, toolName, skillName, arguments, result, isError, artifacts);
                             } catch (IOException e) {
                                 log.error("发送工具完成事件失败: {}", e.getMessage());
                             }
@@ -338,6 +341,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                                String type,
                                String toolCallId,
                                String toolName,
+                               String skillName,
                                String arguments,
                                String result,
                                boolean isError,
@@ -346,6 +350,9 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         payload.put("type", type);
         payload.put("toolCallId", toolCallId != null ? toolCallId : "");
         payload.put("toolName", toolName != null ? toolName : "");
+        if (skillName != null && !skillName.isBlank()) {
+            payload.put("skillName", skillName);
+        }
         payload.put("arguments", arguments != null ? arguments : "");
         payload.put("isError", isError);
         if (result != null) {

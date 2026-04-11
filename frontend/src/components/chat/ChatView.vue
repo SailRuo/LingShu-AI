@@ -199,6 +199,7 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
       upsertToolStep({
         toolCallId: msg.toolCallId,
         toolName: msg.toolName,
+        skillName: msg.skillName,
         arguments: msg.arguments,
         status: 'running',
         isError: false
@@ -213,6 +214,7 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
       upsertToolStep({
         toolCallId: msg.toolCallId,
         toolName: msg.toolName,
+        skillName: msg.skillName,
         arguments: msg.arguments,
         result: msg.result,
         output: msg.result,
@@ -232,7 +234,7 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
         scrollToBottom('smooth')
       }
       if (settings.value.ttsEnabled && lastMsg && lastMsg.content) {
-        ttsSpeak(lastMsg.content, lastMsg.id)
+        ttsSpeak(lastMsg.content, String(lastMsg.id ?? ""))
       }
       break
     case 'error':

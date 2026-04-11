@@ -11,8 +11,7 @@ import {
   AlertTriangle,
   XCircle,
   Server,
-  HardDrive,
-  Wifi
+  HardDrive
 } from 'lucide-vue-next'
 
 interface SystemStatus {

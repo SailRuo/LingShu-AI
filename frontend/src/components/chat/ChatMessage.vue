@@ -1,8 +1,8 @@
 ﻿<script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import MarkdownIt from 'markdown-it'
-import { FileText, Brain, ChevronDown, ChevronRight, Volume2, VolumeX } from 'lucide-vue-next'
-import type { ChatMessage, ChatMessageSegment, ChatToolSegment } from '@/types'
+import { FileText, Brain, ChevronDown, ChevronRight, Volume2, Sparkles } from 'lucide-vue-next'
+import type { ChatMessage, ChatMessageSegment, ChatReasoningSegment, ChatTextSegment, ChatToolSegment } from '@/types'
 import { useTts } from '@/composables/useTts'
 
 const props = defineProps<{
@@ -22,8 +22,8 @@ watch(
     const isLoading = props.message.isLoading
     if (!segments || segments.length === 0) return { hasReasoning: false, hasText: false, isLoading }
     
-    const hasReasoning = segments.some(s => s.type === 'reasoning' && s.content)
-    const hasText = segments.some(s => s.type === 'text' && s.content)
+    const hasReasoning = segments.some(isReasoningSegment)
+    const hasText = segments.some(isTextSegment)
     return { hasReasoning, hasText, isLoading }
   },
   ({ hasReasoning, hasText, isLoading }) => {
@@ -40,7 +40,7 @@ const messageText = computed(() => {
   if (props.message.role !== 'assistant') return ''
   if (Array.isArray(props.message.segments) && props.message.segments.length > 0) {
     return props.message.segments
-      .filter(s => s.type === 'text' && s.content)
+      .filter(isTextSegment)
       .map(s => s.content)
       .join('\n')
   }
@@ -48,16 +48,24 @@ const messageText = computed(() => {
 })
 
 const isThisMessagePlaying = computed(() => {
-  return isPlaying.value && currentPlayingId.value === props.message.id
+  return isPlaying.value && String(currentPlayingId.value ?? '') === String(props.message.id ?? '')
 })
 
 async function handleTtsClick() {
   if (!messageText.value) return
-  await speak(messageText.value, props.message.id)
+  await speak(messageText.value, String(props.message.id ?? ''))
 }
 
 function toggleReasoning() {
   reasoningExpanded.value = !reasoningExpanded.value
+}
+
+function isTextSegment(segment: ChatMessageSegment): segment is ChatTextSegment {
+  return segment.type === 'text' && 'content' in segment && Boolean(segment.content)
+}
+
+function isReasoningSegment(segment: ChatMessageSegment): segment is ChatReasoningSegment {
+  return segment.type === 'reasoning' && 'content' in segment && Boolean(segment.content)
 }
 
 function toolStepKey(segment: ChatToolSegment, index: number): string {
@@ -98,9 +106,76 @@ function processContent(content: string): string {
 function safeToolName(name?: string): string {
   if (!name) return '宸ュ叿璋冪敤'
   if (name === 'executeCommand') return '鍛戒护鎵ц'
+  if (name === 'execute_command') return '命令执行'
   if (name === 'readLocalFile') return '鏂囦欢璇诲彇'
+  if (name === 'read_file') return '文件读取'
+  if (name === 'activate_skill') return '激活技能'
+  if (name === 'read_skill_resource') return '读取技能资源'
+  if (name === 'write_file') return '文件写入'
   return name
 }
+
+function parseSkillName(raw?: string): string {
+  if (!raw) return ''
+  try {
+    const parsed = JSON.parse(raw)
+    if (typeof parsed === 'string') return parsed.trim()
+    if (parsed && typeof parsed === 'object') {
+      const candidate =
+        parsed.skill_name ??
+        parsed.skillName ??
+        parsed.skill ??
+        parsed.name ??
+        ''
+      return typeof candidate === 'string' ? candidate.trim() : ''
+    }
+    return ''
+  } catch {
+    return raw.trim()
+  }
+}
+
+const skillNames = computed(() => {
+  if (props.message.role !== 'assistant') return []
+
+  const steps = props.message.toolSteps ?? []
+  const segmentSteps = Array.isArray(props.message.segments)
+    ? props.message.segments.filter((segment) => segment.type === 'tool')
+    : []
+  const names: string[] = []
+  let activeSkill = ''
+
+  for (const step of [...steps, ...segmentSteps]) {
+    const toolName = step.toolName || ''
+    const parsedSkill =
+      step.skillName?.trim() ||
+      (toolName === 'activate_skill' || toolName === 'read_skill_resource'
+        ? parseSkillName(step.arguments)
+        : '')
+
+    if (toolName === 'activate_skill') {
+      activeSkill = parsedSkill || activeSkill
+      if (activeSkill && !names.includes(activeSkill)) {
+        names.push(activeSkill)
+      }
+      continue
+    }
+
+    if (toolName === 'read_skill_resource') {
+      const skill = parsedSkill || activeSkill
+      if (skill && !names.includes(skill)) {
+        names.push(skill)
+      }
+      continue
+    }
+
+    if (toolName.includes('skill') && parsedSkill && !names.includes(parsedSkill)) {
+      names.push(parsedSkill)
+    }
+  }
+
+  return names
+})
 
 function formatToolArguments(raw?: string): string {
   if (!raw) return ''
@@ -278,6 +353,16 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
     <div class="message-meta">
       <span class="meta-role">{{ message.role === 'assistant' ? '灵枢' : '你' }}</span>
       <span class="meta-time">{{ timeLabel }}</span>
+      <span
+        v-if="skillNames.length"
+        class="skill-pill"
+        :title="skillNames.join('，')"
+      >
+        <Sparkles :size="12" />
+        <span class="skill-pill-label">Skill</span>
+        <span class="skill-pill-name">{{ skillNames[0] }}</span>
+        <span v-if="skillNames.length > 1" class="skill-pill-more">+{{ skillNames.length - 1 }}</span>
+      </span>
       <button
         v-if="message.role === 'assistant' && messageText && !message.isLoading"
         class="tts-btn"
@@ -776,6 +861,36 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
 .meta-time {
   font-size: 12px;
   color: var(--color-text-dim);
+}
+
+.skill-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  background: rgba(59, 130, 246, 0.08);
+  color: var(--color-primary);
+  font-size: 11px;
+  line-height: 1;
+  max-width: 100%;
+}
+
+.skill-pill-label {
+  opacity: 0.7;
+}
+
+.skill-pill-name {
+  font-weight: 700;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-pill-more {
+  opacity: 0.75;
 }
 
 .tts-btn {

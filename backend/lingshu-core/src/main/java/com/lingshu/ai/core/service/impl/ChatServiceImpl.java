@@ -1,16 +1,18 @@
-package com.lingshu.ai.core.service.impl;
+﻿package com.lingshu.ai.core.service.impl;
 
 import com.lingshu.ai.core.config.AiConfig;
 import com.lingshu.ai.core.service.*;
-import com.lingshu.ai.core.tool.CliSkillProvider;
-import com.lingshu.ai.core.tool.LocalTools;
 import com.lingshu.ai.core.tool.McpToolArtifactRegistry;
 import com.lingshu.ai.core.tool.RawMcpClient;
 import com.lingshu.ai.core.tool.SafeMcpToolProvider;
+import com.lingshu.ai.core.tool.BuiltinWorkspaceToolProvider;
+import com.lingshu.ai.core.tool.SkillToolManifest;
 import com.lingshu.ai.core.dto.EmotionContextResult;
+import com.lingshu.ai.core.util.SkillNameResolver;
 import com.lingshu.ai.infrastructure.entity.AgentConfig;
 import com.lingshu.ai.infrastructure.entity.ChatSession;
 import com.lingshu.ai.infrastructure.repository.ChatSessionRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.message.Content;
 import dev.langchain4j.data.message.ImageContent;
 import dev.langchain4j.data.message.SystemMessage;
@@ -32,10 +34,8 @@ import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.tool.ToolErrorContext;
 import dev.langchain4j.service.tool.ToolErrorHandlerResult;
 import dev.langchain4j.service.tool.ToolProvider;
-import dev.langchain4j.service.tool.ToolProviderResult;
 import dev.langchain4j.skills.FileSystemSkill;
 import dev.langchain4j.skills.FileSystemSkillLoader;
-import dev.langchain4j.skills.Skill;
 import dev.langchain4j.skills.Skills;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -48,7 +48,9 @@ import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
@@ -67,7 +69,6 @@ public class ChatServiceImpl implements ChatService {
     private final AffinityService affinityService;
     private final PromptBuilderService promptBuilderService;
     private final ChatMemoryProvider chatMemoryProvider;
-    private final LocalTools localTools;
     private final McpService mcpService;
     private final List<ChatModelListener> listeners;
     private final TurnPostProcessingServiceImpl turnPostProcessingService;
@@ -75,6 +76,7 @@ public class ChatServiceImpl implements ChatService {
     private final EmotionPreAnalysisService emotionPreAnalysisService;
     private final TurnTimelineService turnTimelineService;
     private final McpToolArtifactRegistry mcpToolArtifactRegistry;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Value("${lingshu.ollama.base-url:http://localhost:11434}")
     private String baseUrl;
@@ -89,7 +91,6 @@ public class ChatServiceImpl implements ChatService {
                            AffinityService affinityService,
                            PromptBuilderService promptBuilderService,
                            ChatMemoryProvider chatMemoryProvider,
-                           LocalTools localTools,
                            McpService mcpService,
                            List<ChatModelListener> listeners,
                            TurnPostProcessingServiceImpl turnPostProcessingService,
@@ -107,7 +108,6 @@ public class ChatServiceImpl implements ChatService {
         this.affinityService = affinityService;
         this.promptBuilderService = promptBuilderService;
         this.chatMemoryProvider = chatMemoryProvider;
-        this.localTools = localTools;
         this.mcpService = mcpService;
         this.listeners = listeners;
         this.turnPostProcessingService = turnPostProcessingService;
@@ -147,11 +147,11 @@ public class ChatServiceImpl implements ChatService {
                     preAnalyzedEmotion
             );
         } catch (Exception e) {
-            log.warn("鎻愪氦鍥炲悎鍚庡鐞嗕换鍔″け璐? {}", e.getMessage(), e);
+            log.warn("鎻愪氦鍥炲悎鍚庡鐞嗕换鍔″け�? {}", e.getMessage(), e);
             try {
                 affinityService.recordInteraction(userId);
             } catch (Exception ex) {
-                log.warn("璁板綍浜掑姩澶辫触: {}", ex.getMessage(), ex);
+                log.warn("璁板綍浜掑姩澶辫�? {}", ex.getMessage(), ex);
             }
         }
     }
@@ -205,7 +205,7 @@ public class ChatServiceImpl implements ChatService {
         AgentConfig agent = getAgent(agentId);
 
         if (agent != null) {
-            log.info("处理聊天消息: 智能体 name={}, systemPrompt长度={}",
+            log.info("处理聊天消息: 智能�?name={}, systemPrompt长度={}",
                     agent.getName(),
                     agent.getSystemPrompt() != null ? agent.getSystemPrompt().length() : 0);
         } else {
@@ -239,7 +239,7 @@ public class ChatServiceImpl implements ChatService {
         }
 
         log.debug("Merged System Prompt generated for streamChat (first 100 chars): {}...", systemPrompt.substring(0, Math.min(100, systemPrompt.length())));
-        systemLogService.debug("已加载 Agent Prompt (长度: " + systemPrompt.length() + ")", "CHAT");
+        systemLogService.debug("已加�?Agent Prompt (长度: " + systemPrompt.length() + ")", "CHAT");
 
         com.lingshu.ai.infrastructure.entity.SystemSetting sysSetting = settingService.getSetting();
         String actualModel = sysSetting.getChatModel() != null ? sysSetting.getChatModel() : "default-model";
@@ -280,7 +280,7 @@ public class ChatServiceImpl implements ChatService {
                 boolean isGemini = model != null && model.toLowerCase().contains("gemini");
                 if (Boolean.TRUE.equals(enableThinking)) {
                     if (isGemini) {
-                        log.warn("检测到 Gemini 模型 [{}]，切换到普通模式（因为当前版本不支持流式输出中的工具调用）。", model);
+                        log.warn("检测到 Gemini 模型 [{}]，切换到普通模式（因为当前版本不支持流式输出中的工具调用）", model);
                     } else {
                         openAiBuilder.returnThinking(true);
                         log.info("启用 Thinking/Reasoning 模式: [{}]", model);
@@ -293,7 +293,7 @@ public class ChatServiceImpl implements ChatService {
 
         systemLogService.debug("准备发送流式对话请求，SystemPrompt 长度: " + systemPrompt.length(), "CHAT");
 
-        // 构建多模态 UserMessage
+        // 构建多模�?UserMessage
         List<Content> contents = new ArrayList<>();
         if (!safeMessage.isBlank()) {
             contents.add(TextContent.from(safeMessage));
@@ -307,7 +307,7 @@ public class ChatServiceImpl implements ChatService {
             }
         }
 
-        // 如果既没有文字也没有图片，添加一个默认文字避免报错
+        // 如果既没有文字也没有图片，添加一个默认文字避免报�?
         if (contents.isEmpty()) {
             contents.add(TextContent.from(" "));
         }
@@ -327,74 +327,50 @@ public class ChatServiceImpl implements ChatService {
                 .toolArgumentsErrorHandler(this::handleToolArgumentsError)
                 .maxSequentialToolsInvocations(30);
 
-        List<Object> enabledLocalTools = localTools.getEnabledTools(settingService.getLocalToolsSetting());
-        if (!enabledLocalTools.isEmpty()) {
-            builder.tools(enabledLocalTools.toArray());
-        }
-
         List<RawMcpClient> mcpClients = mcpService.getActiveClients();
         String userIntent = safeMessage;
 
         // 加载 Skills
         Path skillsPath = Paths.get(System.getProperty("user.dir"), ".lingshu", "skills");
-        List<Skill> skills = new ArrayList<>();
-        List<ToolProvider> skillToolProviders = new ArrayList<>();
+        Skills loadedSkills = null;
+        Set<String> requiredBuiltinTools = new LinkedHashSet<>();
         try {
             if (java.nio.file.Files.exists(skillsPath)) {
                 List<FileSystemSkill> fsSkills = FileSystemSkillLoader.loadSkills(skillsPath);
-                for (FileSystemSkill fsSkill : fsSkills) {
-                    // 1. 创建基础 Skill 对象 (1.12.2 接口支持的字段)
-                    skills.add(Skill.builder()
-                            .name(fsSkill.name())
-                            .description(fsSkill.description())
-                            .content(fsSkill.content())
-                            .build());
-                    
-                    // 2. 收集对应的 ToolProvider
-                    skillToolProviders.add(CliSkillProvider.fromSkill(fsSkill));
+                if (!fsSkills.isEmpty()) {
+                    loadedSkills = Skills.from(fsSkills);
+                    for (FileSystemSkill skill : fsSkills) {
+                        requiredBuiltinTools.addAll(SkillToolManifest.parseRequiredTools(skill.basePath()));
+                    }
                 }
             }
         } catch (Exception e) {
             log.error("加载 Skills 失败: {}", e.getMessage());
         }
 
-        if (!mcpClients.isEmpty() || !skills.isEmpty()) {
-            // 创建 MCP ToolProvider
-            ToolProvider mcpProvider = mcpClients.isEmpty() ? null : 
-                new SafeMcpToolProvider(mcpClients, toolResultSummarizer, () -> userIntent, chatMemoryProvider, mcpToolArtifactRegistry);
-
-            // 创建 Skills 提示词管理器 (1.12.2 特性)
-            // 注意：如果 1.12.2 的 Skills.toolProvider() 不包含我们自定义的工具，我们依然需要手动组合
-            final List<ToolProvider> finalSkillToolProviders = skillToolProviders;
-
-            // 组合 ToolProvider
-            builder.toolProvider(request -> {
-                ToolProviderResult.Builder resultBuilder = ToolProviderResult.builder();
-                
-                // 1. 加入 MCP 工具
-                if (mcpProvider != null) {
-                    ToolProviderResult mcpResult = mcpProvider.provideTools(request);
-                    if (mcpResult != null && mcpResult.tools() != null) {
-                        resultBuilder.addAll(mcpResult.tools());
-                    }
-                }
-                
-                // 2. 加入所有 Skill 对应的 CLI 工具
-                for (ToolProvider provider : finalSkillToolProviders) {
-                    ToolProviderResult result = provider.provideTools(request);
-                    if (result != null && result.tools() != null) {
-                        resultBuilder.addAll(result.tools());
-                    }
-                }
-                
-                return resultBuilder.build();
-            });
+        List<ToolProvider> toolProviders = new ArrayList<>();
+        if (!mcpClients.isEmpty()) {
+            toolProviders.add(new SafeMcpToolProvider(
+                    mcpClients, toolResultSummarizer, () -> userIntent, chatMemoryProvider, mcpToolArtifactRegistry));
         }
+        if (loadedSkills != null) {
+            toolProviders.add(loadedSkills.toolProvider());
+        }
+
+        Set<String> enabledBuiltinTools = new LinkedHashSet<>(requiredBuiltinTools);
+        enabledBuiltinTools.add("execute_command");
+        toolProviders.add(new BuiltinWorkspaceToolProvider(
+                Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize(),
+                enabledBuiltinTools));
+
+        // 官方推荐：把多个动�?ToolProvider 直接交给 AiServices 统一合并
+        builder.toolProviders(toolProviders);
 
         ToolEventListener timelineToolListener = new ToolEventListener() {
             @Override
             public void onToolStart(String toolCallId, String toolName, String arguments) {
-                turnTimelineService.recordToolStart(turnId, toolCallId, toolName, arguments);
+                String skillName = SkillNameResolver.resolve(toolName, arguments, objectMapper);
+                turnTimelineService.recordToolStart(turnId, toolCallId, toolName, skillName, arguments);
                 if (toolEventListener != null) {
                     toolEventListener.onToolStart(toolCallId, toolName, arguments);
                 }
@@ -402,6 +378,7 @@ public class ChatServiceImpl implements ChatService {
 
             @Override
             public void onToolEnd(String toolCallId, String toolName, String arguments, String result, boolean isError) {
+                String skillName = SkillNameResolver.resolve(toolName, arguments, objectMapper);
                 List<TurnTimelineService.ArtifactPayload> artifacts = mcpToolArtifactRegistry.pop(toolCallId).stream()
                         .map(artifact -> new TurnTimelineService.ArtifactPayload(
                                 artifact.artifactType(),
@@ -410,7 +387,7 @@ public class ChatServiceImpl implements ChatService {
                                 artifact.base64Data()
                         ))
                         .toList();
-                turnTimelineService.recordToolEnd(turnId, toolCallId, toolName, arguments, result, isError, artifacts);
+                turnTimelineService.recordToolEnd(turnId, toolCallId, toolName, skillName, arguments, result, isError, artifacts);
                 if (toolEventListener != null) {
                     toolEventListener.onToolEnd(toolCallId, toolName, arguments, result, isError, artifacts);
                 }
@@ -449,7 +426,7 @@ public class ChatServiceImpl implements ChatService {
                 .onCompleteResponse(response -> {
                     int tokenCount = assistantResponseStore.length() / 4;
                     systemLogService.llmEnd(tokenCount, "LLM");
-                    systemLogService.success("对话完成，回复长度 " + assistantResponseStore.length() + " 字符", "CHAT");
+                    systemLogService.success("对话完成，回复长�?" + assistantResponseStore.length() + " 字符", "CHAT");
                     flushPendingAssistantText(turnId, pendingAssistantText);
                     turnTimelineService.completeTurn(turnId, assistantResponseStore.toString());
                     sink.tryEmitComplete();
@@ -464,9 +441,9 @@ public class ChatServiceImpl implements ChatService {
                     String errorMsg = error.getMessage() != null ? error.getMessage() : "";
 
                     if (errorMsg.contains("context length") || errorMsg.contains("n_ctx") || errorMsg.contains("n_keep")) {
-                        sink.tryEmitError(new RuntimeException("输入内容过长，超出模型上下文限制。请尝试：\n1. 减少图片数量或使用更小的图片\n2. 清除对话历史后重试\n3. 切换到支持更长上下文的模型"));
+                        sink.tryEmitError(new RuntimeException("输入内容过长，超出模型上下文限制。请尝试：1. 减少图片数量或使用更小的图片 2. 清除对话历史后重试 3. 切换到支持更长上下文的模"));
                     } else if (errorMsg.contains("image") || errorMsg.contains("vision") || errorMsg.contains("multimodal")) {
-                        sink.tryEmitError(new RuntimeException("当前模型不支持图像识别，请切换到支持视觉的模型（如Qwen-VL等）或移除图片后重试。"));
+                        sink.tryEmitError(new RuntimeException("当前模型不支持图像识别，请切换到支持视觉的模型（如Qwen-VL等）或移除图片后重试"));
                     } else {
                         sink.tryEmitError(error);
                     }
@@ -551,7 +528,7 @@ public class ChatServiceImpl implements ChatService {
                                            Long turnId) {
         int tokenCount = assistantResponseStore.length() / 4;
         systemLogService.llmEnd(tokenCount, "LLM");
-        systemLogService.success("对话完成，回复长度 " + assistantResponseStore.length() + " 字符", "CHAT");
+        systemLogService.success("对话完成，回复长�?" + assistantResponseStore.length() + " 字符", "CHAT");
         turnTimelineService.recordAssistantText(turnId, assistantResponseStore.toString());
         turnTimelineService.completeTurn(turnId, assistantResponseStore.toString());
         sink.tryEmitComplete();
@@ -567,7 +544,7 @@ public class ChatServiceImpl implements ChatService {
         if (errorMsg.contains("context length") || errorMsg.contains("n_ctx") || errorMsg.contains("n_keep")) {
             sink.tryEmitError(new RuntimeException("输入内容过长，超出模型上下文限制。请尝试：\n1. 减少图片数量或使用更小的图片\n2. 清除对话历史后重试\n3. 切换到支持更长上下文的模型"));
         } else if (errorMsg.contains("image") || errorMsg.contains("vision") || errorMsg.contains("multimodal")) {
-            sink.tryEmitError(new RuntimeException("当前模型不支持图像识别，请切换到支持视觉的模型（如Qwen-VL等）或移除图片后重试。"));
+            sink.tryEmitError(new RuntimeException("当前模型不支持图像识别，请切换到支持视觉的模型（如Qwen-VL等）或移除图片后重试"));
         } else {
             sink.tryEmitError(error);
         }
@@ -676,14 +653,14 @@ public class ChatServiceImpl implements ChatService {
                         List<String> models = list.stream()
                                 .map(m -> (String) ((java.util.Map<?, ?>) m).get("id"))
                                 .collect(java.util.stream.Collectors.toList());
-                        //log.debug("获取到" + models.size() + " 个OpenAI兼容模型");
+                        //log.debug("获取�? + models.size() + " 个OpenAI兼容模型");
                         return models;
                     }
                 } else if (responseObj instanceof java.util.List<?> list) {
                     List<String> models = list.stream()
                             .map(m -> (String) ((java.util.Map<?, ?>) m).get("id"))
                             .collect(java.util.stream.Collectors.toList());
-                    //log.debug("获取到" + models.size() + " 个OpenAI兼容模型");
+                    //log.debug("获取�? + models.size() + " 个OpenAI兼容模型");
                     return models;
                 }
 
@@ -704,7 +681,7 @@ public class ChatServiceImpl implements ChatService {
                 List<String> modelNames = models.stream()
                         .map(m -> (String) m.get("name"))
                         .collect(java.util.stream.Collectors.toList());
-                systemLogService.info("获取到" + modelNames.size() + " 个Ollama模型", "SYSTEM");
+                systemLogService.info("获取" + modelNames.size() + " 个Ollama模型", "SYSTEM");
                 return modelNames;
             }
         } catch (Exception e) {
@@ -727,7 +704,7 @@ public class ChatServiceImpl implements ChatService {
         // 1. 从数据库物理删除记录
         turnTimelineService.clearTurnHistory(idToClear);
 
-        // 2. 清除 LangChain4j 的 ChatMemory 缓存（这会调用 store.deleteMessages）
+        // 2. 清除 LangChain4j �?ChatMemory 缓存（这会调�?store.deleteMessages�?
         chatMemoryProvider.get(idToClear).clear();
 
         systemLogService.info("已清空会话卷记录 sessionId=" + idToClear, "CHAT");
@@ -770,7 +747,7 @@ public class ChatServiceImpl implements ChatService {
         builder.append("Tool arguments are invalid JSON and could not be parsed.")
                 .append(" Retry the same tool call with valid JSON only. ");
 
-        if ("executeCommand".equals(toolName)) {
+        if ("executeCommand".equals(toolName) || "execute_command".equals(toolName)) {
             builder.append("\n\nCRITICAL: Your JSON has UNESCAPED DOUBLE QUOTES inside the command string!\n")
                     .append("WRONG: {\"command\": \"powershell -Command \"Get-Date\"\"}  <- inner quotes NOT escaped!\n")
                     .append("RIGHT: {\"command\": \"powershell -Command \\\"Get-Date\\\"\"}  <- inner quotes escaped as \\\"\n\n")
@@ -800,3 +777,4 @@ public class ChatServiceImpl implements ChatService {
         return normalized.length() > 240 ? normalized.substring(0, 240) + "..." : normalized;
     }
 }
+

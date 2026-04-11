@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, onMounted, watch, onUnmounted } from 'vue'
 import { getFullUrl } from '@/utils/request'
 import {
@@ -9,8 +9,8 @@ import {
 } from 'naive-ui'
 import {
   RefreshCw, Settings, Cpu, Globe, Activity, Zap, Plus,
-  Trash2, Edit, Star, Users, Bell, Send, Brain, Wrench, Palette, Mic,
-  Bot, Gem, Rocket, Sparkles, Volume2, MessageCircle
+  Trash2, Edit, Star, Users, Bell, Send, Brain, Palette, Mic,
+  Bot, Gem, Rocket, Sparkles, Volume2, MessageCircle, Info
 } from 'lucide-vue-next'
 import McpSettings from '@/components/McpSettings.vue'
 import ThemeModal from '@/components/common/ThemeModal.vue'
@@ -52,6 +52,27 @@ const memoryModelOptions = ref<{label: string, value: string}[]>([])
 const loadingChatModels = ref(false)
 const loadingEmbedModels = ref(false)
 const loadingMemoryModels = ref(false)
+
+interface SkillResource {
+  relativePath: string
+}
+
+interface SkillItem {
+  name: string
+  description: string
+  basePath: string
+  resourceCount: number
+  scriptCount?: number
+  resources: SkillResource[]
+  scripts?: SkillResource[]
+}
+
+const skills = ref<SkillItem[]>([])
+const skillsPath = ref('.lingshu/skills')
+const skillsError = ref('')
+const loadingSkills = ref(false)
+const showSkillsHelp = ref(false)
+const lastSkillsRefreshAt = ref('')
 
 interface Agent {
   id: number
@@ -132,16 +153,6 @@ const agentForm = ref({
   color: '#3b82f6',
   isActive: true
 })
-
-interface LocalTool {
-  name: string
-  displayName: string
-  enabled: boolean
-  prompt: string
-}
-
-const localTools = ref<LocalTool[]>([])
-const loadingLocalTools = ref(false)
 
 const asrSettings = ref({
   enabled: false,
@@ -257,12 +268,32 @@ async function removeWechatBotAccount(accountId: string) {
   }
 }
 
+async function fetchSkills() {
+  loadingSkills.value = true
+  skillsError.value = ''
+  try {
+    const res = await fetch(getFullUrl('/api/settings/skills'))
+    const data = await res.json()
+    skills.value = Array.isArray(data.skills) ? data.skills : []
+    skillsPath.value = data.path || '.lingshu/skills'
+    lastSkillsRefreshAt.value = new Date().toLocaleString()
+    if (data.error) {
+      skillsError.value = data.error
+    }
+  } catch (err) {
+    skills.value = []
+    skillsError.value = '获取 Skills 列表失败'
+  } finally {
+    loadingSkills.value = false
+  }
+}
+
 onMounted(() => {
   fetchSettings()
   fetchAgents()
-  fetchLocalTools()
   fetchAsrSettings()
   fetchWechatBotAccounts()
+  fetchSkills()
 })
 
 onUnmounted(() => {
@@ -483,53 +514,6 @@ async function fetchAgents() {
   }
 }
 
-async function fetchLocalTools() {
-  loadingLocalTools.value = true
-  try {
-    const res = await fetch(getFullUrl('/api/settings/local-tools'))
-    const data = await res.json()
-    if (data && data.tools) {
-      localTools.value = data.tools
-    }
-  } catch (err) {
-    console.error('Failed to fetch local tools', err)
-    message.error('获取本地工具配置失败')
-  } finally {
-    loadingLocalTools.value = false
-  }
-}
-
-async function saveLocalTools() {
-  try {
-    await fetch(getFullUrl('/api/settings/local-tools'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tools: localTools.value })
-    })
-    message.success('本地工具配置已保存')
-  } catch (err) {
-    message.error('保存本地工具配置失败')
-  }
-}
-
-async function toggleTool(tool: LocalTool, enabled: boolean) {
-  // 先更新状态，让 UI 立即响应
-  tool.enabled = enabled
-
-  try {
-    await fetch(getFullUrl('/api/settings/local-tools'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tools: localTools.value })
-    })
-    message.success(`${tool.displayName}已${enabled ? '启用' : '禁用'}`)
-  } catch (err) {
-    // 失败时回滚状态
-    tool.enabled = !enabled
-    message.error('保存工具配置失败')
-  }
-}
-
 async function fetchAsrSettings() {
   try {
     const res = await fetch(getFullUrl('/api/settings/asr'))
@@ -563,7 +547,6 @@ async function saveAsrSettings() {
 onMounted(() => {
   fetchSettings()
   fetchAgents()
-  fetchLocalTools()
   fetchAsrSettings()
 })
 
@@ -1184,45 +1167,87 @@ async function setDefaultAgent(id: number) {
         </div>
       </n-tab-pane>
 
-      <n-tab-pane name="local-tools" tab="本地工具">
+      <n-tab-pane name="skills" tab="Skills">
         <div class="tab-content">
           <section class="settings-section">
             <div class="section-header">
-              <n-icon :component="Wrench" />
-              <h2>本地工具管理</h2>
+              <n-icon :component="Sparkles" />
+              <h2>Skills 管理</h2>
+              <div class="section-actions">
+                <n-button quaternary circle size="small" @click="showSkillsHelp = true">
+                  <template #icon><n-icon :component="Info" /></template>
+                </n-button>
+                <n-button type="primary" secondary size="small" :loading="loadingSkills" @click="fetchSkills">
+                  <template #icon><n-icon :component="RefreshCw" /></template>
+                  刷新
+                </n-button>
+              </div>
             </div>
 
-            <div class="tools-grid">
-              <n-card v-for="tool in localTools" :key="tool.name" class="glass-card tool-card">
-                <div class="tool-header">
-                  <div class="tool-info">
-                    <div class="tool-name">{{ tool.displayName }}</div>
-                    <div class="tool-id">@{{ tool.name }}</div>
-                  </div>
-                  <n-switch
-                    :value="tool.enabled"
-                    @update:value="(val: boolean) => toggleTool(tool, val)"
-                  />
+            <n-card class="glass-card skills-card">
+              <div class="setting-item">
+                <div class="item-label">
+                  <span class="label-text">Skills 目录</span>
                 </div>
-                <div class="tool-prompt">
-                  <div class="item-label">工具提示词 (Prompt)</div>
-                  <n-input
-                    v-model:value="tool.prompt"
-                    type="textarea"
-                    :rows="4"
-                    placeholder="定义工具的调用规则和描述..."
-                    :disabled="!tool.enabled"
-                  />
-                </div>
-              </n-card>
-            </div>
+                <div class="item-hint">系统会从这个目录加载 Skills：<code>{{ skillsPath }}</code></div>
+                <div class="item-hint" v-if="lastSkillsRefreshAt">上次刷新：{{ lastSkillsRefreshAt }}</div>
+              </div>
 
-            <div class="save-section">
-              <n-button type="primary" size="large" @click="saveLocalTools" :loading="loadingLocalTools">
-                <template #icon><n-icon :component="Zap" /></template>
-                保存工具配置
-              </n-button>
-            </div>
+              <div v-if="skillsError" class="skills-error">{{ skillsError }}</div>
+
+              <div class="setting-item mt-4">
+                <div class="item-label">
+                  <span class="label-text">当前已加载</span>
+                  <n-tag size="small" round type="success">{{ skills.length }} 个</n-tag>
+                </div>
+                <div v-if="loadingSkills" class="skills-loading">正在重新扫描 `.lingshu/skills` ...</div>
+                <div v-else-if="skills.length === 0" class="empty-state compact">
+                  <p>暂无已加载的 Skills</p>
+                  <p class="hint">在 `.lingshu/skills` 下新增 `SKILL.md` 后，点击右上角刷新即可同步。</p>
+                </div>
+                <div v-else class="skills-grid">
+                  <n-card v-for="skill in skills" :key="`${skill.basePath}-${skill.name}`" class="skill-card" size="small">
+                    <div class="skill-card-header">
+                      <div class="skill-title-block">
+                        <div class="skill-name-row">
+                          <div class="skill-name" :title="skill.name">{{ skill.name }}</div>
+                          <n-tag size="small" round type="info" class="skill-count-tag">{{ skill.resourceCount }} resources</n-tag>
+                        </div>
+                        <div class="skill-base-path" :title="skill.basePath">
+                          <span class="skill-base-label">Path</span>
+                          <span class="skill-base-value">{{ skill.basePath }}</span>
+                        </div>
+                      </div>
+                      <n-tag size="small" round type="warning" class="skill-script-tag">{{ skill.scriptCount || 0 }} scripts</n-tag>
+                    </div>
+                    <div class="skill-desc" :title="skill.description || '暂无描述'">
+                      {{ skill.description || '暂无描述' }}
+                    </div>
+                    <div v-if="skill.resources?.length" class="skill-resources">
+                      <div class="skill-subtitle">Resources</div>
+                      <n-tag v-for="resource in skill.resources" :key="resource.relativePath" size="small" round>
+                        {{ resource.relativePath }}
+                      </n-tag>
+                    </div>
+                    <div v-if="skill.scripts?.length" class="skill-resources">
+                      <div class="skill-subtitle">Scripts</div>
+                      <n-tag v-for="script in skill.scripts" :key="script.relativePath" size="small" round type="success">
+                        {{ script.relativePath }}
+                      </n-tag>
+                    </div>
+                  </n-card>
+                </div>
+              </div>
+
+              <div class="setting-item mt-4">
+                <div class="item-label">
+                  <span class="label-text">说明</span>
+                </div>
+                <div class="item-hint">
+                  Skills 会在运行时按需加载；更详细的使用说明可以点右上角帮助图标查看。
+                </div>
+              </div>
+            </n-card>
           </section>
         </div>
       </n-tab-pane>
@@ -1505,6 +1530,25 @@ async function setDefaultAgent(id: number) {
           <n-button type="primary" @click="saveAgent">保存</n-button>
         </div>
       </template>
+    </n-modal>
+
+    <n-modal
+      v-model:show="showSkillsHelp"
+      preset="card"
+      title="Skills 使用说明"
+      class="skills-help-modal"
+      :style="{ width: '720px', maxWidth: '90vw' }"
+    >
+      <div class="skills-help-content">
+        <p>把 Skill 放到 <code>.lingshu/skills</code> 下，系统会在每次聊天前重新扫描并自动加载。</p>
+        <pre class="code-block">.lingshu/skills/
+  travel-planner/
+    SKILL.md
+    resources/
+  meeting-summarizer/
+    SKILL.md</pre>
+        <p>Skills 通过官方 <code>Skills.from(...).toolProvider()</code> 暴露 <code>activate_skill</code> 和 <code>read_skill_resource</code>。新增或修改文件后，点击刷新按钮即可让后台重新拉取列表。</p>
+      </div>
     </n-modal>
 
     <ThemeModal v-model:open="showThemeModal" />
@@ -2135,5 +2179,190 @@ async function setDefaultAgent(id: number) {
 
 .manual-link:hover {
   background: rgba(59, 130, 246, 0.2);
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.skills-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.skills-error {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(239, 68, 68, 0.08);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  font-size: 12px;
+}
+
+.skills-loading {
+  font-size: 13px;
+  color: var(--color-text-dim);
+  padding: 8px 0;
+}
+
+.empty-state.compact {
+  padding: 16px 0 4px;
+}
+
+.skills-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.skill-card {
+  position: relative;
+  border-radius: 18px !important;
+  border: 1px solid color-mix(in srgb, var(--color-outline) 72%, transparent) !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02)) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.skill-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  height: 1px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--color-primary) 45%, transparent), transparent);
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.skill-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--color-primary) 35%, var(--color-outline)) !important;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.14);
+}
+
+.skill-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.skill-title-block {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.skill-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.skill-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text);
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.skill-base-path {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--color-text-dim);
+  min-width: 0;
+  opacity: 0.86;
+}
+
+.skill-base-label {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.skill-base-value {
+  min-width: 0;
+  font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.skill-stats {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+
+.skill-count-tag,
+.skill-script-tag {
+  margin-top: 2px;
+}
+
+.skill-desc {
+  padding-top: 2px;
+  font-size: 13px;
+  color: var(--color-text-dim);
+  line-height: 1.65;
+  min-height: 44px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.skill-resources {
+  margin-top: 12px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.skill-subtitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-right: 2px;
+  flex: 0 0 100%;
+}
+
+.skills-help-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--color-text);
+}
+
+.skills-help-content p {
+  margin: 0;
+  line-height: 1.7;
+}
+
+.skills-help-content .code-block {
+  margin: 0;
 }
 </style>

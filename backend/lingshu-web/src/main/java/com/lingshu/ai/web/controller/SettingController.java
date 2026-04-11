@@ -3,14 +3,25 @@ package com.lingshu.ai.web.controller;
 import com.lingshu.ai.core.service.SettingService;
 import com.lingshu.ai.infrastructure.dto.SystemSettingDTO;
 import com.lingshu.ai.infrastructure.entity.SystemSetting;
+import dev.langchain4j.skills.FileSystemSkill;
+import dev.langchain4j.skills.FileSystemSkillLoader;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Comparator;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
 @RequestMapping("/api/settings")
 public class SettingController {
+
+    private static final Path SKILLS_DIR = Paths.get(System.getProperty("user.dir"), ".lingshu", "skills");
 
     private final SettingService settingService;
 
@@ -19,27 +30,30 @@ public class SettingController {
     }
 
     /**
-     * 获取本地工具配置
+     * 获取当前已加载的 Skills 列表
      */
-    @GetMapping("/local-tools")
-    public Map<String, Object> getLocalToolsSetting() {
-        SystemSetting setting = settingService.getLocalToolsSetting();
-        return setting.getSettings();
-    }
-
-    /**
-     * 保存本地工具配置
-     */
-    @PostMapping("/local-tools")
-    public Map<String, Object> saveLocalToolsSetting(@RequestBody Map<String, Object> settings) {
-        SystemSetting setting = new SystemSetting();
-        setting.setId("local_tools");
-        setting.setSettings(settings);
-        settingService.saveLocalToolsSetting(setting);
+    @GetMapping("/skills")
+    public Map<String, Object> getSkills() {
+        List<Map<String, Object>> skills = new ArrayList<>();
+        try {
+            if (Files.exists(SKILLS_DIR)) {
+                List<FileSystemSkill> loadedSkills = FileSystemSkillLoader.loadSkills(SKILLS_DIR);
+                for (FileSystemSkill skill : loadedSkills) {
+                    skills.add(toSkillSummary(skill));
+                }
+            }
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("skills", skills);
+            error.put("path", SKILLS_DIR.toString());
+            error.put("error", e.getMessage());
+            return error;
+        }
 
         Map<String, Object> response = new HashMap<>();
-        response.put("success", true);
-        response.put("message", "配置已保存");
+        response.put("skills", skills);
+        response.put("path", SKILLS_DIR.toString());
+        response.put("count", skills.size());
         return response;
     }
 
@@ -64,7 +78,6 @@ public class SettingController {
 
     /**
      * 获取当前系统配置信息（模型、API Key 等）。
-     * 为了保持向后兼容，将 JSON 配置扁平化返回
      */
     @GetMapping
     public Map<String, Object> getSetting() {
@@ -155,4 +168,53 @@ public class SettingController {
         setting.setTtsConfig(ttsConfig);
 
         settingService.saveSetting(setting);
-    }}
+    }
+
+    private Map<String, Object> toSkillSummary(FileSystemSkill skill) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("name", skill.name());
+        summary.put("description", skill.description());
+        summary.put("basePath", skill.basePath().toString());
+        summary.put("resourceCount", skill.resources() == null ? 0 : skill.resources().size());
+        summary.put("scriptCount", countScripts(skill.basePath()));
+        summary.put("resources", skill.resources() == null
+                ? List.of()
+                : skill.resources().stream()
+                .map(resource -> {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("relativePath", resource.relativePath());
+                    return item;
+                })
+                .toList());
+        summary.put("scripts", listScripts(skill.basePath()));
+        return summary;
+    }
+
+    private long countScripts(Path basePath) {
+        return listScripts(basePath).size();
+    }
+
+    private List<Map<String, Object>> listScripts(Path basePath) {
+        if (basePath == null) {
+            return List.of();
+        }
+        Path scriptsDir = basePath.resolve("scripts");
+        if (!Files.exists(scriptsDir)) {
+            return List.of();
+        }
+        try {
+            return Files.walk(scriptsDir)
+                    .filter(Files::isRegularFile)
+                    .sorted(Comparator.comparing(Path::toString))
+                    .map(path -> {
+                        Map<String, Object> item = new LinkedHashMap<>();
+                        item.put("relativePath", scriptsDir.relativize(path).toString().replace('\\', '/'));
+                        item.put("fileName", path.getFileName().toString());
+                        return item;
+                    })
+                    .toList();
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+}

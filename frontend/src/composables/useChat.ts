@@ -32,6 +32,7 @@ interface TurnArtifact {
 interface TurnToolStep {
   toolCallId?: string;
   toolName?: string;
+  skillName?: string;
   arguments?: string;
   result?: string;
   isError?: boolean;
@@ -51,6 +52,7 @@ interface TurnHistoryItem {
     type: string;
     toolCallId?: string;
     toolName?: string;
+    skillName?: string;
     arguments?: string;
     result?: string;
     isError?: boolean;
@@ -72,37 +74,6 @@ function getToolStepKey(
     ].join("::") ||
     `tool-step-${fallbackIndex}`
   );
-}
-
-function mergeToolStepLists(
-  previousSteps?: ChatToolStep[],
-  nextSteps?: ChatToolStep[],
-): ChatToolStep[] | undefined {
-  const merged = new Map<string, ChatToolStep>();
-
-  [...(previousSteps ?? []), ...(nextSteps ?? [])].forEach((step, index) => {
-    const key = getToolStepKey(step, index);
-    const previous = merged.get(key);
-    merged.set(key, {
-      ...previous,
-      ...step,
-      id: step.id ?? previous?.id,
-      toolCallId: step.toolCallId ?? previous?.toolCallId,
-      toolName: step.toolName ?? previous?.toolName ?? "",
-      arguments: step.arguments ?? previous?.arguments,
-      command: step.command ?? previous?.command,
-      input: step.input ?? previous?.input,
-      result: step.result ?? previous?.result,
-      output: step.output ?? previous?.output,
-      isError: step.isError ?? previous?.isError ?? false,
-      status: step.status ?? previous?.status,
-      timestamp: step.timestamp ?? previous?.timestamp,
-      artifacts: step.artifacts ?? previous?.artifacts,
-    });
-  });
-
-  const result = Array.from(merged.values());
-  return result.length ? result : undefined;
 }
 
 function mergeSegments(
@@ -179,6 +150,7 @@ function mergeSegments(
         id: toolSegment.id ?? previous.id,
         toolCallId: toolSegment.toolCallId ?? previous.toolCallId,
         toolName: toolSegment.toolName ?? previous.toolName,
+        skillName: toolSegment.skillName ?? previous.skillName,
         arguments: toolSegment.arguments ?? previous.arguments,
         command: toolSegment.command ?? previous.command,
         input: toolSegment.input ?? previous.input,
@@ -213,6 +185,7 @@ function mapTurnsToMessages(turns: TurnHistoryItem[]): ChatMessage[] {
       id: step.toolCallId,
       toolCallId: step.toolCallId,
       toolName: step.toolName ?? "",
+      skillName: step.skillName,
       arguments: step.arguments,
       result: step.result,
       output: step.result,
@@ -232,38 +205,38 @@ function mapTurnsToMessages(turns: TurnHistoryItem[]): ChatMessage[] {
         ? `⚠️ ${turn.errorMessage || "请求失败"}`
         : (turn.assistantMessage ?? "");
 
-    const orderedSegments: ChatMessageSegment[] = (turn.segments ?? [])
-      .map((segment) => {
-        if (segment.type === "text") {
-          return {
-            type: "text" as const,
-            content: segment.content ?? "",
-            timestamp: turn.timestamp,
-          };
-        }
-        if (segment.type === "tool") {
-          return {
-            type: "tool" as const,
-            id: segment.toolCallId,
-            toolCallId: segment.toolCallId,
-            toolName: segment.toolName ?? "",
-            arguments: segment.arguments,
-            result: segment.result,
-            output: segment.result,
-            isError: !!segment.isError,
-            status: segment.isError ? "error" : segment.result ? "success" : "running",
-            timestamp: turn.timestamp,
-            artifacts: segment.artifacts?.map((artifact) => ({
-              artifactType: artifact.artifactType,
-              mimeType: artifact.mimeType,
-              url: artifact.url,
-              base64Data: artifact.base64Data,
-            })),
-          };
-        }
-        return null;
-      })
-      .filter((segment): segment is ChatMessageSegment => segment !== null);
+    const orderedSegments: ChatMessageSegment[] = [];
+    (turn.segments ?? []).forEach((segment) => {
+      if (segment.type === "text") {
+        orderedSegments.push({
+          type: "text" as const,
+          content: segment.content ?? "",
+          timestamp: turn.timestamp,
+        });
+        return;
+      }
+      if (segment.type === "tool") {
+        orderedSegments.push({
+          type: "tool" as const,
+          id: segment.toolCallId,
+          toolCallId: segment.toolCallId,
+          toolName: segment.toolName ?? "",
+          skillName: segment.skillName,
+          arguments: segment.arguments,
+          result: segment.result,
+          output: segment.result,
+          isError: !!segment.isError,
+          status: segment.isError ? "error" : segment.result ? "success" : "running",
+          timestamp: turn.timestamp,
+          artifacts: segment.artifacts?.map((artifact) => ({
+            artifactType: artifact.artifactType,
+            mimeType: artifact.mimeType,
+            url: artifact.url,
+            base64Data: artifact.base64Data,
+          })),
+        });
+      }
+    });
 
     const segments: ChatMessageSegment[] = orderedSegments.length
       ? orderedSegments
@@ -291,6 +264,7 @@ function mapTurnsToMessages(turns: TurnHistoryItem[]): ChatMessage[] {
             id: segment.id,
             toolCallId: segment.toolCallId,
             toolName: segment.toolName,
+            skillName: segment.skillName,
             arguments: segment.arguments,
             result: segment.result,
             output: segment.output,
@@ -415,6 +389,7 @@ export function useChat() {
         id: (toolStep.id ?? previous?.id ?? targetId) || undefined,
         toolCallId: (toolStep.toolCallId ?? previous?.toolCallId ?? targetId) || undefined,
         toolName: toolStep.toolName ?? previous?.toolName ?? "",
+        skillName: toolStep.skillName ?? previous?.skillName,
         arguments: toolStep.arguments ?? previous?.arguments,
         command: toolStep.command ?? previous?.command,
         input: toolStep.input ?? previous?.input,

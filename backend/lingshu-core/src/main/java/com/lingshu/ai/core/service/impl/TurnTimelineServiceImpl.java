@@ -62,16 +62,16 @@ public class TurnTimelineServiceImpl implements TurnTimelineService {
     }
 
     @Override
-    public void recordToolStart(Long turnId, String toolCallId, String toolName, String arguments) {
+    public void recordToolStart(Long turnId, String toolCallId, String toolName, String skillName, String arguments) {
         ChatTurn turn = findTurn(turnId);
-        saveEvent(turn, "tool_start", toolCallId, toolName, arguments, null, false);
+        saveEvent(turn, "tool_start", toolCallId, toolName, skillName, arguments, null, false);
     }
 
     @Override
-    public void recordToolEnd(Long turnId, String toolCallId, String toolName, String arguments, String result, boolean isError,
+    public void recordToolEnd(Long turnId, String toolCallId, String toolName, String skillName, String arguments, String result, boolean isError,
                               List<ArtifactPayload> artifacts) {
         ChatTurn turn = findTurn(turnId);
-        ChatTurnEvent event = saveEvent(turn, "tool_end", toolCallId, toolName, arguments, result, isError);
+        ChatTurnEvent event = saveEvent(turn, "tool_end", toolCallId, toolName, skillName, arguments, result, isError);
         if (artifacts == null || artifacts.isEmpty()) {
             return;
         }
@@ -96,7 +96,7 @@ public class TurnTimelineServiceImpl implements TurnTimelineService {
             return;
         }
         ChatTurn turn = findTurn(turnId);
-        saveEvent(turn, "assistant_text", null, null, null, content, false);
+        saveEvent(turn, "assistant_text", null, null, null, null, content, false);
     }
 
     @Override
@@ -182,6 +182,7 @@ public class TurnTimelineServiceImpl implements TurnTimelineService {
                                     String eventType,
                                     String toolCallId,
                                     String toolName,
+                                    String skillName,
                                     String arguments,
                                     String content,
                                     boolean isError) {
@@ -192,6 +193,7 @@ public class TurnTimelineServiceImpl implements TurnTimelineService {
                 .eventType(eventType)
                 .toolCallId(toolCallId)
                 .toolName(toolName)
+                .skillName(skillName)
                 .arguments(arguments)
                 .content(content)
                 .isError(isError)
@@ -218,6 +220,9 @@ public class TurnTimelineServiceImpl implements TurnTimelineService {
             if (event.getToolName() != null) {
                 acc.toolName = event.getToolName();
             }
+            if (event.getSkillName() != null) {
+                acc.skillName = event.getSkillName();
+            }
             if (event.getArguments() != null) {
                 acc.arguments = event.getArguments();
             }
@@ -240,6 +245,7 @@ public class TurnTimelineServiceImpl implements TurnTimelineService {
                 .map(acc -> new ToolStepView(
                         safe(acc.toolCallId),
                         safe(acc.toolName),
+                        safe(acc.skillName),
                         safe(acc.arguments),
                         safe(acc.result),
                         acc.isError,
@@ -255,6 +261,7 @@ public class TurnTimelineServiceImpl implements TurnTimelineService {
             if ("assistant_text".equals(event.getEventType())) {
                 segments.add(new SegmentView(
                         "text",
+                        "",
                         "",
                         "",
                         "",
@@ -279,6 +286,7 @@ public class TurnTimelineServiceImpl implements TurnTimelineService {
                         "tool",
                         safe(event.getToolCallId()),
                         safe(event.getToolName()),
+                        safe(event.getSkillName()),
                         safe(event.getArguments()),
                         safe(event.getContent()),
                         Boolean.TRUE.equals(event.getIsError()),
@@ -317,6 +325,7 @@ public class TurnTimelineServiceImpl implements TurnTimelineService {
     private static class ToolStepAccumulator {
         String toolCallId;
         String toolName;
+        String skillName;
         String arguments;
         String result;
         boolean isError;

@@ -33,6 +33,9 @@ public class ChatTurnEvent {
     @Column(name = "tool_name")
     private String toolName;
 
+    @Column(name = "skill_name")
+    private String skillName;
+
     @Column(name = "arguments", columnDefinition = "TEXT")
     private String arguments;
 

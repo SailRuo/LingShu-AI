@@ -273,6 +273,7 @@ onMounted(() => {
     <div class="table-container glass">
       <NDataTable
         remote
+        flex-height
         :columns="columns"
         :data="tableData"
         :loading="isLoading"
@@ -343,11 +344,13 @@ onMounted(() => {
   border-radius: 12px;
   background: rgba(var(--color-surface-rgb), 0.3);
   border: 1px solid var(--color-outline);
-  overflow: hidden;
   padding: 16px;
+  display: flex;
+  flex-direction: column;
 }
 
 .custom-table {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 </style>

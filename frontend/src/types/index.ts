@@ -4,6 +4,7 @@ export interface ChatToolStep {
   id?: string;
   toolCallId?: string;
   toolName: string;
+  skillName?: string;
   arguments?: string;
   command?: string;
   input?: string;
@@ -47,7 +48,7 @@ export interface ChatImageSegment {
 export type ChatMessageSegment = ChatTextSegment | ChatToolSegment | ChatReasoningSegment | ChatImageSegment;
 
 export interface ChatMessage {
-  id?: number;
+  id?: string | number;
   role: "user" | "assistant";
   content: string;
   timestamp: number;

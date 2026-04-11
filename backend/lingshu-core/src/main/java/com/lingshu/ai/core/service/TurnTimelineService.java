@@ -9,6 +9,7 @@ public interface TurnTimelineService {
     record ToolStepView(
             String toolCallId,
             String toolName,
+            String skillName,
             String arguments,
             String result,
             boolean isError,
@@ -19,6 +20,7 @@ public interface TurnTimelineService {
             String type,
             String toolCallId,
             String toolName,
+            String skillName,
             String arguments,
             String result,
             boolean isError,
@@ -40,9 +42,9 @@ public interface TurnTimelineService {
 
     Long startTurn(Long sessionId, String userMessage, List<String> userImages);
 
-    void recordToolStart(Long turnId, String toolCallId, String toolName, String arguments);
+    void recordToolStart(Long turnId, String toolCallId, String toolName, String skillName, String arguments);
 
-    void recordToolEnd(Long turnId, String toolCallId, String toolName, String arguments, String result, boolean isError,
+    void recordToolEnd(Long turnId, String toolCallId, String toolName, String skillName, String arguments, String result, boolean isError,
                        List<ArtifactPayload> artifacts);
 
     void recordAssistantText(Long turnId, String content);
