@@ -69,6 +69,14 @@ public class BuiltinWorkspaceToolProvider implements ToolProvider {
             return errorJson("command is required");
         }
 
+        String lowerCmd = command.toLowerCase(Locale.ROOT).trim();
+        if (lowerCmd.startsWith("rm ") || lowerCmd.startsWith("rmdir ") || 
+            lowerCmd.startsWith("del ") || lowerCmd.startsWith("erase ") ||
+            lowerCmd.contains("remove-item") || lowerCmd.contains("clear-content") ||
+            lowerCmd.contains("format ") || lowerCmd.contains("mkfs")) {
+            return errorJson("Security restriction: command execution blocked due to dangerous keywords.");
+        }
+
         Path workingDir = workdirValue.isBlank() ? workspaceRoot : safeResolvePath(workdirValue, true);
         if (workingDir == null) {
             return errorJson("workdir must be inside workspace root");
