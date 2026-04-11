@@ -15,6 +15,7 @@ import dev.langchain4j.data.message.Content;
 import dev.langchain4j.data.message.ImageContent;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.TextContent;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.http.client.jdk.JdkHttpClientBuilder;
 import dev.langchain4j.memory.ChatMemory;
@@ -322,6 +323,7 @@ public class ChatServiceImpl implements ChatService {
         AiServices<AiConfig.StreamingAssistant> builder = AiServices.builder(AiConfig.StreamingAssistant.class)
                 .streamingChatModel(streamingModelToUse)
                 .chatMemoryProvider(chatMemoryProvider)
+                .hallucinatedToolNameStrategy(this::handleHallucinatedToolName)
                 .toolArgumentsErrorHandler(this::handleToolArgumentsError)
                 .maxSequentialToolsInvocations(30);
 
@@ -748,6 +750,19 @@ public class ChatServiceImpl implements ChatService {
                 "TOOL"
         );
         return ToolErrorHandlerResult.text(message);
+    }
+
+    private ToolExecutionResultMessage handleHallucinatedToolName(dev.langchain4j.agent.tool.ToolExecutionRequest request) {
+        String toolName = request != null && request.name() != null ? request.name() : "unknown";
+        String message = "Tool not available: " + toolName + ". "
+                + "Do not invent tool names. Use only tools provided in this turn, or continue without tool calls.";
+        systemLogService.warn("检测到幻觉工具调用: " + toolName + "，已返回可恢复错误结果", "TOOL");
+        return ToolExecutionResultMessage.builder()
+                .id(request != null ? request.id() : null)
+                .toolName(toolName)
+                .text(message)
+                .isError(true)
+                .build();
     }
 
     private String buildToolArgumentsRepairMessage(String toolName, String rawArguments, Throwable error) {

@@ -5,8 +5,6 @@ import com.lingshu.ai.core.service.FactSemanticClassifier;
 import com.lingshu.ai.core.service.MemoryService;
 import com.lingshu.ai.core.service.EmotionAwareFactExtractor;
 import com.lingshu.ai.core.dto.ExtractionResult;
-import com.lingshu.ai.core.dto.ConfidenceLevel;
-import com.lingshu.ai.core.dto.FactType;
 import com.lingshu.ai.core.model.DynamicMemoryModel;
 import com.lingshu.ai.infrastructure.entity.FactNode;
 import com.lingshu.ai.infrastructure.entity.UserNode;
@@ -41,8 +39,6 @@ import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -60,24 +56,6 @@ public class MemoryServiceImpl implements MemoryService {
     private static final long SEMANTIC_CLASSIFY_TIMEOUT_SECONDS = 8;
     private static final long HISTORY_EMBED_TIMEOUT_SECONDS = 6;
     private static final long HISTORY_SEARCH_TIMEOUT_SECONDS = 4;
-    private static final Pattern[] NAME_INTENT_PATTERNS = new Pattern[]{
-            Pattern.compile("(?:\\u4f60\\u8bb0\\u9519\\u4e86)?(?:\\u6211\\u7684\\u540d\\u5b57(?:\\u662f)?|\\u6211\\u53eb|\\u53eb\\u6211|\\u6211\\u662f)\\s*([\\p{IsHan}A-Za-z][\\p{IsHan}A-Za-z0-9_\\-]{0,15})")
-    };
-    private static final Pattern[] STORED_NAME_PATTERNS = new Pattern[]{
-            Pattern.compile("(?:\\u7528\\u6237(?:\\u7684)?\\u540d\\u5b57\\u662f|\\u540d\\u5b57\\u662f|\\u6211\\u53eb|\\u6211\\u662f)\\s*([\\p{IsHan}A-Za-z][\\p{IsHan}A-Za-z0-9_\\-]{0,15})")
-    };
-    private static final Set<String> INVALID_NAME_VALUES = Set.of(
-            "\u6211",
-            "\u6211\u7684\u540d\u5b57",
-            "\u540d\u5b57",
-            "\u59d3\u540d",
-            "\u7528\u6237\u540d\u5b57",
-            "\u7528\u6237\u7684\u540d\u5b57",
-            "\u4f60\u8bb0\u9519\u4e86",
-            "\u53eb\u6211",
-            "\u6211\u53eb",
-            "\u6211\u662f"
-    );
     private static final java.util.Set<String> STOP_WORDS = java.util.Set.of(
             "的", "了", "是", "在", "我", "你", "他", "她", "它", "们",
             "这", "那", "有", "和", "与", "或", "但", "如果", "因为",
@@ -215,7 +193,7 @@ public class MemoryServiceImpl implements MemoryService {
 
     private void processExtractionResult(String userId, String messageSnapshot, UserNode user,
                                          ExtractionResult result, com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
-        normalizeNameFactsForIdentityIntent(messageSnapshot, user, result);
+
         log.debug("提取结果已收到: {} 新事实, {} 请求删除",
                 result.getNewFacts() != null ? result.getNewFacts().size() : 0,
                 result.getDeletedFactIds() != null ? result.getDeletedFactIds().size() : 0);
@@ -274,167 +252,6 @@ public class MemoryServiceImpl implements MemoryService {
             userRepository.save(user);
         }
     }
-
-
-    private void normalizeNameFactsForIdentityIntent(String messageSnapshot, UserNode user, ExtractionResult result) {
-        if (result == null || messageSnapshot == null || messageSnapshot.isBlank()) {
-            return;
-        }
-
-        String candidateName = extractNameCandidate(messageSnapshot);
-        if (candidateName == null || candidateName.isBlank()) {
-            return;
-        }
-        String canonicalNameFact = buildCanonicalNameFact(candidateName);
-
-        List<ExtractionResult.ExtractedFact> newFacts = result.getNewFacts();
-        if (newFacts == null) {
-            newFacts = new ArrayList<>();
-            result.setNewFacts(newFacts);
-        }
-
-        boolean hasIdentityName = false;
-        for (ExtractionResult.ExtractedFact fact : newFacts) {
-            if (fact == null || fact.getContent() == null) {
-                continue;
-            }
-            if (!fact.getContent().contains(candidateName)) {
-                continue;
-            }
-            fact.setType(FactType.IDENTITY);
-            fact.setContent(canonicalNameFact);
-            if (fact.getConfidence() == null || fact.getConfidence().getValue() < ConfidenceLevel.HIGH.getValue()) {
-                fact.setConfidence(ConfidenceLevel.HIGH);
-            }
-            hasIdentityName = true;
-        }
-
-        if (!hasIdentityName) {
-            ExtractionResult.ExtractedFact identityFact = new ExtractionResult.ExtractedFact();
-            identityFact.setType(FactType.IDENTITY);
-            identityFact.setContent(canonicalNameFact);
-            identityFact.setConfidence(ConfidenceLevel.HIGH);
-            identityFact.setVolatile(false);
-            newFacts.add(identityFact);
-        }
-
-        List<Long> deletedFactIds = result.getDeletedFactIds();
-        if (deletedFactIds == null) {
-            deletedFactIds = new ArrayList<>();
-            result.setDeletedFactIds(deletedFactIds);
-        }
-
-        if (user == null || user.getFacts() == null) {
-            return;
-        }
-        for (FactNode existingFact : user.getFacts()) {
-            if (existingFact == null || existingFact.getId() == null || existingFact.getContent() == null) {
-                continue;
-            }
-            String existingContent = existingFact.getContent();
-            String existingName = extractStoredNameCandidate(existingContent);
-            boolean isRelationshipNameNoise = isRelationshipFact(existingFact)
-                    && existingContent.contains(candidateName)
-                    && existingContent.contains("\u5173\u7cfb");
-            boolean isDuplicateNameVariant = existingName != null
-                    && existingName.equalsIgnoreCase(candidateName)
-                    && !canonicalNameFact.equals(existingContent);
-            boolean isConflictingIdentity = existingName != null
-                    && !existingName.equalsIgnoreCase(candidateName)
-                    && isIdentityFact(existingFact);
-            if ((isRelationshipNameNoise || isDuplicateNameVariant || isConflictingIdentity)
-                    && !deletedFactIds.contains(existingFact.getId())) {
-                deletedFactIds.add(existingFact.getId());
-            }
-        }
-    }
-
-    private String extractNameCandidate(String text) {
-        if (text == null || text.isBlank()) {
-            return null;
-        }
-        String normalized = text.replace('\u3002', ' ')
-                .replace('\uFF0C', ' ')
-                .replace(',', ' ')
-                .trim();
-        for (Pattern pattern : NAME_INTENT_PATTERNS) {
-            Matcher matcher = pattern.matcher(normalized);
-            if (!matcher.find()) {
-                continue;
-            }
-            String candidate = cleanupNameCandidate(matcher.group(1));
-            if (candidate != null) {
-                return candidate;
-            }
-        }
-        return null;
-    }
-
-    private String extractStoredNameCandidate(String text) {
-        if (text == null || text.isBlank()) {
-            return null;
-        }
-        String normalized = text.replace('\u3002', ' ')
-                .replace('\uFF0C', ' ')
-                .replace(',', ' ')
-                .trim();
-        for (Pattern pattern : STORED_NAME_PATTERNS) {
-            Matcher matcher = pattern.matcher(normalized);
-            if (!matcher.find()) {
-                continue;
-            }
-            String candidate = cleanupNameCandidate(matcher.group(1));
-            if (candidate != null) {
-                return candidate;
-            }
-        }
-        return null;
-    }
-
-    private String buildCanonicalNameFact(String candidateName) {
-        return "\u7528\u6237\u540d\u5b57\u662f" + candidateName;
-    }
-
-    private boolean isRelationshipFact(FactNode fact) {
-        return hasFactLabel(fact, "relationship")
-                || hasFactLabel(fact, "person");
-    }
-
-    private boolean isIdentityFact(FactNode fact) {
-        return hasFactLabel(fact, "identity")
-                || extractStoredNameCandidate(fact.getContent()) != null;
-    }
-
-    private boolean hasFactLabel(FactNode fact, String expected) {
-        return expected.equalsIgnoreCase(fact.getCategory())
-                || expected.equalsIgnoreCase(fact.getSubType())
-                || expected.equalsIgnoreCase(fact.getClusterKey());
-    }
-
-    private String cleanupNameCandidate(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return null;
-        }
-        String cleaned = raw.trim()
-                .replaceAll("^[\\s\\uFF1A:\\u662F]+", "")
-                .replaceAll("[\\s\\u3002\\uFF0C,\\u3001\\u5462\\u5417\\u5427\\u554A\\u5440].*$", "")
-                .trim();
-        if (cleaned.isBlank()) {
-            return null;
-        }
-        if (INVALID_NAME_VALUES.contains(cleaned)) {
-            return null;
-        }
-        if (cleaned.length() <= 1 && cleaned.codePoints().allMatch(Character::isIdeographic)) {
-            return null;
-        }
-        if (cleaned.length() > 16) {
-            cleaned = cleaned.substring(0, 16);
-        }
-        return cleaned;
-    }
-
-
     private FactWriteResult persistFactCandidateWithMetadata(UserNode user,
                                                              ExtractionResult.ExtractedFact extractedFact,
                                                              String originalMessage, com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
@@ -457,11 +274,177 @@ public class MemoryServiceImpl implements MemoryService {
         double confidence = extractedFact.getConfidence() != null ? extractedFact.getConfidence().getValue()
                 : semanticProfile.confidence;
 
+
+
+        RelationDecision relationDecision = detectBestFactRelation(user, factText, normalized);
+        FactNode bestMatch = relationDecision.match;
+        String relationType = relationDecision.type;
+
+        if (bestMatch != null && "CONTRADICTS".equals(relationType)) {
+            bestMatch.setStatus("conflicted");
+            bestMatch.setLastActivatedAt(now);
+            bestMatch.setActivityScore(calculateActivityScore(now, now));
+            factRepository.save(bestMatch);
+
+            FactNode factNode = buildNewFactNodeWithMetadata(
+                    factText, normalized, clusterKey, subType,
+                    confidence, semanticProfile.source, now, originalMessage, emotion, extractedFact);
+            factNode.setContradictsFactId(bestMatch.getId());
+            factNode.setStatus("conflicted");
+            systemLogService.info("妫€娴嬪埌鍐茬獊璁板繂锛屽垱寤哄啿绐佺増鏈? " + shortenLabel(factText, 24), "MEMORY");
+            return saveNewFact(user, factNode);
+        }
+
+        if (bestMatch != null && "SUPERSEDES".equals(relationType)) {
+            bestMatch.setStatus("superseded");
+            bestMatch.setLastActivatedAt(now);
+            bestMatch.setActivityScore(calculateActivityScore(now, now));
+            factRepository.save(bestMatch);
+
+            FactNode factNode = buildNewFactNodeWithMetadata(
+                    factText, normalized, clusterKey, subType,
+                    confidence, semanticProfile.source, now, originalMessage, emotion, extractedFact);
+            factNode.setSupersedesFactId(bestMatch.getId());
+            factNode.setVersion((bestMatch.getVersion() == null ? 1 : bestMatch.getVersion()) + 1);
+            factNode.setStatus("active");
+            systemLogService.info("妫€娴嬪埌鐩镐技璁板繂锛屽垱寤烘浛浠ｇ増鏈? " + shortenLabel(factText, 24), "MEMORY");
+            return saveNewFact(user, factNode);
+        }
+
         FactNode factNode = buildNewFactNodeWithMetadata(
                 factText, normalized, clusterKey, subType,
                 confidence, semanticProfile.source, now, originalMessage, emotion, extractedFact);
-
         return saveNewFact(user, factNode);
+    }
+
+
+
+    private RelationDecision detectBestFactRelation(UserNode user, String factText, String normalized) {
+        if (user == null || user.getFacts() == null || user.getFacts().isEmpty()) {
+            return new RelationDecision(null, "NONE");
+        }
+
+        FactNode bestMatch = null;
+        String relationType = "NONE";
+
+        try {
+            systemLogService.embeddingStart(factText.length(), "MEMORY");
+            CompletableFuture<dev.langchain4j.data.embedding.Embedding> embedFuture = CompletableFuture.supplyAsync(
+                    () -> embeddingModel.embed(factText).content());
+            dev.langchain4j.data.embedding.Embedding queryEmbedding = embedFuture.get(HISTORY_EMBED_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            systemLogService.embeddingEnd("MEMORY");
+
+            systemLogService.dbStart("pgvector_query", "embeddingStore", "MEMORY");
+            dev.langchain4j.store.embedding.EmbeddingSearchRequest searchRequest = dev.langchain4j.store.embedding.EmbeddingSearchRequest
+                    .builder()
+                    .queryEmbedding(queryEmbedding)
+                    .maxResults(5)
+                    .minScore(0.5)
+                    .build();
+            CompletableFuture<dev.langchain4j.store.embedding.EmbeddingSearchResult<dev.langchain4j.data.segment.TextSegment>> searchFuture =
+                    CompletableFuture.supplyAsync(() -> embeddingStore.search(searchRequest));
+            dev.langchain4j.store.embedding.EmbeddingSearchResult<dev.langchain4j.data.segment.TextSegment> searchResult =
+                    searchFuture.get(HISTORY_SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            systemLogService.dbEnd("pgvector_query", "MEMORY");
+
+            List<Long> userFactIds = user.getFacts().stream()
+                    .filter(this::isComparableForConflict)
+                    .filter(f -> f.getId() != null)
+                    .map(FactNode::getId)
+                    .collect(Collectors.toList());
+
+            for (dev.langchain4j.store.embedding.EmbeddingMatch<dev.langchain4j.data.segment.TextSegment> match : searchResult
+                    .matches()) {
+                String factIdStr = match.embedded().metadata().getString("fact_id");
+                if (factIdStr == null) {
+                    continue;
+                }
+                Long factId = Long.parseLong(factIdStr);
+                if (!userFactIds.contains(factId)) {
+                    continue;
+                }
+
+                FactNode existingFact = user.getFacts().stream()
+                        .filter(this::isComparableForConflict)
+                        .filter(f -> f.getId().equals(factId))
+                        .findFirst()
+                        .orElse(null);
+                if (existingFact == null) {
+                    continue;
+                }
+
+                if (factRelationshipEvaluator != null) {
+                    String modelName = dynamicMemoryModel.getModelName();
+                    systemLogService.llmStart("fact-relationship-evaluator", modelName, "FACT");
+                    com.lingshu.ai.core.dto.FactRelationshipResult relResult = factRelationshipEvaluator
+                            .evaluate(existingFact.getContent() == null ? "" : existingFact.getContent(), factText);
+                    systemLogService.llmEnd(0, "FACT");
+
+                    if (relResult != null && !"NONE".equals(relResult.getType())) {
+                        bestMatch = existingFact;
+                        relationType = relResult.getType();
+                        if ("SUPERSEDES".equals(relationType) || "CONTRADICTS".equals(relationType)) {
+                            break;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Vector search or LLM evaluation failed, falling back to rule-based: {}", e.getMessage());
+        }
+
+        if (bestMatch != null && !"NONE".equals(relationType)) {
+            return new RelationDecision(bestMatch, relationType);
+        }
+
+        double bestSimilarity = 0.0;
+        boolean contradiction = false;
+        FactNode lexicalBestMatch = null;
+        for (FactNode existing : user.getFacts()) {
+            if (!isComparableForConflict(existing) || existing.getContent() == null || existing.getContent().isBlank()) {
+                continue;
+            }
+            double similarity = lexicalSimilarity(normalized, normalizedFactContent(existing));
+            boolean candidateContradiction = isContradictory(existing.getContent(), factText);
+            if (candidateContradiction && similarity >= 0.22) {
+                lexicalBestMatch = existing;
+                contradiction = true;
+                relationType = "CONTRADICTS";
+                break;
+            }
+            if (similarity > bestSimilarity) {
+                bestSimilarity = similarity;
+                lexicalBestMatch = existing;
+            }
+        }
+
+        if (lexicalBestMatch == null) {
+            return new RelationDecision(null, "NONE");
+        }
+        if (contradiction) {
+            return new RelationDecision(lexicalBestMatch, "CONTRADICTS");
+        }
+        if (bestSimilarity >= 0.68) {
+            return new RelationDecision(lexicalBestMatch, "SUPERSEDES");
+        }
+        if (bestSimilarity >= 0.38) {
+            return new RelationDecision(lexicalBestMatch, "RELATED_TO");
+        }
+        return new RelationDecision(null, "NONE");
+    }
+
+    private boolean isComparableForConflict(FactNode fact) {
+        if (fact == null) {
+            return false;
+        }
+        String status = fact.getStatus();
+        if (status == null || status.isBlank()) {
+            return true;
+        }
+        String normalizedStatus = status.trim().toLowerCase(Locale.ROOT);
+        return !"archived".equals(normalizedStatus)
+                && !"superseded".equals(normalizedStatus)
+                && !"conflicted".equals(normalizedStatus);
     }
 
     private FactNode buildNewFactNodeWithMetadata(String factText, String normalized, String clusterKey, String subType,
@@ -1985,6 +1968,16 @@ public class MemoryServiceImpl implements MemoryService {
             this.user = user;
             this.savedFact = savedFact;
             this.createdNewFact = createdNewFact;
+        }
+    }
+
+    private static final class RelationDecision {
+        private final FactNode match;
+        private final String type;
+
+        private RelationDecision(FactNode match, String type) {
+            this.match = match;
+            this.type = type;
         }
     }
 

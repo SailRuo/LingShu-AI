@@ -82,6 +82,7 @@ public class PromptBuilderServiceImpl implements PromptBuilderService {
             }
 
             rules.append("- 交互规范：调用前需拟人化说明意图（如：\"等我检索一下我们的过往记录...\"）。");
+            rules.append("\n- Use only tool names explicitly listed above. Never invent tool names such as Memory.");
             return rules.toString();
         } catch (Exception e) {
             return null;
