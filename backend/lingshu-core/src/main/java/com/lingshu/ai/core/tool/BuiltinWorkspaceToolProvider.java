@@ -86,7 +86,14 @@ public class BuiltinWorkspaceToolProvider implements ToolProvider {
             Process process = builder.start();
             byte[] outputBytes = process.getInputStream().readAllBytes();
             int exitCode = process.waitFor();
-            String output = new String(outputBytes, StandardCharsets.UTF_8);
+            
+            java.nio.charset.Charset charset = StandardCharsets.UTF_8;
+            if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows")) {
+                try {
+                    charset = java.nio.charset.Charset.forName("GBK");
+                } catch (Exception ignored) {}
+            }
+            String output = new String(outputBytes, charset);
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", exitCode == 0);

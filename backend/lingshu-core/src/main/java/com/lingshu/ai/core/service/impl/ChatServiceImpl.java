@@ -1,29 +1,17 @@
-﻿package com.lingshu.ai.core.service.impl;
+package com.lingshu.ai.core.service.impl;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lingshu.ai.core.config.AiConfig;
 import com.lingshu.ai.core.service.*;
-import com.lingshu.ai.core.tool.McpToolArtifactRegistry;
-import com.lingshu.ai.core.tool.RawMcpClient;
-import com.lingshu.ai.core.tool.SafeMcpToolProvider;
-import com.lingshu.ai.core.tool.BuiltinWorkspaceToolProvider;
-import com.lingshu.ai.core.tool.SkillToolManifest;
-import com.lingshu.ai.core.dto.EmotionContextResult;
+import com.lingshu.ai.core.tool.*;
 import com.lingshu.ai.core.util.SkillNameResolver;
 import com.lingshu.ai.infrastructure.entity.AgentConfig;
 import com.lingshu.ai.infrastructure.entity.ChatSession;
 import com.lingshu.ai.infrastructure.repository.ChatSessionRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.langchain4j.data.message.Content;
-import dev.langchain4j.data.message.ImageContent;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.TextContent;
-import dev.langchain4j.data.message.ToolExecutionResultMessage;
-import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.data.message.*;
 import dev.langchain4j.http.client.jdk.JdkHttpClientBuilder;
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.ChatMemoryProvider;
-
-import dev.langchain4j.mcp.client.McpClient;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.listener.ChatModelListener;
 import dev.langchain4j.model.chat.request.ChatRequest;
@@ -50,9 +38,10 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map; // 添加此行
 import java.util.Set;
 import java.util.concurrent.Executors;
-import java.util.stream.Collectors;
+import java.util.stream.Collectors; // 添加此行
 
 @Service
 public class ChatServiceImpl implements ChatService {
@@ -221,14 +210,11 @@ public class ChatServiceImpl implements ChatService {
         StringBuilder pendingAssistantText = new StringBuilder();
         Long turnId = turnTimelineService.startTurn(session.getId(), safeMessage, images == null ? List.of() : images);
 
-        com.lingshu.ai.core.dto.EmotionContextResult emotionResult = emotionPreAnalysisService.analyzeBeforeResponse(userId, safeMessage, session.getId());
-        com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion = emotionResult != null ? emotionResult.toEmotionAnalysis() : null;
+        // 情感前置分析已禁用，使用情感微调后的 LLM
+        // com.lingshu.ai.core.dto.EmotionContextResult emotionResult = emotionPreAnalysisService.analyzeBeforeResponse(userId, safeMessage, session.getId());
+        // com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion = emotionResult != null ? emotionResult.toEmotionAnalysis() : null;
+        com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion = null;
         String emotionPrompt = "";
-        if (emotionResult != null) {
-            emotionPrompt = emotionPreAnalysisService.getEmotionPromptInjection(userId);
-            String abbreviated = emotionPrompt.length() > 100 ? emotionPrompt.substring(0, 100) + "..." : emotionPrompt;
-            systemLogService.info("情感前置分析完成，已记录情感状态到 Prompt: " + abbreviated, "EMOTION");
-        }
 
         String longTermContext = memoryService.retrieveContext(userId, safeMessage);
         String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
@@ -238,8 +224,8 @@ public class ChatServiceImpl implements ChatService {
             systemPrompt = systemPrompt + emotionPrompt;
         }
 
-        log.debug("Merged System Prompt generated for streamChat (first 100 chars): {}...", systemPrompt.substring(0, Math.min(100, systemPrompt.length())));
-        systemLogService.debug("已加�?Agent Prompt (长度: " + systemPrompt.length() + ")", "CHAT");
+        log.debug("合并后的系统提示: \n{}...", systemPrompt);
+        systemLogService.debug("已添加Agent Prompt (长度: " + systemPrompt.length() + ")", "CHAT");
 
         com.lingshu.ai.infrastructure.entity.SystemSetting sysSetting = settingService.getSetting();
         String actualModel = sysSetting.getChatModel() != null ? sysSetting.getChatModel() : "default-model";
@@ -293,7 +279,7 @@ public class ChatServiceImpl implements ChatService {
 
         systemLogService.debug("准备发送流式对话请求，SystemPrompt 长度: " + systemPrompt.length(), "CHAT");
 
-        // 构建多模�?UserMessage
+        // 构建多模态?UserMessage
         List<Content> contents = new ArrayList<>();
         if (!safeMessage.isBlank()) {
             contents.add(TextContent.from(safeMessage));
@@ -331,18 +317,33 @@ public class ChatServiceImpl implements ChatService {
         String userIntent = safeMessage;
 
         // 加载 Skills
-        Path skillsPath = Paths.get(System.getProperty("user.dir"), ".lingshu", "skills");
+        Path skillsPath = resolveSkillsPath();
         Skills loadedSkills = null;
         Set<String> requiredBuiltinTools = new LinkedHashSet<>();
         try {
             if (java.nio.file.Files.exists(skillsPath)) {
                 List<FileSystemSkill> fsSkills = FileSystemSkillLoader.loadSkills(skillsPath);
                 if (!fsSkills.isEmpty()) {
-                    loadedSkills = Skills.from(fsSkills);
-                    for (FileSystemSkill skill : fsSkills) {
+                    // 根据 skill name 去重，后加载的覆盖先加载的
+                    Map<String, FileSystemSkill> uniqueSkills = fsSkills.stream()
+                            .collect(Collectors.toMap(
+                                    FileSystemSkill::name,
+                                    skill -> skill,
+                                    (existing, replacement) -> replacement // 保留后加载的
+                            ));
+
+                    loadedSkills = Skills.from(new ArrayList<>(uniqueSkills.values()));
+                    log.info("已加载 Skills: count={}, unique_count={}, path={}",
+                            fsSkills.size(), uniqueSkills.size(), skillsPath);
+
+                    for (FileSystemSkill skill : uniqueSkills.values()) {
                         requiredBuiltinTools.addAll(SkillToolManifest.parseRequiredTools(skill.basePath()));
                     }
+                } else {
+                    log.warn("Skills 目录存在但未加载到任何技能: {}", skillsPath);
                 }
+            } else {
+                log.warn("未找到 Skills 目录: {}", skillsPath);
             }
         } catch (Exception e) {
             log.error("加载 Skills 失败: {}", e.getMessage());
@@ -451,6 +452,25 @@ public class ChatServiceImpl implements ChatService {
                 .start();
 
         return sink.asFlux();
+    }
+
+    private Path resolveSkillsPath() {
+        // 1. 优先扫描用户主目录下的配置 (生产环境推荐)
+        Path homeSkills = Paths.get(System.getProperty("user.home"), ".lingshu", "skills");
+        if (java.nio.file.Files.isDirectory(homeSkills)) {
+            return homeSkills;
+        }
+
+        // 2. Fallback: 递归向上查找项目目录下的 .lingshu/skills (开发环境便利)
+        Path current = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
+        for (int i = 0; i < 8 && current != null; i++) {
+            Path candidate = current.resolve(".lingshu").resolve("skills");
+            if (java.nio.file.Files.isDirectory(candidate)) {
+                return candidate;
+            }
+            current = current.getParent();
+        }
+        return Paths.get(System.getProperty("user.dir"), ".lingshu", "skills");
     }
 
     private void streamMultimodalRequest(StreamingChatModel streamingModel,
@@ -650,17 +670,15 @@ public class ChatServiceImpl implements ChatService {
 
                 if (responseObj instanceof java.util.Map<?, ?> response) {
                     if (response.containsKey("data") && response.get("data") instanceof java.util.List<?> list) {
-                        List<String> models = list.stream()
+                        //log.debug("获取�? + models.size() + " 个OpenAI兼容模型");
+                        return list.stream()
                                 .map(m -> (String) ((java.util.Map<?, ?>) m).get("id"))
                                 .collect(java.util.stream.Collectors.toList());
-                        //log.debug("获取�? + models.size() + " 个OpenAI兼容模型");
-                        return models;
                     }
                 } else if (responseObj instanceof java.util.List<?> list) {
                     List<String> models = list.stream()
                             .map(m -> (String) ((java.util.Map<?, ?>) m).get("id"))
                             .collect(java.util.stream.Collectors.toList());
-                    //log.debug("获取�? + models.size() + " 个OpenAI兼容模型");
                     return models;
                 }
 

@@ -9,6 +9,8 @@ public interface MemoryService {
 
     void extractFacts(String userId, String message, com.lingshu.ai.core.dto.EmotionAnalysis emotion);
 
+    void extractFacts(String userId, String userMessage, String assistantResponse, com.lingshu.ai.core.dto.EmotionAnalysis emotion);
+
     /**
      * 从记忆中检索与当前对话相关的上下文。
      */

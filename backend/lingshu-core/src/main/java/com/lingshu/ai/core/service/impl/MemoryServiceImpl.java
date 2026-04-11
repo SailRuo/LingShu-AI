@@ -125,12 +125,17 @@ public class MemoryServiceImpl implements MemoryService {
 
     @Override
     public void extractFacts(String userId, String message) {
-        extractFacts(userId, message, null);
+        extractFacts(userId, message, "", null);
+    }
+
+    @Override
+    public void extractFacts(String userId, String message, com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
+        extractFacts(userId, message, "", emotion);
     }
 
     @Async("taskExecutor")
     @Override
-    public void extractFacts(String userId, String message, com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
+    public void extractFacts(String userId, String message, String assistantResponse, com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
         final String messageSnapshot = message;
         log.debug("Memory pulse: Analyzing input for cognitive facts: {}", messageSnapshot);
         systemLogService.info("事实提取: 开始分析用户消息...", "FACT");
@@ -162,6 +167,7 @@ public class MemoryServiceImpl implements MemoryService {
 
                 extractionResult = emotionAwareFactExtractor.analyzeWithEmotion(
                         messageSnapshot,
+                        assistantResponse != null ? assistantResponse : "",
                         currentFactsBuilder.toString(),
                         emotionType,
                         emotionIntensity,

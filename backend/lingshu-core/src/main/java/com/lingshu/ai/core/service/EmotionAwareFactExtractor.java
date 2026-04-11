@@ -114,9 +114,10 @@ public interface EmotionAwareFactExtractor {
             【当前已知事实列表】
             {{currentFacts}}
             """)
-    @UserMessage("请分析该消息并直接返回 JSON 结果：{{message}}")
+    @UserMessage("用户消息：{{message}}\\n助手回复：{{assistantResponse}}\\n请基于以上对话分析并直接返回 JSON 结果")
     ExtractionResult analyzeWithEmotion(
             @V("message") String message,
+            @V("assistantResponse") String assistantResponse,
             @V("currentFacts") String currentFacts,
             @V("emotionType") String emotionType,
             @V("emotionIntensity") Double emotionIntensity,

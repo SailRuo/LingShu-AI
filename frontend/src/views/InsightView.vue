@@ -149,11 +149,15 @@ const positionedNodes3D = computed<PositionedNode3D[]>(() => {
   const users = filteredNodes.value.filter((n) => n.type === 'User')
   const pos = new Map<string, PositionedNode3D>()
 
-  users.forEach((n) => pos.set(n.id, {
-    ...n, x: 0, y: 0, z: 0, size: 24, color: resolvedColors.value.nodeUser,
-    showLabel: true, faded: false, hiddenByReplay: false,
-    isRecent: false, isHit: false, isFocus: selectedNode.value?.id === n.id, isBorn: false
-  }))
+  users.forEach((n, i) => {
+    const angle = (i / Math.max(1, users.length)) * Math.PI * 2
+    const radius = 40
+    pos.set(n.id, {
+      ...n, x: Math.cos(angle) * radius, y: 0, z: Math.sin(angle) * radius, size: 24, color: resolvedColors.value.nodeUser,
+      showLabel: true, faded: false, hiddenByReplay: false,
+      isRecent: false, isHit: false, isFocus: selectedNode.value?.id === n.id, isBorn: false
+    })
+  })
 
   topics.forEach((n, i) => {
     const angle = (i / Math.max(1, topics.length)) * Math.PI * 2

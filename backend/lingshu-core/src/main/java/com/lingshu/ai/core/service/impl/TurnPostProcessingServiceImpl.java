@@ -87,7 +87,7 @@ public class TurnPostProcessingServiceImpl {
             }
 
             if (decision.isExtractFacts()) {
-                extractFacts(userId, userMessage, emotionResult);
+                extractFacts(userId, userMessage, assistantResponse, emotionResult);
             }
 
             if (decision.isRecordInteraction()) {
@@ -149,9 +149,9 @@ public class TurnPostProcessingServiceImpl {
         emotionalEpisodeService.extractAndSaveEpisode(userId, userMessage, emotion);
     }
 
-    private void extractFacts(String userId, String userMessage, EmotionAnalysis emotion) {
+    private void extractFacts(String userId, String userMessage, String assistantResponse, EmotionAnalysis emotion) {
         try {
-            memoryService.extractFacts(userId, userMessage, emotion);
+            memoryService.extractFacts(userId, userMessage, assistantResponse, emotion);
         } catch (Exception e) {
             log.warn("事实提取失败: {}", e.getMessage(), e);
         }
