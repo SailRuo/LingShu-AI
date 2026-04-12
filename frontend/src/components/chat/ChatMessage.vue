@@ -94,13 +94,55 @@ const md = new MarkdownIt({
   typographer: true
 })
 
+const defaultLinkOpenRenderer = md.renderer.rules.link_open || ((tokens, idx, options, _env, self) => {
+  return self.renderToken(tokens, idx, options)
+})
+
+md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+  const targetIndex = tokens[idx].attrIndex('target')
+  if (targetIndex < 0) {
+    tokens[idx].attrPush(['target', '_blank'])
+  } else {
+    tokens[idx].attrs![targetIndex][1] = '_blank'
+  }
+
+  const relIndex = tokens[idx].attrIndex('rel')
+  const relValue = 'noopener noreferrer nofollow'
+  if (relIndex < 0) {
+    tokens[idx].attrPush(['rel', relValue])
+  } else {
+    tokens[idx].attrs![relIndex][1] = relValue
+  }
+
+  return defaultLinkOpenRenderer(tokens, idx, options, env, self)
+}
+
 function processContent(content: string): string {
   let processed = content ?? ''
   const markdownMatch = processed.match(/^markdown#?\s*/)
   if (markdownMatch) {
     processed = processed.slice(markdownMatch[0].length).trim()
   }
+  // URLs wrapped in inline code cannot be clicked in markdown. Unwrap them.
+  processed = processed.replace(/`(https?:\/\/[^`\s]+)`/g, '$1')
+  // Ensure plain http/https URLs become clickable links.
+  processed = processed.replace(
+    /(^|[\s(\[\{<\u3000])((https?:\/\/[^\s<>"'`\u3002\uff0c\uff1b\uff01\uff1f]+))/g,
+    '$1<$2>'
+  )
   return processed
+}
+
+function handleMessageContentClick(event: MouseEvent) {
+  const target = event.target as HTMLElement | null
+  const link = target?.closest('a') as HTMLAnchorElement | null
+  if (!link) return
+
+  const href = link.getAttribute('href') || ''
+  if (!/^https?:\/\//i.test(href)) return
+
+  event.preventDefault()
+  window.open(href, '_blank', 'noopener,noreferrer')
 }
 
 function safeToolName(name?: string): string {
@@ -325,7 +367,7 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
 
             <div v-if="isToolExpanded(segment, index) && formatToolResult(segment.result)" class="tool-block">
               <div class="tool-block-label">结果</div>
-              <pre class="tool-block-content" :class="{ error: segment.isError }"><code>{{ formatToolResult(segment.result) }}</code></pre>
+              <pre class="tool-block-content tool-block-result" :class="{ error: segment.isError }"><code>{{ formatToolResult(segment.result) }}</code></pre>
 
             <div v-if="isToolExpanded(segment, index) && toolArtifactImages(segment).length" class="tool-images">
               <img
@@ -339,15 +381,16 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
             </div>
           </div>
 
-          <div
-            v-else-if="segment.type === 'text' && segment.content"
-            class="message-content"
-            v-html="renderContent(segment.content)"
-          ></div>
+            <div
+              v-else-if="segment.type === 'text' && segment.content"
+              class="message-content"
+              @click="handleMessageContentClick"
+              v-html="renderContent(segment.content)"
+            ></div>
         </div>
       </template>
 
-      <div v-else-if="message.content" class="message-content" v-html="renderedContent"></div>
+      <div v-else-if="message.content" class="message-content" @click="handleMessageContentClick" v-html="renderedContent"></div>
     </div>
 
     <div class="message-meta">
@@ -382,6 +425,12 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
   flex-direction: column;
   gap: 8px;
   max-width: 80%;
+}
+
+@media (max-width: 768px) {
+  .message-row {
+    max-width: 95%;
+  }
 }
 
 .message-row.assistant {
@@ -834,6 +883,11 @@ const displaySegments = computed<ChatMessageSegment[]>(() => {
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--color-text);
+}
+
+.tool-block-result {
+  max-height: 260px;
+  overflow-y: auto;
 }
 
 .tool-block-content.error {

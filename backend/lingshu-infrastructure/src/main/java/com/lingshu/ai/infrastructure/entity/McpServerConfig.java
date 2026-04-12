@@ -32,6 +32,9 @@ public class McpServerConfig {
 
     private String url; // For SSE
 
+    @Column(columnDefinition = "TEXT")
+    private String headers; // JSON object of headers for SSE/HTTP
+
     @Builder.Default
     private Boolean isActive = true;
 

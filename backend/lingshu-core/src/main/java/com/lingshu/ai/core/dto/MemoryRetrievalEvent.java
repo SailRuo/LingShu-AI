@@ -14,6 +14,9 @@ import java.util.List;
 @AllArgsConstructor
 public class MemoryRetrievalEvent {
 
+    // 当前检索所属的用户ID
+    private String userId;
+
     // 当前检索的原始 Query
     private String query;
 

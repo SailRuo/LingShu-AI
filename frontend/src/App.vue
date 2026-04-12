@@ -10,7 +10,6 @@ import InsightView from '@/views/InsightView.vue'
 import SettingsView from '@/views/SettingsView.vue'
 import ComingSoonView from '@/views/ComingSoonView.vue'
 import SystemLogView from '@/views/SystemLogView.vue'
-import StreamView from '@/views/StreamView.vue'
 import GovernanceView from '@/views/GovernanceView.vue'
 import StarField from '@/components/common/StarField.vue'
 import SecurityView from '@/views/SecurityView.vue'
@@ -63,7 +62,6 @@ watch(activeMenu, (newVal, oldVal) => {
 const viewMap: Record<string, any> = {
   resonance: markRaw(ResonanceView),
   insight: markRaw(InsightView),
-  stream: markRaw(StreamView),
   governance: markRaw(GovernanceView),
   pocket: markRaw(() => h(ComingSoonView, { title: '全维口袋' })),
   'settings-model': markRaw(SettingsView),

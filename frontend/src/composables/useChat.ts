@@ -7,7 +7,7 @@ import type {
   ChatToolStep,
 } from "@/types";
 
-function getClientUserId(): string {
+export function getClientUserId(): string {
   const storageKey = "lingshu_user_id";
   const existing = window.localStorage.getItem(storageKey);
   if (existing && existing.trim()) {

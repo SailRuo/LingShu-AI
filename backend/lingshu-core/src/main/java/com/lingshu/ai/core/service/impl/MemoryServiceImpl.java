@@ -558,6 +558,7 @@ public class MemoryServiceImpl implements MemoryService {
         StringBuilder contextBuilder = new StringBuilder();
         com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder = com.lingshu.ai.core.dto.MemoryRetrievalEvent
                 .builder()
+                .userId(userId)
                 .query(message)
                 .timestamp(LocalDateTime.now())
                 .extractedEntities(new ArrayList<>())
@@ -569,6 +570,7 @@ public class MemoryServiceImpl implements MemoryService {
         List<String> finalFacts = new ArrayList<>();
 
         List<String> entities = extractEntities(message);
+        List<FactNode> keywordMatchedFacts = new ArrayList<>();
 
         userRepository.findByName(userId).ifPresentOrElse(user -> {
             log.info("Graph Retrieval: Found {} facts for user {}",
@@ -590,14 +592,14 @@ public class MemoryServiceImpl implements MemoryService {
                     log.debug("Found {} relevant facts by entities: {}", relevantFacts.size(), entities);
                     systemLogService.debug(String.format("图谱检索: 根据实体 %s 匹配到 %d 条相关事实", entities, relevantFacts.size()),
                             "MEMORY");
+                    keywordMatchedFacts.addAll(relevantFacts);
                 } else {
                     relevantFacts = new ArrayList<>();
                 }
 
-                // 如果事实数量不足3个，或者是身份查询，则补充核心事实
                 boolean isIdentityQuery = isIdentityQuery(message, entities);
+                List<FactNode> coreFactsAdded = new ArrayList<>();
                 if (relevantFacts.size() < 3 || isIdentityQuery) {
-                    // Only inject core facts if it's an identity query or if we have NO relevant facts at all
                     if (relevantFacts.isEmpty() || isIdentityQuery) {
                         List<FactNode> coreFacts = user.getFacts().stream()
                                 .filter(f -> !relevantFacts.contains(f))
@@ -605,6 +607,7 @@ public class MemoryServiceImpl implements MemoryService {
                                 .limit(isIdentityQuery ? 5 : 2)
                                 .toList();
                         relevantFacts.addAll(coreFacts);
+                        coreFactsAdded.addAll(coreFacts);
                         systemLogService.debug(String.format("图谱检索: 保底补充了 %d 条核心事实", coreFacts.size()), "MEMORY");
                     }
                 }
@@ -619,13 +622,15 @@ public class MemoryServiceImpl implements MemoryService {
                         systemLogService.info(String.format("  - %s (重要度: %.2f)", f.getContent(), f.getImportance()),
                                 "MEMORY");
                     });
-                    eventBuilder.graphMatchedContent(relevantFacts.stream().map(FactNode::getContent).collect(Collectors.toList()));
-                    eventBuilder.graphMatchedIds(relevantFacts.stream().map(FactNode::getId).collect(Collectors.toList()));
+                    
+                    if (!keywordMatchedFacts.isEmpty()) {
+                        eventBuilder.graphMatchedContent(keywordMatchedFacts.stream().map(FactNode::getContent).collect(Collectors.toList()));
+                        eventBuilder.graphMatchedIds(keywordMatchedFacts.stream().map(FactNode::getId).collect(Collectors.toList()));
+                    }
 
-                    // If we fall back to core facts or specific identity queries, mark it
-                    if (relevantFacts.size() > 0 && isIdentityQuery) {
+                    if (!coreFactsAdded.isEmpty() || isIdentityQuery) {
                         eventBuilder.fallbackActivated(true);
-                        eventBuilder.baseFactContents(relevantFacts.stream().map(FactNode::getContent).collect(Collectors.toList()));
+                        eventBuilder.baseFactContents(coreFactsAdded.stream().map(FactNode::getContent).collect(Collectors.toList()));
                     }
                 } else {
                     systemLogService.debug("图谱检索: 未找到与当前对话相关的事实", "MEMORY");
@@ -636,7 +641,7 @@ public class MemoryServiceImpl implements MemoryService {
             systemLogService.warn(String.format("图谱检索: 未找到用户 %s 的节点", userId), "MEMORY");
         });
 
-        if (!needsSemanticRetrieval(message, entities, eventBuilder)) {
+        if (!needsSemanticRetrieval(message, entities, keywordMatchedFacts, eventBuilder)) {
             eventBuilder.finalRankedContent(finalFacts);
             recordRetrievalEvent(eventBuilder.build());
             return contextBuilder.toString();
@@ -725,7 +730,7 @@ public class MemoryServiceImpl implements MemoryService {
         return false;
     }
 
-    private boolean needsSemanticRetrieval(String message, List<String> entities,
+    private boolean needsSemanticRetrieval(String message, List<String> entities, List<FactNode> activatedFacts,
                                            com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder) {
         if (message == null || message.trim().isEmpty()) {
             return false;
@@ -736,11 +741,6 @@ public class MemoryServiceImpl implements MemoryService {
             systemLogService.debug("GAM-RAG: 未提取到实体，增益=0，跳过语义检索", "MEMORY");
             return false;
         }
-
-        List<FactNode> activatedFacts = factRepository.findFactsByKeywords(entities);
-
-        eventBuilder.graphMatchedIds(activatedFacts.stream().map(FactNode::getId).collect(Collectors.toList()));
-        eventBuilder.graphMatchedContent(activatedFacts.stream().map(FactNode::getContent).collect(Collectors.toList()));
 
         if (activatedFacts.isEmpty()) {
             systemLogService.debug("GAM-RAG: 实体未激活任何记忆路径，增益=0，跳过语义检索", "MEMORY");
@@ -2139,8 +2139,13 @@ public class MemoryServiceImpl implements MemoryService {
     }
 
     @Override
-    public java.util.List<com.lingshu.ai.core.dto.MemoryRetrievalEvent> getRecentRetrievalEvents() {
-        return new ArrayList<>(recentRetrievalEvents);
+    public java.util.List<com.lingshu.ai.core.dto.MemoryRetrievalEvent> getRecentRetrievalEvents(String userId) {
+        if (userId == null || userId.isBlank()) {
+            return new ArrayList<>(recentRetrievalEvents);
+        }
+        return recentRetrievalEvents.stream()
+                .filter(e -> userId.equals(e.getUserId()))
+                .collect(Collectors.toList());
     }
 
     @Override

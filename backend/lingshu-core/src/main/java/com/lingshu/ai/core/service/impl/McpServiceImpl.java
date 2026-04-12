@@ -83,12 +83,38 @@ public class McpServiceImpl implements McpService {
                     .transport(transport)
                     .build();
         } else {
-            // SSE Transport
-            StreamableHttpMcpTransport transport = StreamableHttpMcpTransport.builder()
+            // SSE or STREAMABLE_HTTP Transport
+            // Both can be handled by StreamableHttpMcpTransport in langchain4j
+            var builder = StreamableHttpMcpTransport.builder()
                     .url(config.getUrl())
                     .logRequests(true)
-                    .logResponses(true)
-                    .build();
+                    .logResponses(true);
+                    
+            // Apply headers if present
+            // Some versions of langchain4j StreamableHttpMcpTransport.builder() don't have .headers() method
+            // We use reflection to safely try setting headers without breaking compilation for different versions
+            if (config.getHeaders() != null && !config.getHeaders().isBlank()) {
+                try {
+                    Map<String, String> headersMap = objectMapper.readValue(config.getHeaders(), new TypeReference<Map<String, String>>() {});
+                    if (!headersMap.isEmpty()) {
+                        try {
+                            // First try headers(Map) if available (recent versions)
+                            builder.getClass().getMethod("headers", Map.class).invoke(builder, headersMap);
+                        } catch (NoSuchMethodException e) {
+                            try {
+                                // Or maybe customHeaders(Map)
+                                builder.getClass().getMethod("customHeaders", Map.class).invoke(builder, headersMap);
+                            } catch (NoSuchMethodException ex) {
+                                log.warn("Cannot set headers: StreamableHttpMcpTransport.builder() does not support headers() method in the current langchain4j version");
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    log.error("Failed to parse or apply headers for MCP client: {}", config.getName(), e);
+                }
+            }
+            
+            StreamableHttpMcpTransport transport = builder.build();
             baseTransport = transport;
             
             defaultMcpClient = new DefaultMcpClient.Builder()
@@ -253,8 +279,11 @@ public class McpServiceImpl implements McpService {
                 config.setIsActive(true);
                 
                 if (configMap.containsKey("url")) {
-                    config.setTransportType("SSE");
+                    config.setTransportType("SSE"); // Default to SSE for url-based configs from import
                     config.setUrl(configMap.get("url").toString());
+                    if (configMap.containsKey("headers")) {
+                        config.setHeaders(objectMapper.writeValueAsString(configMap.get("headers")));
+                    }
                 } else {
                     config.setTransportType("STDIO");
                     if (configMap.containsKey("command")) {

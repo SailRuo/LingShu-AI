@@ -8,7 +8,11 @@ import { useAsr } from '@/composables/useAsr'
 import { useTts } from '@/composables/useTts'
 import ChatMessageComponent from '@/components/chat/ChatMessage.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
-import { Sparkles, Loader2, Wifi, WifiOff, Trash2, Volume2, VolumeX } from 'lucide-vue-next'
+import { Sparkles, Loader2, Wifi, WifiOff, Trash2, Volume2, VolumeX, Workflow } from 'lucide-vue-next'
+
+const emit = defineEmits<{
+  (e: 'toggle-panel'): void
+}>()
 
 const {
   messages,
@@ -357,25 +361,36 @@ async function handleToggleTts() {
         <span>{{ isConnected ? '已连接' : '未连接' }}</span>
       </div>
 
-      <div class="chat-actions" v-if="messages.length > 0">
+      <div class="chat-actions">
         <button
-          class="action-btn tts-btn"
-          :class="{ active: settings.ttsEnabled, playing: ttsPlaying }"
-          @click="handleToggleTts"
-          :title="settings.ttsEnabled ? '关闭语音' : '开启语音'"
+          class="action-btn toggle-panel-btn"
+          @click="$emit('toggle-panel')"
+          title="记忆流光面板"
         >
-          <Volume2 v-if="settings.ttsEnabled" :size="16" />
-          <VolumeX v-else :size="16" />
+          <Workflow :size="16" />
+          <span>溯源</span>
         </button>
 
-        <button
-          class="action-btn clear-btn"
-          @click="handleClearHistory"
-          title="清空会话"
-        >
-          <Trash2 :size="14" />
-          <span>清空</span>
-        </button>
+        <template v-if="messages.length > 0">
+          <button
+            class="action-btn tts-btn"
+            :class="{ active: settings.ttsEnabled, playing: ttsPlaying }"
+            @click="handleToggleTts"
+            :title="settings.ttsEnabled ? '关闭语音' : '开启语音'"
+          >
+            <Volume2 v-if="settings.ttsEnabled" :size="16" />
+            <VolumeX v-else :size="16" />
+          </button>
+
+          <button
+            class="action-btn clear-btn"
+            @click="handleClearHistory"
+            title="清空会话"
+          >
+            <Trash2 :size="14" />
+            <span>清空</span>
+          </button>
+        </template>
       </div>
     </div>
 
@@ -707,6 +722,13 @@ async function handleToggleTts() {
   display: flex;
   flex-direction: column;
   gap: 24px;
+}
+
+@media (max-width: 768px) {
+  .messages-content {
+    width: calc(100% - 16px);
+    padding: 60px 0 150px;
+  }
 }
 
 /* Load More Indicator */

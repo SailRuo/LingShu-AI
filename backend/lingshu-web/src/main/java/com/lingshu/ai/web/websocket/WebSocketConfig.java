@@ -29,10 +29,6 @@ public class WebSocketConfig implements WebSocketConfigurer {
                 }
             },
             "/ws/chat"
-        ).setAllowedOrigins(
-            "http://localhost:5173",
-            "tauri://localhost",
-            "http://tauri.localhost"
-        );
+        ).setAllowedOriginPatterns("*");
     }
 }

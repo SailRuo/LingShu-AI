@@ -427,7 +427,7 @@ public class ChatServiceImpl implements ChatService {
                 .onCompleteResponse(response -> {
                     int tokenCount = assistantResponseStore.length() / 4;
                     systemLogService.llmEnd(tokenCount, "LLM");
-                    systemLogService.success("对话完成，回复长�?" + assistantResponseStore.length() + " 字符", "CHAT");
+                    systemLogService.success("对话完成，回复长度: " + assistantResponseStore.length() + " 字符", "CHAT");
                     flushPendingAssistantText(turnId, pendingAssistantText);
                     turnTimelineService.completeTurn(turnId, assistantResponseStore.toString());
                     sink.tryEmitComplete();
@@ -548,7 +548,7 @@ public class ChatServiceImpl implements ChatService {
                                            Long turnId) {
         int tokenCount = assistantResponseStore.length() / 4;
         systemLogService.llmEnd(tokenCount, "LLM");
-        systemLogService.success("对话完成，回复长�?" + assistantResponseStore.length() + " 字符", "CHAT");
+        systemLogService.success("对话完成，回复长度: " + assistantResponseStore.length() + " 字符", "CHAT");
         turnTimelineService.recordAssistantText(turnId, assistantResponseStore.toString());
         turnTimelineService.completeTurn(turnId, assistantResponseStore.toString());
         sink.tryEmitComplete();

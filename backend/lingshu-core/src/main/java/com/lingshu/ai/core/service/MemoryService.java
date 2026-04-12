@@ -37,7 +37,7 @@ public interface MemoryService {
     Object getMemoryMaintenanceSummary();
     void updateFactClassification(Long factId, String clusterKey, String subType);
 
-    java.util.List<com.lingshu.ai.core.dto.MemoryRetrievalEvent> getRecentRetrievalEvents();
+    java.util.List<com.lingshu.ai.core.dto.MemoryRetrievalEvent> getRecentRetrievalEvents(String userId);
 
     /**
      * P2: 记忆治理 - 获取所有事实列表（包含已归档等），支持分页或治理。

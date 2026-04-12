@@ -23,6 +23,7 @@ const formModel = ref({
   command: '',
   args: [] as string[],
   envVars: [] as { key: string, value: string }[],
+  headers: [] as { key: string, value: string }[],
   url: '',
   isActive: true
 })
@@ -40,7 +41,7 @@ const columns = computed(() => [
   {
     title: '类型',
     key: 'transportType',
-    width: 100,
+    width: 160,
     align: 'center' as const,
     render: (row: any) => {
       const type = (row.transportType || '').toLowerCase()
@@ -153,7 +154,8 @@ const columns = computed(() => [
 
 const transportOptions = [
   { label: 'STDIO (本地子进程)', value: 'STDIO' },
-  { label: 'SSE (HTTP 长链接)', value: 'SSE' }
+  { label: 'SSE (HTTP 长链接)', value: 'SSE' },
+  { label: 'Streamable HTTP (可流式 HTTP)', value: 'STREAMABLE_HTTP' }
 ]
 
 async function fetchServers() {
@@ -184,6 +186,7 @@ function openCreate() {
     command: '',
     args: [],
     envVars: [],
+    headers: [],
     url: '',
     isActive: true
   }
@@ -199,6 +202,13 @@ function openEdit(server: any) {
       envs = Object.keys(parsed).map(k => ({ key: k, value: parsed[k] }))
     } catch(e) {}
   }
+  let headers: {key: string, value: string}[] = []
+  if (server.headers) {
+    try {
+      const parsed = JSON.parse(server.headers)
+      headers = Object.keys(parsed).map(k => ({ key: k, value: parsed[k] }))
+    } catch(e) {}
+  }
   let args: string[] = []
   if (server.args) {
     try { args = JSON.parse(server.args) } catch(e) {}
@@ -210,6 +220,7 @@ function openEdit(server: any) {
     command: server.command || '',
     args: args,
     envVars: envs,
+    headers: headers,
     url: server.url || '',
     isActive: server.isActive
   }
@@ -228,6 +239,13 @@ async function saveServer() {
       envObj[item.key] = item.value
     }
   })
+
+  const headersObj: Record<string, string> = {}
+  formModel.value.headers.forEach(item => {
+    if (item.key && item.value) {
+      headersObj[item.key] = item.value
+    }
+  })
   
   const payload = {
     name: formModel.value.name,
@@ -235,7 +253,8 @@ async function saveServer() {
     command: formModel.value.transportType?.toUpperCase() === 'STDIO' ? formModel.value.command : null,
     args: formModel.value.transportType?.toUpperCase() === 'STDIO' ? JSON.stringify(formModel.value.args) : null,
     env: formModel.value.transportType?.toUpperCase() === 'STDIO' ? JSON.stringify(envObj) : null,
-    url: formModel.value.transportType?.toUpperCase() === 'SSE' ? formModel.value.url : null,
+    headers: ['SSE', 'STREAMABLE_HTTP'].includes(formModel.value.transportType?.toUpperCase() || '') ? JSON.stringify(headersObj) : null,
+    url: ['SSE', 'STREAMABLE_HTTP'].includes(formModel.value.transportType?.toUpperCase() || '') ? formModel.value.url : null,
     isActive: formModel.value.isActive
   }
 
@@ -298,9 +317,11 @@ function exportServer(server: any) {
   const mcpConfig: any = {}
   const serverName = server.name || 'mcp-server'
   
-  if (server.transportType?.toUpperCase() === 'SSE') {
+  if (['SSE', 'STREAMABLE_HTTP'].includes(server.transportType?.toUpperCase() || '')) {
     mcpConfig[serverName] = {
-      url: server.url
+      url: server.url,
+      transportType: server.transportType,
+      headers: server.headers ? JSON.parse(server.headers) : {}
     }
   } else {
     try {
@@ -456,9 +477,20 @@ function renderEnvInput() {
           </n-form-item>
         </template>
         
-        <template v-if="formModel.transportType?.toUpperCase() === 'SSE'">
+        <template v-if="['SSE', 'STREAMABLE_HTTP'].includes(formModel.transportType?.toUpperCase() || '')">
           <n-form-item label="SSE 订阅 URL">
             <n-input v-model:value="formModel.url" placeholder="http://localhost:8080/mcp/sse" />
+          </n-form-item>
+          
+          <n-form-item label="请求头 (Headers)">
+            <n-dynamic-input v-model:value="formModel.headers" :on-create="renderEnvInput">
+              <template #default="{ index }">
+                <div style="display: flex; gap: 8px; width: 100%;">
+                  <n-input v-model:value="formModel.headers[index].key" placeholder="Key" style="flex: 1" />
+                  <n-input v-model:value="formModel.headers[index].value" placeholder="Value" style="flex: 2" />
+                </div>
+              </template>
+            </n-dynamic-input>
           </n-form-item>
         </template>
 

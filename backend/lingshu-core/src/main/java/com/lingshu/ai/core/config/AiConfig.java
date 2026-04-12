@@ -215,7 +215,7 @@ public class AiConfig {
             private final dev.langchain4j.memory.ChatMemory delegate =
                     dev.langchain4j.memory.chat.MessageWindowChatMemory.builder()
                             .id(sessionId)
-                            .maxMessages(15)
+                            .maxMessages(200)
                             .chatMemoryStore(chatMemoryStore)
                             .build();
 
@@ -237,26 +237,42 @@ public class AiConfig {
                 }
 
                 msgs = removeOrphanedToolMessages(msgs);
+                return ensureHistoryStartsWithUser(msgs);
+            }
 
-                java.util.List<dev.langchain4j.data.message.ChatMessage> result = new java.util.ArrayList<>();
-                boolean foundUserMessage = false;
-                for (dev.langchain4j.data.message.ChatMessage msg : msgs) {
-                    if (msg instanceof dev.langchain4j.data.message.SystemMessage) {
-                        result.add(msg);
-                    } else if (msg instanceof dev.langchain4j.data.message.UserMessage) {
-                        foundUserMessage = true;
-                        result.add(msg);
-                    } else if (foundUserMessage) {
-                        result.add(msg);
+            private java.util.List<dev.langchain4j.data.message.ChatMessage> ensureHistoryStartsWithUser(
+                    java.util.List<dev.langchain4j.data.message.ChatMessage> messages) {
+                java.util.List<dev.langchain4j.data.message.ChatMessage> systemMessages = new java.util.ArrayList<>();
+                int firstUserIndex = -1;
+
+                for (int i = 0; i < messages.size(); i++) {
+                    dev.langchain4j.data.message.ChatMessage message = messages.get(i);
+                    if (message instanceof dev.langchain4j.data.message.SystemMessage) {
+                        systemMessages.add(message);
+                        continue;
+                    }
+                    if (message instanceof dev.langchain4j.data.message.UserMessage) {
+                        firstUserIndex = i;
+                    }
+                    // Continue looking for the first UserMessage instead of breaking
+                    // We only care about the first one we find after SystemMessages
+                    if (firstUserIndex != -1) {
+                        break;
                     }
                 }
 
-                if (!foundUserMessage && !result.isEmpty()) {
-                    log.warn("ChatMemory 截断后未找到 UserMessage，添加占位符以避免模型报错");
-                    result.add(dev.langchain4j.data.message.UserMessage.from("[继续之前的对话上下文]"));
+                if (firstUserIndex >= 0) {
+                    java.util.List<dev.langchain4j.data.message.ChatMessage> result = new java.util.ArrayList<>(systemMessages);
+                    result.addAll(messages.subList(firstUserIndex, messages.size()));
+                    return result;
                 }
 
-                return result;
+                boolean hasNonSystemMessages = messages.stream()
+                        .anyMatch(msg -> !(msg instanceof dev.langchain4j.data.message.SystemMessage));
+                if (hasNonSystemMessages) {
+                    log.warn("ChatMemory 中存在缺少 UserMessage 的残缺历史，已跳过这些历史消息");
+                }
+                return systemMessages;
             }
 
             private java.util.List<dev.langchain4j.data.message.ChatMessage> removeOrphanedToolMessages(

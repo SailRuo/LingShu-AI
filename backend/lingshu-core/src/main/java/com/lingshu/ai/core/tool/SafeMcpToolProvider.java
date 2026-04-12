@@ -102,6 +102,14 @@ public class SafeMcpToolProvider implements ToolProvider {
                     }
                 }
 
+                // Fallback: some MCP servers return structuredContent instead of text content array
+                if (textParts.isEmpty() && images.isEmpty()) {
+                    String fallbackText = extractTextFallback(rawResult);
+                    if (fallbackText != null && !fallbackText.isBlank()) {
+                        textParts.append(fallbackText);
+                    }
+                }
+
                 // 将图像直接注入到 ChatMemory 让 LLM 能够访问
                 if (!images.isEmpty() && chatMemoryProvider != null && memoryId != null) {
                     injectImagesToMemory(images, memoryId, toolSpec.name());
@@ -153,6 +161,67 @@ public class SafeMcpToolProvider implements ToolProvider {
         }
 
         return contents;
+    }
+
+    private String extractTextFallback(JsonNode rawResult) {
+        JsonNode resultNode = rawResult.get("result");
+        if (resultNode == null || resultNode.isNull()) {
+            return null;
+        }
+
+        // 1) Prefer structuredContent if present
+        JsonNode structured = resultNode.get("structuredContent");
+        if (structured != null && !structured.isNull()) {
+            return jsonNodeToReadableText(structured);
+        }
+
+        // 2) If content exists but polymorphic parse failed, try manual extraction
+        JsonNode content = resultNode.get("content");
+        if (content != null) {
+            if (content.isTextual()) {
+                return content.asText();
+            }
+            if (content.isArray()) {
+                StringBuilder sb = new StringBuilder();
+                for (JsonNode item : content) {
+                    if (item == null || item.isNull()) {
+                        continue;
+                    }
+                    JsonNode textNode = item.get("text");
+                    if (textNode != null && textNode.isTextual()) {
+                        if (!sb.isEmpty()) {
+                            sb.append("\n");
+                        }
+                        sb.append(textNode.asText());
+                    } else {
+                        if (!sb.isEmpty()) {
+                            sb.append("\n");
+                        }
+                        sb.append(jsonNodeToReadableText(item));
+                    }
+                }
+                if (!sb.isEmpty()) {
+                    return sb.toString();
+                }
+            }
+        }
+
+        // 3) Last fallback: use whole result payload
+        return jsonNodeToReadableText(resultNode);
+    }
+
+    private String jsonNodeToReadableText(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        try {
+            if (node.isTextual()) {
+                return node.asText();
+            }
+            return OBJECT_MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(node);
+        } catch (Exception e) {
+            return node.toString();
+        }
     }
 
     private void injectImagesToMemory(List<McpImageContent> images, Object memoryId, String toolName) {

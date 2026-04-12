@@ -101,7 +101,7 @@ public class BuiltinWorkspaceToolProvider implements ToolProvider {
                     charset = java.nio.charset.Charset.forName("GBK");
                 } catch (Exception ignored) {}
             }
-            String output = new String(outputBytes, charset);
+            String output = new String(outputBytes, charset).replace("\u0000", "");
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", exitCode == 0);

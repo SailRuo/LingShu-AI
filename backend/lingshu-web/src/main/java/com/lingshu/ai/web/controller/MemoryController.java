@@ -71,8 +71,8 @@ public class MemoryController {
      * 获取最近的记忆检索事件流。
      */
     @GetMapping("/events")
-    public Object getRecentRetrievalEvents() {
-        return memoryService.getRecentRetrievalEvents();
+    public Object getRecentRetrievalEvents(@RequestParam(required = false) String userId) {
+        return memoryService.getRecentRetrievalEvents(resolveUserId(userId));
     }
 
     /**

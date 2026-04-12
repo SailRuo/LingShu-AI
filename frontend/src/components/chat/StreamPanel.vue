@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { NSpin, NEmpty, NIcon, NTag, NScrollbar } from 'naive-ui'
-import { Zap, BrainCircuit, Workflow, AlertCircle, Database, Search } from 'lucide-vue-next'
+import { Zap, BrainCircuit, Workflow, AlertCircle, Database, Search, X } from 'lucide-vue-next'
+import { getClientUserId } from '@/composables/useChat'
+import { getFullUrl } from '@/utils/request'
+
+const emit = defineEmits<{
+  (e: 'close'): void
+}>()
 
 interface SemanticMatch {
   factId: number | null
@@ -29,7 +35,8 @@ const error = ref<string | null>(null)
 
 const fetchEvents = async () => {
   try {
-    const res = await fetch('http://localhost:8080/api/memory/events')
+    const userId = getClientUserId()
+    const res = await fetch(getFullUrl(`/api/memory/events?userId=${encodeURIComponent(userId)}`))
     if (!res.ok) throw new Error('获取事件流失败')
     const data = await res.json()
     // 反转数组，让最新事件排在前面
@@ -66,43 +73,46 @@ const getScoreColor = (score: number) => {
 </script>
 
 <template>
-  <div class="stream-view">
-    <header class="view-header">
-      <div class="header-title">
-        <NIcon :size="24" color="var(--color-primary)"><Workflow /></NIcon>
-        <h2>检索溯源事件流</h2>
+  <div class="stream-panel">
+    <header class="panel-header">
+      <div class="header-content">
+        <div class="header-title">
+          <NIcon :size="18" color="var(--color-primary)"><Workflow /></NIcon>
+          <h3>记忆流光</h3>
+        </div>
+        <p class="header-desc">GAM-RAG 检索链路监控</p>
       </div>
-      <p class="header-desc">记录实时发生的 RAG 检索链路，包含实体激活、图谱召回与向量打分记录。</p>
+      <button class="close-btn" @click="$emit('close')" title="关闭面板">
+        <X :size="18" />
+      </button>
     </header>
 
     <div class="stream-content">
       <div v-if="isLoading && events.length === 0" class="loading-state">
-        <NSpin size="large" stroke="var(--color-primary)" />
-        <span>正在接入神经漫游接口...</span>
+        <NSpin size="medium" stroke="var(--color-primary)" />
+        <span>监听神经漫游...</span>
       </div>
 
       <div v-else-if="error" class="error-state">
-        <NIcon :size="48" color="var(--color-error)"><AlertCircle /></NIcon>
+        <NIcon :size="32" color="var(--color-error)"><AlertCircle /></NIcon>
         <span>{{ error }}</span>
       </div>
 
       <div v-else-if="events.length === 0" class="empty-state">
-        <NEmpty description="暂无检索事件，尝试发送包含既有事实的消息激活它。" />
+        <NEmpty description="暂无检索事件" />
       </div>
 
       <NScrollbar v-else class="event-list-scroll">
         <transition-group name="list" tag="div" class="event-list">
           <div v-for="(event, i) in events" :key="event.timestamp + i" class="event-card glass">
-
-            <div class="event-time-bar">
-              <span class="time-label">{{ formatTime(event.timestamp) }}</span>
-              <div class="line"></div>
-              <div class="dot pulse"></div>
+            <div class="event-header-compact">
+               <div class="dot pulse"></div>
+               <span class="time-label">{{ formatTime(event.timestamp) }}</span>
             </div>
 
             <div class="event-body">
               <div class="query-section">
-                <NIcon :size="16" class="icon-query"><Search /></NIcon>
+                <NIcon :size="14" class="icon-query"><Search /></NIcon>
                 <div class="query-text">{{ event.query }}</div>
               </div>
 
@@ -125,12 +135,12 @@ const getScoreColor = (score: number) => {
                       激活事实:
                       <div class="graph-content-list">
                         <div v-for="(content, gi) in event.graphMatchedContent" :key="gi" class="graph-content-item">
-                          <NIcon :size="10" color="var(--color-primary)"><FlashOutline /></NIcon>
+                          <NIcon :size="10" color="var(--color-primary)"><Zap /></NIcon>
                           {{ content }}
                         </div>
                       </div>
                     </div>
-                    <div class="graph-hits" v-else-if="event.baseFactContents && event.baseFactContents.length > 0">
+                    <div class="graph-hits" v-if="event.baseFactContents && event.baseFactContents.length > 0" :style="event.graphMatchedContent && event.graphMatchedContent.length > 0 ? 'margin-top: 12px;' : ''">
                       用户基础事实 ({{ event.baseFactContents.length }}):
                       <div class="graph-content-list">
                         <div v-for="(content, bi) in event.baseFactContents" :key="bi" class="graph-content-item base-fact">
@@ -139,7 +149,7 @@ const getScoreColor = (score: number) => {
                         </div>
                       </div>
                     </div>
-                    <div class="empty-note" v-else>未触发图谱激活</div>
+                    <div class="empty-note" v-if="!(event.graphMatchedContent && event.graphMatchedContent.length > 0) && !(event.baseFactContents && event.baseFactContents.length > 0)">未触发图谱激活</div>
                   </div>
                 </div>
 
@@ -172,22 +182,22 @@ const getScoreColor = (score: number) => {
                     <span>3. 最终上下文装配</span>
                   </div>
                   <div class="stage-content">
-                    <div class="final-hits" v-if="event.finalRankedContent && event.finalRankedContent.length > 0">
-                      装配事实内容:
-                      <div class="final-content-list">
-                        <div v-for="(content, ci) in event.finalRankedContent" :key="ci" class="final-content-item">
-                          <NIcon :size="10" color="var(--color-success)"><Database /></NIcon>
-                          {{ content }}
-                        </div>
-                      </div>
-                    </div>
-                    <div class="fallback-section" v-else-if="event.fallbackActivated">
+                    <div class="fallback-section" v-if="event.fallbackActivated">
                       <div class="fallback-note">
                         <NIcon :size="12" color="var(--color-accent)"><BrainCircuit /></NIcon>
                         已通过图谱基础事实提供上下文（Fallback 激活）
                       </div>
                       <div class="final-content-list" v-if="event.finalRankedContent && event.finalRankedContent.length > 0">
                         <div v-for="(content, fi) in event.finalRankedContent" :key="fi" class="final-content-item">
+                          <NIcon :size="10" color="var(--color-success)"><Database /></NIcon>
+                          {{ content }}
+                        </div>
+                      </div>
+                    </div>
+                    <div class="final-hits" v-else-if="event.finalRankedContent && event.finalRankedContent.length > 0">
+                      装配事实内容:
+                      <div class="final-content-list">
+                        <div v-for="(content, ci) in event.finalRankedContent" :key="ci" class="final-content-item">
                           <NIcon :size="10" color="var(--color-success)"><Database /></NIcon>
                           {{ content }}
                         </div>
@@ -207,29 +217,37 @@ const getScoreColor = (score: number) => {
 </template>
 
 <style scoped>
-.stream-view {
+.stream-panel {
   height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 24px;
   box-sizing: border-box;
 }
 
-.view-header {
-  margin-bottom: 24px;
-  flex-shrink: 0;
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--color-outline);
+  background: rgba(var(--color-surface-rgb), 0.4);
+}
+
+.header-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .header-title {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
+  gap: 8px;
 }
 
-.header-title h2 {
+.header-title h3 {
   margin: 0;
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--color-text);
   letter-spacing: 0.5px;
@@ -237,19 +255,34 @@ const getScoreColor = (score: number) => {
 
 .header-desc {
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--color-text-dim);
+}
+
+.close-btn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.close-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-text);
 }
 
 .stream-content {
   flex: 1;
   min-height: 0;
   position: relative;
-  border-radius: 16px;
-  background: var(--color-glass-bg);
-  border: 1px solid var(--color-glass-border);
   overflow: hidden;
-  padding: 20px;
+  padding: 16px;
 }
 
 .loading-state, .error-state, .empty-state {
@@ -270,28 +303,29 @@ const getScoreColor = (score: number) => {
 .event-list {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding-right: 12px;
-  padding-bottom: 20px;
+  gap: 16px;
+  padding-right: 8px;
+  padding-bottom: 16px;
 }
 
 /* 列表动画 */
 .list-enter-active,
 .list-leave-active {
-  transition: all 0.5s ease;
+  transition: all 0.4s ease;
 }
 .list-enter-from {
   opacity: 0;
-  transform: translateY(-20px) scale(0.98);
+  transform: translateY(-10px) scale(0.98);
 }
 .list-leave-to {
   opacity: 0;
-  transform: translateX(30px);
+  transform: translateX(20px);
 }
 
 .event-card {
   display: flex;
-  gap: 16px;
+  flex-direction: column;
+  gap: 12px;
   padding: 16px;
   border-radius: 12px;
   background: rgba(var(--color-surface-rgb), 0.4);
@@ -304,34 +338,24 @@ const getScoreColor = (score: number) => {
   border-color: var(--color-primary-dim);
 }
 
-.event-time-bar {
+.event-header-compact {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  width: 70px;
-  flex-shrink: 0;
+  gap: 8px;
+  margin-bottom: 4px;
 }
 
 .time-label {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-dim);
-  margin-bottom: 8px;
-}
-
-.line {
-  width: 2px;
-  flex: 1;
-  background: linear-gradient(to bottom, var(--color-primary-dim), transparent);
-  border-radius: 2px;
 }
 
 .dot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--color-primary);
-  margin-top: -4px;
 }
 
 .dot.pulse {
@@ -341,7 +365,7 @@ const getScoreColor = (score: number) => {
 
 @keyframes pulse-dot {
   0% { box-shadow: 0 0 0 0 rgba(var(--color-primary-rgb), 0.4); }
-  70% { box-shadow: 0 0 0 8px rgba(var(--color-primary-rgb), 0); }
+  70% { box-shadow: 0 0 0 6px rgba(var(--color-primary-rgb), 0); }
   100% { box-shadow: 0 0 0 0 rgba(var(--color-primary-rgb), 0); }
 }
 
@@ -354,10 +378,10 @@ const getScoreColor = (score: number) => {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  margin-bottom: 16px;
-  padding: 12px;
+  margin-bottom: 12px;
+  padding: 10px;
   background: rgba(0, 0, 0, 0.2);
-  border-radius: 8px;
+  border-radius: 6px;
   border-left: 3px solid var(--color-primary);
 }
 
@@ -367,52 +391,40 @@ const getScoreColor = (score: number) => {
 }
 
 .query-text {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--color-text);
-  line-height: 1.5;
+  line-height: 1.4;
   word-break: break-all;
 }
 
 .pipeline-stages {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: auto auto;
-  gap: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .stage-block {
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
   border: 1px solid var(--color-outline);
   overflow: hidden;
-}
-
-/* 前两个阶段并排显示 */
-.stage-block:nth-child(1),
-.stage-block:nth-child(2) {
-  grid-column: span 1;
-}
-
-/* 第三个阶段独占一整行 */
-.stage-block:nth-child(3) {
-  grid-column: 1 / -1;
 }
 
 .stage-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 12px;
+  padding: 6px 10px;
   background: rgba(0, 0, 0, 0.1);
   border-bottom: 1px solid var(--color-outline);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--color-text);
 }
 
 .stage-content {
-  padding: 12px;
-  font-size: 12px;
+  padding: 10px;
+  font-size: 11px;
 }
 
 .empty-note {
@@ -426,7 +438,7 @@ const getScoreColor = (score: number) => {
   align-items: center;
   gap: 6px;
   color: var(--color-accent);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
 }
 
@@ -463,16 +475,16 @@ const getScoreColor = (score: number) => {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .graph-content-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+  gap: 6px;
+  padding: 5px 8px;
   background: rgba(var(--color-primary-rgb), 0.08);
-  border-radius: 6px;
+  border-radius: 4px;
   border-left: 2px solid var(--color-primary);
   color: var(--color-text);
   font-size: 11px;
@@ -517,7 +529,6 @@ const getScoreColor = (score: number) => {
 }
 
 .final-stage {
-  grid-column: 1 / -1;
   background: rgba(var(--color-success-rgb), 0.03);
   border-color: rgba(var(--color-success-rgb), 0.2);
 }
@@ -537,16 +548,16 @@ const getScoreColor = (score: number) => {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .final-content-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+  gap: 6px;
+  padding: 5px 8px;
   background: rgba(var(--color-success-rgb), 0.08);
-  border-radius: 6px;
+  border-radius: 4px;
   border-left: 2px solid var(--color-success);
   color: var(--color-text);
   font-size: 11px;

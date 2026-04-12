@@ -473,6 +473,19 @@ function handleMicMouseUp() {
   50% { transform: scale(1.2); }
 }
 
+@media (max-width: 768px) {
+  .input-container {
+    padding: 12px 0;
+  }
+  .input-wrapper {
+    width: calc(100% - 16px);
+    padding: 8px 12px;
+  }
+  .input-field {
+    font-size: 14px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .loading-dot,
   .spinning,

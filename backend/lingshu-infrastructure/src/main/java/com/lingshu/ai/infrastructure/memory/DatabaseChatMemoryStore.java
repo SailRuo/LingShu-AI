@@ -28,6 +28,8 @@ import java.util.stream.Collectors;
 @Component("databaseChatMemoryStore")
 public class DatabaseChatMemoryStore implements ChatMemoryStore {
 
+    private static final int MAX_CONTEXT_TURNS = 8;
+
     private final ChatTurnRepository turnRepository;
     private final ChatTurnEventRepository eventRepository;
     private final ConcurrentMap<Long, SystemMessage> sessionSystemMessages = new ConcurrentHashMap<>();
@@ -49,10 +51,10 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
             messages.add(systemMessage);
         }
 
-        PageRequest pageable = PageRequest.of(0, 20, Sort.by("id").descending());
+        PageRequest pageable = PageRequest.of(0, MAX_CONTEXT_TURNS, Sort.by("id").descending());
         List<ChatTurn> turnsDesc = turnRepository.findBySessionIdAndStatusInOrderByIdDesc(
                 sessionId,
-                List.of("completed", "failed"),
+                List.of("running", "completed", "failed"),
                 pageable
         );
         if (turnsDesc == null || turnsDesc.isEmpty()) {
@@ -69,11 +71,19 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
 
         for (ChatTurn turn : turns) {
             UserMessage userMessage = toUserMessage(turn);
-            if (userMessage != null) {
-                messages.add(userMessage);
+            List<ChatTurnEvent> turnEvents = eventsByTurnId.getOrDefault(turn.getId(), List.of());
+
+            // Keep model context aligned to complete user-driven turns.
+            // Assistant-only records such as welcome messages are still stored for UI history,
+            // but should not become the leading conversational message sent back to the LLM.
+            if (userMessage == null) {
+                if (!turnEvents.isEmpty() || !safe(turn.getAssistantMessage()).isBlank()) {
+                    log.debug("Skip assistant-only turn from chat memory context, turnId={}", turn.getId());
+                }
+                continue;
             }
 
-            List<ChatTurnEvent> turnEvents = eventsByTurnId.getOrDefault(turn.getId(), List.of());
+            messages.add(userMessage);
             boolean hasAssistantTextEvent = false;
 
             for (ChatTurnEvent event : turnEvents) {
