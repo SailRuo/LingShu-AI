@@ -12,6 +12,10 @@ import ComingSoonView from '@/views/ComingSoonView.vue'
 import SystemLogView from '@/views/SystemLogView.vue'
 import GovernanceView from '@/views/GovernanceView.vue'
 import StarField from '@/components/common/StarField.vue'
+import RainEffect from '@/components/common/RainEffect.vue'
+import AuroraEffect from '@/components/common/AuroraEffect.vue'
+import FireflyEffect from '@/components/common/FireflyEffect.vue'
+import MistEffect from '@/components/common/MistEffect.vue'
 import SecurityView from '@/views/SecurityView.vue'
 
 const themeStore = useThemeStore()
@@ -21,8 +25,8 @@ const sidebarCollapsed = ref(false)
 const mobileSidebarVisible = ref(false)
 const isMobile = ref(false)
 
-// 动画特效开关，使用 LocalStorage 持久化，默认开启
-const enableAnimations = useLocalStorage('lingshu-enable-animations', false)
+// 动画特效，使用 LocalStorage 持久化
+const animationEffect = useLocalStorage('lingshu-animation-effect', 'off')
 
 // 监听窗口大小变化
 function checkMobile() {
@@ -106,14 +110,18 @@ function getViewKey(menuKey: string): string {
           <n-loading-bar-provider>
             <div class="app-container">
               <!-- Mesh Background (根据开关控制) -->
-              <div class="mesh-bg" v-if="enableAnimations">
+              <div class="mesh-bg" v-if="animationEffect !== 'off'">
                 <div class="mesh-blob mesh-1"></div>
                 <div class="mesh-blob mesh-2"></div>
                 <div class="mesh-blob mesh-3"></div>
               </div>
               
-              <!-- Star Field Background Component (根据开关控制) -->
-              <StarField v-if="enableAnimations" />
+              <!-- Background Effects -->
+              <StarField v-if="animationEffect === 'starfield'" />
+              <RainEffect v-if="animationEffect === 'rain'" />
+              <AuroraEffect v-if="animationEffect === 'aurora'" />
+              <FireflyEffect v-if="animationEffect === 'firefly'" />
+              <MistEffect v-if="animationEffect === 'mist'" />
 
               <!-- Main Layout -->
               <div class="main-layout" :class="{ 'sidebar-collapsed': sidebarCollapsed && !isMobile }">

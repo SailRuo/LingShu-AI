@@ -21,7 +21,7 @@ export const polarLight: ThemeConfig = {
     '--color-success': '#059669',
     '--color-warning': '#b45309',
     '--color-error': '#b91c1c',
-    '--color-glass-bg': 'rgba(255, 255, 255, 0.95)',
+    '--color-glass-bg': 'rgba(255, 255, 255, 0.4)',
     '--color-glass-border': 'rgba(0, 0, 0, 0.12)',
     '--color-bg-mesh-1': '#f1f5f9',
     '--color-bg-mesh-2': '#cbd5e1',
@@ -70,7 +70,7 @@ export const cyberPurple: ThemeConfig = {
     '--color-error': '#f87171',
     
     // 玻璃态效果
-    '--color-glass-bg': 'rgba(10, 10, 20, 0.8)', // 黑玻璃
+    '--color-glass-bg': 'rgba(10, 10, 20, 0.4)', // 黑玻璃
     '--color-glass-border': 'rgba(226, 232, 240, 0.2)',
     
     // Mesh 渐变背景 - 宇宙基调
@@ -127,7 +127,7 @@ export const deepTechFuturistic: ThemeConfig = {
     '--color-error': '#f87171',
     
     // 玻璃态效果
-    '--color-glass-bg': 'rgba(5, 45, 35, 0.85)', // 深绿玻璃
+    '--color-glass-bg': 'rgba(5, 45, 35, 0.45)', // 深绿玻璃
     '--color-glass-border': 'rgba(52, 211, 153, 0.28)',
     
     // Mesh 渐变背景 - 深色基调
@@ -184,7 +184,7 @@ export const midnightBlue: ThemeConfig = {
     '--color-error': '#f87171',
     
     // 玻璃态效果
-    '--color-glass-bg': 'rgba(15, 30, 60, 0.85)', // 深蓝玻璃
+    '--color-glass-bg': 'rgba(15, 30, 60, 0.45)', // 深蓝玻璃
     '--color-glass-border': 'rgba(56, 189, 248, 0.25)',
     
     // Mesh 渐变背景 - 深蓝基调

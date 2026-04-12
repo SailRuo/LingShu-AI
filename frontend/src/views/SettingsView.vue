@@ -1,5 +1,6 @@
 ﻿<script setup lang="ts">
 import { ref, onMounted, watch, onUnmounted } from 'vue'
+import { useLocalStorage } from '@vueuse/core'
 import { getFullUrl } from '@/utils/request'
 import {
   NInput, NSelect, NButton, NIcon, NRadioGroup, NRadioButton,
@@ -10,7 +11,8 @@ import {
 import {
   RefreshCw, Settings, Cpu, Globe, Activity, Zap, Plus,
   Trash2, Edit, Star, Users, Bell, Send, Brain, Palette, Mic,
-  Bot, Gem, Rocket, Sparkles, Volume2, MessageCircle, Info
+  Bot, Gem, Rocket, Sparkles, Volume2, MessageCircle, Info, Waves,
+  Cloud, Flame, Wind
 } from 'lucide-vue-next'
 import McpSettings from '@/components/McpSettings.vue'
 import ThemeModal from '@/components/common/ThemeModal.vue'
@@ -20,6 +22,7 @@ const message = useMessage()
 const activeTab = ref('basic')
 const showThemeModal = ref(false)
 const themeStore = useThemeStore()
+const animationEffect = useLocalStorage('lingshu-animation-effect', 'off')
 
 const settings = ref({
   source: '',
@@ -751,6 +754,53 @@ async function setDefaultAgent(id: number) {
                     </n-button>
                   </div>
                 </div>
+              </div>
+            </n-card>
+
+            <n-card class="glass-card mt-4">
+              <div class="setting-item">
+                <div class="item-label">
+                  <span class="label-text">背景特效</span>
+                  <span class="item-hint">为界面增加动态氛围感</span>
+                </div>
+                <n-radio-group v-model:value="animationEffect" size="medium">
+                  <n-radio-button value="off">
+                    <div class="flex items-center gap-1">
+                      <n-icon :component="Rocket" :size="14" v-if="animationEffect === 'off'" />
+                      <span>关闭</span>
+                    </div>
+                  </n-radio-button>
+                  <n-radio-button value="starfield">
+                    <div class="flex items-center gap-1">
+                      <n-icon :component="Sparkles" :size="14" v-if="animationEffect === 'starfield'" />
+                      <span>星辰</span>
+                    </div>
+                  </n-radio-button>
+                  <n-radio-button value="rain">
+                    <div class="flex items-center gap-1">
+                      <n-icon :component="Zap" :size="14" v-if="animationEffect === 'rain'" />
+                      <span>下雨</span>
+                    </div>
+                  </n-radio-button>
+                  <n-radio-button value="aurora">
+                    <div class="flex items-center gap-1">
+                      <n-icon :component="Wind" :size="14" v-if="animationEffect === 'aurora'" />
+                      <span>极光</span>
+                    </div>
+                  </n-radio-button>
+                  <n-radio-button value="firefly">
+                    <div class="flex items-center gap-1">
+                      <n-icon :component="Flame" :size="14" v-if="animationEffect === 'firefly'" />
+                      <span>萤火</span>
+                    </div>
+                  </n-radio-button>
+                  <n-radio-button value="mist">
+                    <div class="flex items-center gap-1">
+                      <n-icon :component="Cloud" :size="14" v-if="animationEffect === 'mist'" />
+                      <span>云海</span>
+                    </div>
+                  </n-radio-button>
+                </n-radio-group>
               </div>
             </n-card>
           </section>

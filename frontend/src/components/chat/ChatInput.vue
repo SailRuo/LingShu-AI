@@ -201,7 +201,7 @@ function handleMicMouseUp() {
   left: 0;
   right: 0;
   padding: 20px 0;
-  background: linear-gradient(to top, var(--color-background), transparent);
+  background: transparent;
   pointer-events: auto;
   display: flex;
   justify-content: center;
@@ -216,15 +216,30 @@ function handleMicMouseUp() {
   max-width: 1050px;
   margin: 0 auto;
   padding: 12px 16px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-outline);
-  border-radius: 16px;
+  /* 高级毛玻璃效果：极高透明度 */
+  background: color-mix(in srgb, var(--color-glass-bg) 20%, transparent);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
   pointer-events: auto;
-  transition: all 0.2s ease;
+  transition: all 0.3s ease;
+  box-shadow: 
+    0 8px 32px 0 rgba(0, 0, 0, 0.2),
+    inset 0 1px 1px rgba(255, 255, 255, 0.05);
+}
+
+.input-wrapper:focus-within {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-surface-elevated) 25%, transparent);
+  box-shadow: 
+    0 12px 40px 0 rgba(0, 0, 0, 0.3),
+    0 0 0 1px var(--color-primary);
 }
 
 .input-row {
   display: flex;
+  flex-direction: row;
   align-items: flex-end;
   gap: 12px;
   width: 100%;
@@ -275,11 +290,6 @@ function handleMicMouseUp() {
   background: rgba(255, 0, 0, 0.8);
 }
 
-.input-wrapper:focus-within {
-  border-color: var(--color-primary);
-  background: var(--color-surface-elevated);
-}
-
 .input-field {
   flex: 1;
   background: transparent;
@@ -321,6 +331,7 @@ function handleMicMouseUp() {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .mic-btn {
