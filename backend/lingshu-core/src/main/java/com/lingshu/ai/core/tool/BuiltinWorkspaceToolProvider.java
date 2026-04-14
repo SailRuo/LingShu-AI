@@ -176,10 +176,10 @@ public class BuiltinWorkspaceToolProvider implements ToolProvider {
     private ToolSpecification executeCommandSpec() {
         return ToolSpecification.builder()
                 .name("execute_command")
-                .description("Execute a PowerShell or shell command inside the workspace. Returns exit code and combined output as JSON.")
+                .description("Execute local shell commands inside the workspace. This tool can perform any local command operation that is allowed by the built-in security whitelist (dangerous keywords are blocked). Returns exit code and combined output as JSON.")
                 .parameters(JsonObjectSchema.builder()
-                        .description("Command execution request")
-                        .addStringProperty("command", "The command to run.")
+                        .description("Local command execution request (whitelisted and workspace-scoped).")
+                        .addStringProperty("command", "The command to run. Prefer direct local commands for file/system operations within whitelist restrictions.")
                         .addStringProperty("workdir", "Optional working directory inside the workspace.")
                         .required(List.of("command"))
                         .additionalProperties(false)

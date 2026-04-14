@@ -18,7 +18,10 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<String> handleGenericException(Exception e) {
+    public ResponseEntity<Object> handleGenericException(Exception e) throws Exception {
+        if (e instanceof org.springframework.web.servlet.resource.NoResourceFoundException) {
+            throw e;
+        }
         log.error("系统内部错误: ", e);
         return ResponseEntity.internalServerError().body("系统内部错误: " + e.getMessage());
     }

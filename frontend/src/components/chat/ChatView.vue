@@ -186,7 +186,6 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
 
     case 'chatChunk':
       appendAssistantChunk(msg.content || '')
-      isTyping.value = false
       if (autoScrollEnabled.value) {
         scrollToBottom()
       }
@@ -208,7 +207,6 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
         status: 'running',
         isError: false
       })
-      isTyping.value = false
       if (autoScrollEnabled.value) {
         scrollToBottom()
       }

@@ -52,6 +52,7 @@ function handleInput(e: Event) {
 function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
+    if (props.loading || props.disabled) return
     emit('send')
   }
 }
@@ -182,6 +183,7 @@ function handleMicMouseUp() {
           
           <button 
             class="send-btn"
+            :class="{ 'is-ai-busy': loading }"
             :disabled="(!modelValue.trim() && (!images || images.length === 0)) || loading || disabled"
             @click="emit('send')"
           >
@@ -401,7 +403,7 @@ function handleMicMouseUp() {
   background: var(--color-outline);
 }
 
-.send-btn:disabled::after {
+.send-btn.is-ai-busy::after {
   content: 'AI 正在回复';
   position: absolute;
   bottom: 100%;
@@ -421,7 +423,7 @@ function handleMicMouseUp() {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
-.send-btn:disabled:hover::after {
+.send-btn.is-ai-busy:hover::after {
   opacity: 1;
   transform: translateY(0);
 }

@@ -34,11 +34,11 @@
 
 ---
 
-## 界面预览 (Screenshots)
+## 界面预览
 
 <div align="center">
-  <p><i></i></p>
-  <img src="doc/png/lingshu_ai_ui_mockup_1773996576105.png" width="800" alt="UI Mockup">
+  <img src="doc/assets/png/lingshu_ai_ui_mockup_1773996576105.png" width="800" alt="灵枢 AI 界面预览">
+  <p><i>灵枢 AI - 沉浸式星空背景下的情感化交互体验</i></p>
 </div>
 
 ---
@@ -125,7 +125,11 @@ LingShu-AI/
 │   │   └── types/                    # TypeScript类型
 │   └── package.json
 ├── fx-frontend/                      # JavaFX桌面客户端(可选)
-├── doc/                              # 项目文档
+├── doc/                              # 📚 文档中心 (详见 doc/README.md)
+│   ├── architecture/                 # 架构设计与规范
+│   ├── implementation/               # 实施计划与方案
+│   ├── research/                     # 技术调研报告
+│   └── assets/                       # 图片与图表资源
 ├── docker-compose.yml                # Docker编排配置
 ├── Dockerfile                        # 应用镜像构建
 └── README.md
@@ -133,36 +137,21 @@ LingShu-AI/
 
 ---
 
-## 文档导航
+## 📖 文档导航
 
-项目包含详细的设计文档，帮助您深入了解系统架构与实现细节：
+我们已对项目文档进行了**企业级标准化重构**。请前往 [文档中心 (doc/README.md)](doc/README.md) 获取最清晰的分类索引。
 
-### 核心设计文档
+### 🏗️ 核心架构与设计
+*   **[系统架构设计](doc/architecture/系统架构设计文档.md)**: 深度解析分层架构、流式对话引擎及 MCP 协议集成。
+*   **[记忆模块设计](doc/architecture/记忆模块设计文档.md)**: 详解情感感知记忆系统、GAM-RAG 混合召回及生命周期管理。
+*   **[UI/UX 设计规范](doc/architecture/UI_UX设计文档.md)**: 包含 Cyber-Zen 视觉风格、多主题系统及组件库说明。
+*   **[对话调用链路](doc/architecture/对话调用链路详解.md)**: 从用户输入到事实提取的完整数据流转图。
 
-| 文档 | 说明 |
-|------|------|
-| [系统架构设计文档](doc/系统架构设计文档.md) | 整体架构设计、模块划分、核心功能实现及技术选型 |
-| [项目计划书](doc/项目计划书.md) | 项目愿景、阶段性演化路径、技术栈选型 |
-| [对话调用链路详解](doc/对话调用链路详解.md) | 用户发消息到AI流式回复再到事实提取的完整链路 |
+### 🚀 实施计划与进度
+*   **[开发路线图](doc/implementation/灵枢开发计划与进度总览.md)**: 项目阶段性目标（启蒙/百宝袋/共生/深鉴）与当前进度。
+*   **[微信 Bot 接入](doc/implementation/微信Bot接入实施文档.md)**: iLink 协议接入的详细步骤与配置指南。
+*   **[3D 记忆图谱](doc/implementation/记忆图谱3D银河系实施文档.md)**: Three.js 驱动的“银河系”记忆可视化方案。
 
-### 记忆系统文档
-
-| 文档 | 说明 |
-|------|------|
-| [情感感知记忆系统优化设计文档](doc/情感感知记忆系统优化设计文档.md) | 情感前置分析、情感感知的事实提取、记忆生命周期管理 |
-| [记忆图谱3D银河系改造方案](doc/记忆图谱3D银河系改造方案.md) | 记忆图谱可视化升级方案，打造"银河系记忆宇宙" |
-
-### 智能体与扩展
-
-| 文档 | 说明 |
-|------|------|
-| [智能体增强开发规划](doc/智能体增强开发规划.md) | Prompt模块化架构、工具调用规则、主动行为机制 |
-
-### 前端设计
-
-| 文档 | 说明 |
-|------|------|
-| [UI/UX设计详细文档](doc/UI_UX设计详细文档.md) | Cyber-Zen视觉风格、多主题色彩方案、布局系统 |
 
 ---
 
@@ -172,10 +161,10 @@ LingShu-AI/
 
 - **第一阶段：【启蒙】** (已完成) - 建立双向记忆与基础对话链路。
 - **第二阶段：【百宝袋】** (进行中) - 通过 MCP 协议获得现实世界干预能力。
-- **第三阶段：【共生】** (规划中) - 情感波动与主动意识增强。
-- **第四阶段：【深鉴】** (规划中) - 系统可观测性与思维过程可视化。
+- **第三阶段：【共生】** (基础完成 80%) - 情感波动建模与主动关怀机制已落地。
+- **第四阶段：【深鉴】** (基础完成 85%) - 3D 银河记忆图谱与全链路思维可视化已实现。
 
-详细规划请参考 [项目计划书](doc/项目计划书.md)。
+详细规划请参考 [开发路线图](doc/implementation/灵枢开发计划与进度总览.md)。
 
 ---
 
@@ -383,45 +372,6 @@ public interface McpService {
 
 ---
 
-## API 接口
-
-### 对话接口
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/chat/send` | 发送消息 (同步) |
-| GET | `/api/chat/stream` | 流式对话 (SSE) |
-| GET | `/api/chat/welcome` | 获取欢迎语 |
-| GET | `/api/chat/history` | 获取聊天历史 |
-| GET | `/api/chat/models` | 获取可用模型列表 |
-
-### 记忆接口
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/memory/graph` | 获取记忆图谱数据 |
-| GET | `/api/memory/context` | 检索记忆上下文 |
-| DELETE | `/api/memory/fact/{id}` | 删除事实 |
-| GET | `/api/memory/governance` | 记忆治理列表 |
-
-### 设置接口
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/settings` | 获取系统设置 |
-| PUT | `/api/settings` | 更新系统设置 |
-
-### 智能体接口
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/agents` | 获取智能体列表 |
-| POST | `/api/agents` | 创建智能体 |
-| PUT | `/api/agents/{id}` | 更新智能体 |
-| DELETE | `/api/agents/{id}` | 删除智能体 |
-
----
-
 ## 配置说明
 
 ### 系统设置
@@ -556,15 +506,6 @@ docker exec lingshu-neo4j neo4j-admin database dump neo4j --to-path=/backup
 ## 许可证
 
 本项目采用 GPLv3 许可证 - 详见 [LICENSE](LICENSE) 文件。
-
----
-
-## 致谢
-
-- [LangChain4j](https://github.com/langchain4j/langchain4j) - Java AI 框架
-- [Naive UI](https://www.naiveui.com/) - Vue 3 组件库
-- [Neo4j](https://neo4j.com/) - 图数据库
-- [Ollama](https://ollama.ai/) - 本地 LLM 运行时
 
 ---
 
