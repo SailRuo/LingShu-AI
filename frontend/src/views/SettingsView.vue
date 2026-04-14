@@ -11,7 +11,7 @@ import {
 import {
   RefreshCw, Settings, Cpu, Globe, Activity, Zap, Plus,
   Trash2, Edit, Star, Users, Bell, Send, Brain, Palette, Mic,
-  Bot, Gem, Rocket, Sparkles, Volume2, MessageCircle, Info, Waves,
+  Bot, Gem, Rocket, Sparkles, Volume2, MessageCircle, Info,
   Cloud, Flame, Wind
 } from 'lucide-vue-next'
 import McpSettings from '@/components/McpSettings.vue'

@@ -8,7 +8,10 @@ import { useAsr } from '@/composables/useAsr'
 import { useTts } from '@/composables/useTts'
 import ChatMessageComponent from '@/components/chat/ChatMessage.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
-import { Sparkles, Loader2, Wifi, WifiOff, Trash2, Volume2, VolumeX, Workflow } from 'lucide-vue-next'
+import ExportDialog from '@/components/chat/ExportDialog.vue'
+import { exportConversationToMarkdown, exportConversationToPng } from '@/utils/chatExport'
+import type { ExportFormat, ExportRange } from '@/utils/chatExport'
+import { Sparkles, Loader2, Wifi, WifiOff, Trash2, Volume2, VolumeX, Workflow, Download } from 'lucide-vue-next'
 
 const emit = defineEmits<{
   (e: 'toggle-panel'): void
@@ -76,6 +79,8 @@ const scrollRef = ref<InstanceType<typeof NScrollbar> | null>(null)
 const isLoadingMore = ref(false)
 const prevScrollHeight = ref(0)
 const autoScrollEnabled = ref(true) // 是否开启自动滚动到底部
+const showExportDialog = ref(false)
+const isExporting = ref(false)
 let stopHeartbeat: (() => void) | null = null
 
 // 检测用户是否已经在底部（用于判断是否应该开启自动滚动）
@@ -347,6 +352,43 @@ async function handleToggleTts() {
   await saveSettings()
   message.info(settings.value.ttsEnabled ? '语音合成已开启' : '语音合成已关闭')
 }
+
+function openExportDialog() {
+  if (messages.value.length === 0) {
+    message.warning('暂无可导出的消息')
+    return
+  }
+  showExportDialog.value = true
+}
+
+async function handleExportConfirm(payload: { format: ExportFormat; range: ExportRange }) {
+  if (messages.value.length === 0) {
+    message.warning('暂无可导出的消息')
+    return
+  }
+
+  isExporting.value = true
+  try {
+    if (payload.format === 'markdown') {
+      exportConversationToMarkdown(messages.value, {
+        range: payload.range,
+        title: '灵枢 AI 对话记录'
+      })
+    } else {
+      await exportConversationToPng(messages.value, {
+        range: payload.range,
+        title: '灵枢 AI 对话记录'
+      })
+    }
+    showExportDialog.value = false
+    message.success('导出成功')
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : '导出失败，请稍后重试'
+    message.error(msg)
+  } finally {
+    isExporting.value = false
+  }
+}
 </script>
 
 <template>
@@ -387,6 +429,15 @@ async function handleToggleTts() {
           >
             <Trash2 :size="14" />
             <span>清空</span>
+          </button>
+
+          <button
+            class="action-btn export-btn"
+            @click="openExportDialog"
+            title="导出对话"
+          >
+            <Download :size="14" />
+            <span>导出</span>
           </button>
         </template>
       </div>
@@ -465,6 +516,13 @@ async function handleToggleTts() {
       @toggle-asr="handleToggleAsr"
       @start-push-to-talk="startPushToTalk"
       @stop-push-to-talk="stopPushToTalk"
+    />
+
+    <ExportDialog
+      v-model:show="showExportDialog"
+      :message-count="messages.length"
+      :exporting="isExporting"
+      @confirm="handleExportConfirm"
     />
   </div>
 </template>
@@ -576,6 +634,16 @@ async function handleToggleTts() {
   background: rgba(239, 68, 68, 0.1);
   color: #ef4444;
   border-color: rgba(239, 68, 68, 0.2);
+}
+
+.export-btn {
+  margin-left: 8px;
+}
+
+.export-btn:hover {
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.28);
 }
 
 /* Welcome Section */

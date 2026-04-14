@@ -95,13 +95,7 @@ public class BuiltinWorkspaceToolProvider implements ToolProvider {
             byte[] outputBytes = process.getInputStream().readAllBytes();
             int exitCode = process.waitFor();
             
-            java.nio.charset.Charset charset = StandardCharsets.UTF_8;
-            if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows")) {
-                try {
-                    charset = java.nio.charset.Charset.forName("GBK");
-                } catch (Exception ignored) {}
-            }
-            String output = new String(outputBytes, charset).replace("\u0000", "");
+            String output = decodeProcessOutput(outputBytes).replace("\u0000", "");
 
             Map<String, Object> response = new HashMap<>();
             response.put("success", exitCode == 0);
@@ -179,7 +173,7 @@ public class BuiltinWorkspaceToolProvider implements ToolProvider {
                 .description("Execute local shell commands inside the workspace. This tool can perform any local command operation that is allowed by the built-in security whitelist (dangerous keywords are blocked). Returns exit code and combined output as JSON.")
                 .parameters(JsonObjectSchema.builder()
                         .description("Local command execution request (whitelisted and workspace-scoped).")
-                        .addStringProperty("command", "The command to run. Prefer direct local commands for file/system operations within whitelist restrictions.")
+                        .addStringProperty("command", "The command to run. Prefer direct local commands for file/system operations within whitelist restrictions. For reading UTF-8 files on Windows, prefer: Get-Content -Raw -Encoding UTF8 <path>.")
                         .addStringProperty("workdir", "Optional working directory inside the workspace.")
                         .required(List.of("command"))
                         .additionalProperties(false)
@@ -296,6 +290,46 @@ public class BuiltinWorkspaceToolProvider implements ToolProvider {
             return Files.exists(Paths.get("C:\\Program Files\\PowerShell\\7\\pwsh.exe")) ? "pwsh" : "powershell";
         }
         return "pwsh";
+    }
+
+    private String decodeProcessOutput(byte[] outputBytes) {
+        if (outputBytes == null || outputBytes.length == 0) {
+            return "";
+        }
+
+        if (outputBytes.length >= 3
+                && (outputBytes[0] & 0xFF) == 0xEF
+                && (outputBytes[1] & 0xFF) == 0xBB
+                && (outputBytes[2] & 0xFF) == 0xBF) {
+            return new String(outputBytes, 3, outputBytes.length - 3, StandardCharsets.UTF_8);
+        }
+
+        if (outputBytes.length >= 2
+                && (outputBytes[0] & 0xFF) == 0xFF
+                && (outputBytes[1] & 0xFF) == 0xFE) {
+            return new String(outputBytes, 2, outputBytes.length - 2, StandardCharsets.UTF_16LE);
+        }
+
+        if (outputBytes.length >= 2
+                && (outputBytes[0] & 0xFF) == 0xFE
+                && (outputBytes[1] & 0xFF) == 0xFF) {
+            return new String(outputBytes, 2, outputBytes.length - 2, StandardCharsets.UTF_16BE);
+        }
+
+        String utf8 = new String(outputBytes, StandardCharsets.UTF_8);
+        if (!utf8.contains("\uFFFD")) {
+            return utf8;
+        }
+
+        if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows")) {
+            try {
+                return new String(outputBytes, java.nio.charset.Charset.forName("GBK"));
+            } catch (Exception ignored) {
+                return utf8;
+            }
+        }
+
+        return utf8;
     }
 
     private String toJson(Map<String, Object> response) {
