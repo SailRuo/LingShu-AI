@@ -1,19 +1,23 @@
 import html2canvas from "html2canvas";
+import MarkdownIt from "markdown-it";
 import type { ChatMessage, ChatMessageSegment } from "@/types";
-
-export type ExportFormat = "markdown" | "png";
-export type ExportRange = "all" | "recent10";
-
-export interface ExportOptions {
-  range: ExportRange;
-  title?: string;
-}
 
 interface ExportMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: number;
   images?: string[];
+}
+
+const md = new MarkdownIt({
+  html: false,
+  breaks: true,
+  linkify: true,
+  typographer: true,
+});
+
+function renderMarkdown(content: string): string {
+  return md.render(content || "");
 }
 
 function getTimeLabel(timestamp: number): string {
@@ -30,26 +34,6 @@ function getDateTimeLabel(timestamp: number): string {
   const mm = String(date.getMinutes()).padStart(2, "0");
   const ss = String(date.getSeconds()).padStart(2, "0");
   return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
-}
-
-function buildTimestampForFile(): string {
-  const date = new Date();
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  const hh = String(date.getHours()).padStart(2, "0");
-  const mm = String(date.getMinutes()).padStart(2, "0");
-  const ss = String(date.getSeconds()).padStart(2, "0");
-  return `${y}-${m}-${d}_${hh}-${mm}-${ss}`;
-}
-
-function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
 }
 
 function escapeMarkdown(text: string): string {
@@ -76,9 +60,8 @@ function extractAssistantContent(message: ChatMessage): string {
   return (message.content || "").trim();
 }
 
-function normalizeMessages(messages: ChatMessage[], range: ExportRange): ExportMessage[] {
-  const base = range === "recent10" ? messages.slice(-10) : messages;
-  return base
+function normalizeMessages(messages: ChatMessage[]): ExportMessage[] {
+  return messages
     .filter((message) => message.role === "user" || message.role === "assistant")
     .map((message) => {
       if (message.role === "assistant") {
@@ -98,12 +81,12 @@ function normalizeMessages(messages: ChatMessage[], range: ExportRange): ExportM
     .filter((message) => message.content || (message.images && message.images.length > 0));
 }
 
-export function getExportMessageCount(messages: ChatMessage[], range: ExportRange): number {
-  return normalizeMessages(messages, range).length;
+export function getExportMessageCount(messages: ChatMessage[]): number {
+  return normalizeMessages(messages).length;
 }
 
-export function exportConversationToMarkdown(messages: ChatMessage[], options: ExportOptions): void {
-  const normalizedMessages = normalizeMessages(messages, options.range);
+export function buildMarkdownContent(messages: ChatMessage[], title = "灵枢 AI 对话记录"): string {
+  const normalizedMessages = normalizeMessages(messages);
   if (!normalizedMessages.length) {
     throw new Error("暂无可导出的消息");
   }
@@ -111,8 +94,6 @@ export function exportConversationToMarkdown(messages: ChatMessage[], options: E
   const firstTimestamp = normalizedMessages[0].timestamp;
   const lastTimestamp = normalizedMessages[normalizedMessages.length - 1].timestamp;
   const durationMinutes = Math.max(1, Math.round((lastTimestamp - firstTimestamp) / 60000));
-  const title = options.title || "灵枢 AI 对话记录";
-
   const lines: string[] = [];
   lines.push(`# ${title}`);
   lines.push("");
@@ -139,9 +120,15 @@ export function exportConversationToMarkdown(messages: ChatMessage[], options: E
     }
   });
 
-  const content = `${lines.join("\n")}\n`;
-  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
-  downloadBlob(blob, `灵枢对话_${buildTimestampForFile()}.md`);
+  return `${lines.join("\n")}\n`;
+}
+
+export async function copyConversationMarkdown(messages: ChatMessage[], title = "灵枢 AI 对话记录"): Promise<void> {
+  if (!navigator.clipboard?.writeText) {
+    throw new Error("当前环境不支持复制到剪贴板");
+  }
+  const content = buildMarkdownContent(messages, title);
+  await navigator.clipboard.writeText(content);
 }
 
 async function waitForImagesLoaded(container: HTMLElement): Promise<void> {
@@ -217,12 +204,70 @@ function buildRenderContainer(messages: ExportMessage[]): HTMLDivElement {
     header.appendChild(time);
     card.appendChild(header);
 
-    const body = document.createElement("p");
-    body.textContent = message.content || "(空内容)";
-    body.style.whiteSpace = "pre-wrap";
+    const body = document.createElement("div");
+    body.innerHTML = renderMarkdown(message.content || "(空内容)");
     body.style.margin = "0";
     body.style.fontSize = "15px";
     body.style.color = "#0f172a";
+
+    body.querySelectorAll("p").forEach((el) => {
+      (el as HTMLElement).style.margin = "0 0 10px";
+      (el as HTMLElement).style.whiteSpace = "pre-wrap";
+    });
+    body.querySelectorAll("ul,ol").forEach((el) => {
+      (el as HTMLElement).style.margin = "0 0 10px 18px";
+    });
+    body.querySelectorAll("li").forEach((el) => {
+      (el as HTMLElement).style.marginBottom = "4px";
+    });
+    body.querySelectorAll("blockquote").forEach((el) => {
+      const node = el as HTMLElement;
+      node.style.margin = "0 0 10px";
+      node.style.padding = "8px 10px";
+      node.style.borderLeft = "3px solid #94a3b8";
+      node.style.background = "#f8fafc";
+    });
+    body.querySelectorAll("code").forEach((el) => {
+      const node = el as HTMLElement;
+      node.style.fontFamily = "'Fira Code', monospace";
+      node.style.fontSize = "13px";
+      node.style.background = "#e2e8f0";
+      node.style.padding = "1px 4px";
+      node.style.borderRadius = "4px";
+    });
+    body.querySelectorAll("pre").forEach((el) => {
+      const node = el as HTMLElement;
+      node.style.margin = "0 0 10px";
+      node.style.padding = "10px";
+      node.style.borderRadius = "8px";
+      node.style.background = "#0f172a";
+      node.style.color = "#e2e8f0";
+      node.style.overflow = "hidden";
+    });
+    body.querySelectorAll("pre code").forEach((el) => {
+      const node = el as HTMLElement;
+      node.style.background = "transparent";
+      node.style.color = "inherit";
+      node.style.padding = "0";
+      node.style.fontSize = "12px";
+    });
+    body.querySelectorAll("h1,h2,h3,h4").forEach((el) => {
+      const node = el as HTMLElement;
+      node.style.margin = "0 0 8px";
+      node.style.color = "#0f172a";
+    });
+    body.querySelectorAll("table").forEach((el) => {
+      const node = el as HTMLElement;
+      node.style.borderCollapse = "collapse";
+      node.style.width = "100%";
+      node.style.marginBottom = "10px";
+    });
+    body.querySelectorAll("th,td").forEach((el) => {
+      const node = el as HTMLElement;
+      node.style.border = "1px solid #cbd5e1";
+      node.style.padding = "6px 8px";
+      node.style.fontSize = "13px";
+    });
     card.appendChild(body);
 
     if (message.images?.length) {
@@ -252,10 +297,14 @@ function buildRenderContainer(messages: ExportMessage[]): HTMLDivElement {
   return container;
 }
 
-export async function exportConversationToPng(messages: ChatMessage[], options: ExportOptions): Promise<void> {
-  const normalizedMessages = normalizeMessages(messages, options.range);
+export async function copyConversationPng(messages: ChatMessage[]): Promise<void> {
+  const normalizedMessages = normalizeMessages(messages);
   if (!normalizedMessages.length) {
     throw new Error("暂无可导出的消息");
+  }
+
+  if (!navigator.clipboard || typeof ClipboardItem === "undefined") {
+    throw new Error("当前浏览器不支持图片复制，请使用 Chromium 新版浏览器");
   }
 
   const container = buildRenderContainer(normalizedMessages);
@@ -271,16 +320,16 @@ export async function exportConversationToPng(messages: ChatMessage[], options: 
       windowWidth: 920,
     });
 
-    await new Promise<void>((resolve, reject) => {
+    const blob = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob((blob) => {
         if (!blob) {
           reject(new Error("PNG 生成失败"));
           return;
         }
-        downloadBlob(blob, `灵枢对话_${buildTimestampForFile()}.png`);
-        resolve();
+        resolve(blob);
       }, "image/png");
     });
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
   } finally {
     if (container.parentElement) {
       container.parentElement.removeChild(container);

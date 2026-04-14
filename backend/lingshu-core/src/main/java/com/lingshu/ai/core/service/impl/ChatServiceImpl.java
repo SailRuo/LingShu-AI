@@ -215,9 +215,9 @@ public class ChatServiceImpl implements ChatService {
         // com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion = emotionResult != null ? emotionResult.toEmotionAnalysis() : null;
         com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion = null;
         String emotionPrompt = "";
-
         String longTermContext = memoryService.retrieveContext(userId, safeMessage);
         String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
+        
         String systemPrompt = promptBuilderService.buildMergedSystemPrompt(agent, relationshipPrompt, longTermContext);
 
         if (!emotionPrompt.isEmpty()) {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { NScrollbar, useDialog, useMessage } from 'naive-ui'
 import { useChat } from '@/composables/useChat'
 import { useWebSocket, type WebSocketMessage } from '@/composables/useWebSocket'
@@ -8,9 +8,8 @@ import { useAsr } from '@/composables/useAsr'
 import { useTts } from '@/composables/useTts'
 import ChatMessageComponent from '@/components/chat/ChatMessage.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
-import ExportDialog from '@/components/chat/ExportDialog.vue'
-import { exportConversationToMarkdown, exportConversationToPng } from '@/utils/chatExport'
-import type { ExportFormat, ExportRange } from '@/utils/chatExport'
+import type { ChatMessage } from '@/types'
+import { copyConversationMarkdown, copyConversationPng } from '@/utils/chatExport'
 import { Sparkles, Loader2, Wifi, WifiOff, Trash2, Volume2, VolumeX, Workflow, Download } from 'lucide-vue-next'
 
 const emit = defineEmits<{
@@ -79,9 +78,79 @@ const scrollRef = ref<InstanceType<typeof NScrollbar> | null>(null)
 const isLoadingMore = ref(false)
 const prevScrollHeight = ref(0)
 const autoScrollEnabled = ref(true) // 是否开启自动滚动到底部
-const showExportDialog = ref(false)
-const isExporting = ref(false)
+const exportMode = ref(false)
+const selectedTurnIds = ref<Set<string>>(new Set())
+const isCopyingMarkdown = ref(false)
+const isCopyingImage = ref(false)
 let stopHeartbeat: (() => void) | null = null
+
+interface TurnGroup {
+  id: string
+  index: number
+  messages: Array<{ message: ChatMessage; originalIndex: number }>
+}
+
+const turnGroups = computed<TurnGroup[]>(() => {
+  const source = messages.value
+  const groups: TurnGroup[] = []
+  let i = 0
+  let turnIndex = 0
+
+  while (i < source.length) {
+    const current = source[i]
+    if (current.role !== 'user') {
+      i += 1
+      continue
+    }
+
+    const items: Array<{ message: ChatMessage; originalIndex: number }> = [{ message: current, originalIndex: i }]
+    let cursor = i + 1
+    while (cursor < source.length && source[cursor].role !== 'user') {
+      items.push({ message: source[cursor], originalIndex: cursor })
+      cursor += 1
+    }
+
+    turnIndex += 1
+    groups.push({
+      id: `turn-${current.id ?? current.timestamp ?? i}-${turnIndex}`,
+      index: turnIndex,
+      messages: items
+    })
+    i = cursor
+  }
+
+  return groups
+})
+
+const selectedTurnCount = computed(() => selectedTurnIds.value.size)
+
+const allTurnsSelected = computed(() => turnGroups.value.length > 0 && selectedTurnIds.value.size === turnGroups.value.length)
+
+const selectedMessagesForExport = computed<ChatMessage[]>(() => {
+  if (!selectedTurnIds.value.size) {
+    return []
+  }
+  return turnGroups.value
+    .filter((group) => selectedTurnIds.value.has(group.id))
+    .flatMap((group) => group.messages.map((item) => item.message))
+})
+
+watch(turnGroups, (nextGroups) => {
+  if (!nextGroups.length) {
+    exportMode.value = false
+    selectedTurnIds.value = new Set()
+    return
+  }
+
+  const validIds = new Set(nextGroups.map((group) => group.id))
+  const filtered = new Set<string>()
+  selectedTurnIds.value.forEach((id) => {
+    if (validIds.has(id)) {
+      filtered.add(id)
+    }
+  })
+  selectedTurnIds.value = filtered
+})
 
 // 检测用户是否已经在底部（用于判断是否应该开启自动滚动）
 function isAtBottom(el: HTMLElement): boolean {
@@ -93,6 +162,35 @@ function isAtBottom(el: HTMLElement): boolean {
 function scrollToBottom(behavior: 'auto' | 'smooth' = 'auto') {
   nextTick(() => {
     scrollRef.value?.scrollTo({ top: 999999, behavior })
+  })
+}
+
+function getScrollContainer(): HTMLElement | null {
+  const raw = (scrollRef.value as unknown as { $el?: unknown })?.$el
+  if (raw && typeof (raw as { querySelector?: unknown }).querySelector === 'function') {
+    const container = (raw as HTMLElement).querySelector('.n-scrollbar-container') as HTMLElement | null
+    if (container) return container
+  }
+  return document.querySelector('.messages-area .n-scrollbar-container') as HTMLElement | null
+}
+
+function preserveScrollPositionForModeSwitch(mutator: () => void) {
+  const container = getScrollContainer()
+  const wasAtBottom = container ? isAtBottom(container) : true
+  const previousTop = container?.scrollTop ?? 0
+  const previousHeight = container?.scrollHeight ?? 0
+
+  mutator()
+
+  nextTick(() => {
+    const nextContainer = getScrollContainer()
+    if (!nextContainer) return
+    if (wasAtBottom) {
+      nextContainer.scrollTop = nextContainer.scrollHeight
+      return
+    }
+    const delta = nextContainer.scrollHeight - previousHeight
+    nextContainer.scrollTop = Math.max(0, previousTop + delta)
   })
 }
 
@@ -353,40 +451,82 @@ async function handleToggleTts() {
   message.info(settings.value.ttsEnabled ? '语音合成已开启' : '语音合成已关闭')
 }
 
-function openExportDialog() {
-  if (messages.value.length === 0) {
-    message.warning('暂无可导出的消息')
+function toggleExportMode() {
+  if (turnGroups.value.length === 0) {
+    message.warning('暂无可选择的对话轮次')
     return
   }
-  showExportDialog.value = true
+
+  if (exportMode.value) {
+    preserveScrollPositionForModeSwitch(() => {
+      exportMode.value = false
+      selectedTurnIds.value = new Set()
+    })
+    return
+  }
+
+  preserveScrollPositionForModeSwitch(() => {
+    exportMode.value = true
+    selectedTurnIds.value = new Set(turnGroups.value.map((group) => group.id))
+  })
 }
 
-async function handleExportConfirm(payload: { format: ExportFormat; range: ExportRange }) {
-  if (messages.value.length === 0) {
-    message.warning('暂无可导出的消息')
+function toggleTurnSelection(turnId: string) {
+  const next = new Set(selectedTurnIds.value)
+  if (next.has(turnId)) {
+    next.delete(turnId)
+  } else {
+    next.add(turnId)
+  }
+  selectedTurnIds.value = next
+}
+
+function toggleSelectAllTurns() {
+  if (allTurnsSelected.value) {
+    selectedTurnIds.value = new Set()
+    return
+  }
+  selectedTurnIds.value = new Set(turnGroups.value.map((group) => group.id))
+}
+
+function cancelExportMode() {
+  exportMode.value = false
+  selectedTurnIds.value = new Set()
+}
+
+async function handleCopyMarkdown() {
+  if (!selectedMessagesForExport.value.length) {
+    message.warning('请先选择至少一轮对话')
     return
   }
 
-  isExporting.value = true
+  isCopyingMarkdown.value = true
   try {
-    if (payload.format === 'markdown') {
-      exportConversationToMarkdown(messages.value, {
-        range: payload.range,
-        title: '灵枢 AI 对话记录'
-      })
-    } else {
-      await exportConversationToPng(messages.value, {
-        range: payload.range,
-        title: '灵枢 AI 对话记录'
-      })
-    }
-    showExportDialog.value = false
-    message.success('导出成功')
+    await copyConversationMarkdown(selectedMessagesForExport.value)
+    message.success('Markdown 已复制到剪贴板')
   } catch (error) {
-    const msg = error instanceof Error ? error.message : '导出失败，请稍后重试'
+    const msg = error instanceof Error ? error.message : '复制失败，请稍后重试'
     message.error(msg)
   } finally {
-    isExporting.value = false
+    isCopyingMarkdown.value = false
+  }
+}
+
+async function handleCopyLongImage() {
+  if (!selectedMessagesForExport.value.length) {
+    message.warning('请先选择至少一轮对话')
+    return
+  }
+
+  isCopyingImage.value = true
+  try {
+    await copyConversationPng(selectedMessagesForExport.value)
+    message.success('长图已复制到剪贴板')
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : '复制失败，请稍后重试'
+    message.error(msg)
+  } finally {
+    isCopyingImage.value = false
   }
 }
 </script>
@@ -433,11 +573,12 @@ async function handleExportConfirm(payload: { format: ExportFormat; range: Expor
 
           <button
             class="action-btn export-btn"
-            @click="openExportDialog"
-            title="导出对话"
+            :class="{ active: exportMode }"
+            @click="toggleExportMode"
+            :title="exportMode ? '退出导出模式' : '选择轮次并复制导出'"
           >
             <Download :size="14" />
-            <span>导出</span>
+            <span>{{ exportMode ? '退出导出' : '导出' }}</span>
           </button>
         </template>
       </div>
@@ -473,7 +614,7 @@ async function handleExportConfirm(payload: { format: ExportFormat; range: Expor
     </div>
 
     <!-- Messages Area -->
-    <n-scrollbar ref="scrollRef" class="messages-area" v-if="messages.length > 0" @scroll="handleScroll">
+    <n-scrollbar ref="scrollRef" class="messages-area" :class="{ 'export-mode': exportMode }" v-if="messages.length > 0" @scroll="handleScroll">
       <div class="messages-content">
         <!-- Load More Indicator -->
         <div class="load-more-indicator" v-if="hasMoreHistory">
@@ -490,13 +631,29 @@ async function handleExportConfirm(payload: { format: ExportFormat; range: Expor
           <span>— 没有更多历史消息 —</span>
         </div>
 
-        <ChatMessageComponent
-          v-for="(msg, i) in messages"
-          :key="i"
-          :message="msg"
-          :time-label="formatTime(msg.timestamp)"
-          :class="{ 'loading-message': msg.isLoading && !msg.content }"
-        />
+        <div
+          v-for="turn in turnGroups"
+          :key="turn.id"
+          class="turn-block"
+          :class="{ selected: selectedTurnIds.has(turn.id), 'export-active': exportMode }"
+        >
+          <label v-if="exportMode" class="turn-selector">
+            <input
+              type="checkbox"
+              :checked="selectedTurnIds.has(turn.id)"
+              @change="toggleTurnSelection(turn.id)"
+            />
+            <span>第 {{ turn.index }} 轮</span>
+          </label>
+
+          <ChatMessageComponent
+            v-for="item in turn.messages"
+            :key="`${turn.id}-${item.originalIndex}`"
+            :message="item.message"
+            :time-label="formatTime(item.message.timestamp)"
+            :class="{ 'loading-message': item.message.isLoading && !item.message.content }"
+          />
+        </div>
 
 
 
@@ -518,12 +675,36 @@ async function handleExportConfirm(payload: { format: ExportFormat; range: Expor
       @stop-push-to-talk="stopPushToTalk"
     />
 
-    <ExportDialog
-      v-model:show="showExportDialog"
-      :message-count="messages.length"
-      :exporting="isExporting"
-      @confirm="handleExportConfirm"
-    />
+    <div v-if="exportMode" class="export-toolbar">
+      <label class="export-check-all">
+        <input
+          type="checkbox"
+          :checked="allTurnsSelected"
+          @change="toggleSelectAllTurns"
+        />
+        <span>全选</span>
+      </label>
+
+      <div class="export-counter">已选择 {{ selectedTurnCount }} 组对话</div>
+
+      <div class="export-actions">
+        <button class="export-action secondary" @click="cancelExportMode">取消</button>
+        <button
+          class="export-action"
+          :disabled="selectedTurnCount === 0 || isCopyingMarkdown"
+          @click="handleCopyMarkdown"
+        >
+          {{ isCopyingMarkdown ? '复制中...' : '复制 Markdown' }}
+        </button>
+        <button
+          class="export-action primary"
+          :disabled="selectedTurnCount === 0 || isCopyingImage"
+          @click="handleCopyLongImage"
+        >
+          {{ isCopyingImage ? '生成中...' : '复制长图' }}
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -644,6 +825,12 @@ async function handleExportConfirm(payload: { format: ExportFormat; range: Expor
   background: rgba(56, 189, 248, 0.12);
   color: #38bdf8;
   border-color: rgba(56, 189, 248, 0.28);
+}
+
+.export-btn.active {
+  background: rgba(56, 189, 248, 0.16);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.36);
 }
 
 /* Welcome Section */
@@ -790,10 +977,55 @@ async function handleExportConfirm(payload: { format: ExportFormat; range: Expor
   gap: 24px;
 }
 
+
+.turn-block {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.turn-block.export-active {
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  border-radius: 12px;
+  padding: 10px 10px 6px;
+  background: color-mix(in srgb, var(--color-surface-elevated) 40%, transparent);
+}
+
+.turn-selector {
+  position: relative;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  background: rgba(15, 23, 42, 0.45);
+  color: #7dd3fc;
+  font-size: 12px;
+  user-select: none;
+}
+
+.turn-selector input {
+  width: 16px;
+  height: 16px;
+}
+
+.turn-block.selected {
+  border-color: rgba(56, 189, 248, 0.48);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.2) inset;
+}
+
 @media (max-width: 768px) {
   .messages-content {
     width: calc(100% - 16px);
     padding: 60px 0 150px;
+  }
+
+  .turn-block.export-active {
+    padding: 8px 8px 4px;
   }
 }
 
@@ -855,7 +1087,88 @@ async function handleExportConfirm(payload: { format: ExportFormat; range: Expor
   pointer-events: none;
 }
 
+.messages-area.export-mode .messages-content {
+  padding-bottom: 270px;
+}
+
 .messages-area :deep(.n-scrollbar-container) {
   pointer-events: auto;
+}
+
+.export-toolbar {
+  position: absolute;
+  left: 50%;
+  bottom: 84px;
+  transform: translateX(-50%);
+  width: min(1050px, calc(100% - 48px));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--color-outline);
+  background: color-mix(in srgb, var(--color-surface-elevated) 88%, transparent);
+  backdrop-filter: blur(14px);
+  z-index: 30;
+}
+
+.export-check-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.export-counter {
+  color: var(--color-text-dim);
+  font-size: 13px;
+}
+
+.export-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.export-action {
+  border: 1px solid var(--color-outline);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text);
+  border-radius: 18px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.export-action.secondary:hover {
+  border-color: rgba(148, 163, 184, 0.55);
+}
+
+.export-action.primary {
+  border-color: rgba(56, 189, 248, 0.45);
+  background: rgba(56, 189, 248, 0.16);
+  color: #38bdf8;
+}
+
+.export-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .export-toolbar {
+    width: calc(100% - 16px);
+    bottom: 72px;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .export-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 </style>

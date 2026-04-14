@@ -45,37 +45,52 @@
 
 ## 系统架构
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Frontend (Vue 3)                          │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐           │
-│  │ 对话界面  │ │ 记忆中枢  │ │ 系统设置  │ │ 日志监控  │           │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘           │
-└────────────────────────────┬────────────────────────────────────┘
-                             │ HTTP / WebSocket / SSE
-┌────────────────────────────▼────────────────────────────────────┐
-│                     Backend (Spring Boot 3)                      │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │                    lingshu-web (接口层)                      ││
-│  │  ChatController │ MemoryController │ SettingController      ││
-│  └─────────────────────────────────────────────────────────────┘│
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │                    lingshu-core (核心层)                     ││
-│  │  ChatService │ MemoryService │ ProactiveService │ McpService││
-│  └─────────────────────────────────────────────────────────────┘│
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │                lingshu-infrastructure (基础设施层)           ││
-│  │  Entity │ Repository │ Memory Store                        ││
-│  └─────────────────────────────────────────────────────────────┘│
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-┌────────────────────────────▼────────────────────────────────────┐
-│                        数据存储层                                 │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐           │
-│  │PostgreSQL│ │  Neo4j   │ │  Redis   │ │  Ollama  │           │
-│  │ (向量)   │ │ (图数据库)│ │ (缓存)   │ │ (LLM)   │           │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘           │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph Frontend ["Frontend (Vue 3)"]
+        direction TB
+        F1["对话界面"]
+        F2["记忆中枢"]
+        F3["系统设置"]
+        F4["日志监控"]
+    end
+
+    subgraph Backend ["Backend (Spring Boot 3)"]
+        direction TB
+        subgraph WebLayer ["lingshu-web (接口层)"]
+            W1["ChatController"]
+            W2["MemoryController"]
+            W3["SettingController"]
+        end
+        
+        subgraph CoreLayer ["lingshu-core (核心层)"]
+            C1["ChatService"]
+            C2["MemoryService"]
+            C3["ProactiveService"]
+            C4["McpService"]
+        end
+        
+        subgraph InfraLayer ["lingshu-infrastructure (基础设施层)"]
+            I1["Entity"]
+            I2["Repository"]
+            I3["Memory Store"]
+        end
+    end
+
+    subgraph Storage ["数据存储层"]
+        direction TB
+        D1[("PostgreSQL<br/>向量存储")]
+        D2[("Neo4j<br/>图数据库")]
+        D3[("Redis<br/>缓存")]
+        D4[("Ollama<br/>LLM推理")]
+    end
+
+    Frontend -->|"HTTP / WebSocket / SSE"| Backend
+    Backend --> Storage
+    
+    style Frontend fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style Backend fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    style Storage fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
 ```
 
 ---
