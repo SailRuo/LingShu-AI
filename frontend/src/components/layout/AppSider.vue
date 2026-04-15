@@ -1,48 +1,98 @@
 <script setup lang="ts">
-import { NMenu, NIcon } from 'naive-ui'
-import { Layers, Activity as ActivityIcon, FileText, Settings, Zap, DatabaseBackup, Hexagon } from 'lucide-vue-next'
+import { NMenu, NIcon, useMessage } from 'naive-ui'
+import {
+  Activity as ActivityIcon,
+  FileText,
+  Settings,
+  Zap,
+  DatabaseBackup,
+  Hexagon,
+  Loader2,
+  Plus,
+  MessageSquare
+} from 'lucide-vue-next'
 import type { Component } from 'vue'
-import { h } from 'vue'
+import { computed, h, onMounted, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useChatSessionStore } from '@/stores/chatSessionStore'
 
-const props = defineProps<{ 
+const props = defineProps<{
   activeMenu: string,
   collapsed: boolean,
   mobileVisible: boolean
 }>()
-const emit = defineEmits<{ 
+const emit = defineEmits<{
   (e: 'update:activeMenu', key: string): void,
   (e: 'update:collapsed', value: boolean): void,
   (e: 'update:mobileVisible', value: boolean): void
 }>()
 
+const message = useMessage()
+const sessionStore = useChatSessionStore()
+const { sessions, activeSessionId, isLoadingSessions } = storeToRefs(sessionStore)
+const isCreatingSession = ref(false)
+
 const renderIcon = (c: Component) => () => h(NIcon, null, { default: () => h(c) })
 
 const mainNav = [
-  { label: '灵墟之境', key: 'resonance', icon: renderIcon(Hexagon) },
   { label: '记忆图谱', key: 'insight', icon: renderIcon(Zap) },
-  { label: '记忆治理', key: 'governance', icon: renderIcon(DatabaseBackup) },
-  { label: '全维口袋', key: 'pocket', icon: renderIcon(Layers) },
+  { label: '记忆治理', key: 'governance', icon: renderIcon(DatabaseBackup) }
 ]
 
 const infraNav = [
   { label: '系统设置', key: 'settings', icon: renderIcon(Settings) },
   { label: '系统状态', key: 'security', icon: renderIcon(ActivityIcon) },
-  { label: '系统日志', key: 'logs', icon: renderIcon(FileText) },
+  { label: '系统日志', key: 'logs', icon: renderIcon(FileText) }
 ]
 
+async function ensureSessionsLoaded() {
+  try {
+    await sessionStore.fetchSessions(activeSessionId.value)
+  } catch (error) {
+    console.error('Failed to load sessions:', error)
+  }
+}
+
+async function handleCreateSession() {
+  if (isCreatingSession.value) return
+  isCreatingSession.value = true
+  try {
+    const created = await sessionStore.createSession()
+    message.success(`已创建 ${created.title}`)
+  } catch (error) {
+    console.error('Failed to create session:', error)
+    message.error('新建会话失败，请稍后重试')
+  } finally {
+    isCreatingSession.value = false
+  }
+}
+
+function handleSelectSession(sessionId: number) {
+  if (activeSessionId.value === sessionId) return
+  sessionStore.setActiveSession(sessionId)
+  if (props.mobileVisible) {
+    emit('update:mobileVisible', false)
+  }
+}
+
+onMounted(() => {
+  ensureSessionsLoaded()
+})
+
+watch(() => props.activeMenu, () => {
+  ensureSessionsLoaded()
+})
 </script>
 
 <template>
-  <!-- Mobile Overlay -->
-  <div 
-    v-if="mobileVisible" 
+  <div
+    v-if="mobileVisible"
     class="mobile-overlay"
     @click="emit('update:mobileVisible', false)"
   ></div>
-  
+
   <aside class="app-sider" :class="{ collapsed, 'mobile-visible': mobileVisible }">
     <div class="sider-inner">
-      <!-- Logo Area -->
       <div class="logo-section">
         <div class="logo-mark">
           <img src="/bot.png" alt="Logo" class="logo-image" />
@@ -53,8 +103,47 @@ const infraNav = [
         </div>
       </div>
 
-      <!-- Core Navigation -->
-      <div class="core-nav">
+      <div v-if="!collapsed" class="session-section">
+        <div class="session-header">
+          <span class="section-label">会话记录</span>
+          <button
+            class="session-create-btn"
+            :disabled="isCreatingSession"
+            @click="handleCreateSession"
+            title="新建会话"
+          >
+            <Loader2 v-if="isCreatingSession" :size="14" class="spin" />
+            <Plus v-else :size="14" />
+          </button>
+        </div>
+
+        <div class="session-list">
+          <button
+            v-for="session in sessions"
+            :key="session.id"
+            class="session-item"
+            :class="{ active: activeSessionId === session.id }"
+            @click="handleSelectSession(session.id)"
+          >
+            <span class="session-item-icon">
+              <MessageSquare :size="14" />
+            </span>
+            <span class="session-item-body">
+              <strong>{{ session.title }}</strong>
+            </span>
+          </button>
+
+          <div v-if="isLoadingSessions && sessions.length === 0" class="session-empty">
+            <Loader2 :size="14" class="spin" />
+            <span>加载会话中...</span>
+          </div>
+          <div v-else-if="!isLoadingSessions && sessions.length === 0" class="session-empty">
+            <span>暂无会话</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="core-menus">
         <div v-if="!collapsed" class="section-header">
           <span class="section-label">核心能力</span>
           <div class="section-line"></div>
@@ -71,7 +160,6 @@ const infraNav = [
         />
       </div>
 
-      <!-- Infrastructure - Fixed to Bottom -->
       <div class="infra-nav">
         <div v-if="!collapsed" class="section-header">
           <span class="section-label">基础设施</span>
@@ -97,20 +185,18 @@ const infraNav = [
   grid-area: sidebar;
   width: 260px;
   height: 100%;
-  background: transparent !important; /* 改为透明以显示星空 */
+  background: transparent !important;
   border-right: 1px solid var(--color-glass-border) !important;
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
 }
 
-/* Desktop Collapsed State */
 .app-sider.collapsed {
   width: 0;
   border-right: none !important;
   overflow: hidden;
 }
 
-/* Mobile Styles */
 @media (max-width: 767px) {
   .app-sider {
     position: fixed;
@@ -122,11 +208,11 @@ const infraNav = [
     z-index: 999;
     box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3);
   }
-  
+
   .app-sider.mobile-visible {
     transform: translateX(0);
   }
-  
+
   .mobile-overlay {
     position: fixed;
     inset: 0;
@@ -148,10 +234,9 @@ const infraNav = [
   display: flex;
   flex-direction: column;
   padding: 20px 12px;
-  width: 260px; /* 保持内部宽度不变，防止折叠时内容挤压 */
+  width: 260px;
 }
 
-/* Logo Section */
 .logo-section {
   display: flex;
   align-items: center;
@@ -200,14 +285,20 @@ const infraNav = [
   font-family: 'Fira Code', monospace;
 }
 
-/* Core Navigation */
-.core-nav {
+.session-section {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 16px;
 }
 
-/* Infrastructure Navigation - Fixed to Bottom */
+.core-menus {
+  flex-shrink: 0;
+  margin-bottom: 16px;
+}
+
 .infra-nav {
   margin-top: auto;
   flex-shrink: 0;
@@ -242,7 +333,6 @@ const infraNav = [
   background: var(--color-outline);
 }
 
-/* Menu Styles */
 .nav-menu {
   background: transparent !important;
 }
@@ -317,14 +407,121 @@ const infraNav = [
   color: var(--color-text-dim) !important;
 }
 
-/* Fade Transition for Logo Text */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
+.session-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px;
+  margin-bottom: 8px;
 }
 
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
+.session-create-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.session-create-btn:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.2);
+  transform: scale(1.05);
+}
+
+.session-create-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  padding: 0 8px;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s ease;
+}
+
+.session-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.session-item.active {
+  background: linear-gradient(270deg, rgba(56, 189, 248, 0.12) 0%, transparent 100%);
+  color: var(--color-primary);
+}
+
+.session-item.active .session-item-body strong {
+  color: var(--color-primary);
+}
+
+.session-item-icon {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+}
+
+.session-item.active .session-item-icon {
+  color: var(--color-primary);
+}
+
+.session-item-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.session-item-body strong {
+  font-size: 13px;
+  color: var(--color-text);
+  font-weight: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.2s ease;
+}
+
+.session-empty {
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-dim);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>
