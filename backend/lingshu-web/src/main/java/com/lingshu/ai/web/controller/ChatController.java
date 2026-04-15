@@ -1,10 +1,10 @@
 package com.lingshu.ai.web.controller;
 
 import com.lingshu.ai.core.service.ChatService;
+import com.lingshu.ai.core.service.ChatSessionService;
 import com.lingshu.ai.core.service.ProactiveService;
 import com.lingshu.ai.core.service.TurnTimelineService;
 import com.lingshu.ai.infrastructure.entity.UserState;
-import com.lingshu.ai.infrastructure.repository.ChatSessionRepository;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
@@ -17,17 +17,17 @@ import java.util.Map;
 public class ChatController {
 
     private final ChatService chatService;
+    private final ChatSessionService chatSessionService;
     private final ProactiveService proactiveService;
-    private final ChatSessionRepository chatSessionRepository;
     private final TurnTimelineService turnTimelineService;
 
     public ChatController(ChatService chatService,
+                          ChatSessionService chatSessionService,
                           ProactiveService proactiveService,
-                          ChatSessionRepository chatSessionRepository,
                           TurnTimelineService turnTimelineService) {
         this.chatService = chatService;
+        this.chatSessionService = chatSessionService;
         this.proactiveService = proactiveService;
-        this.chatSessionRepository = chatSessionRepository;
         this.turnTimelineService = turnTimelineService;
     }
 
@@ -89,6 +89,22 @@ public class ChatController {
         return turnTimelineService.getTurnHistory(effectiveSessionId, beforeId, size);
     }
 
+    @GetMapping("/sessions")
+    public List<ChatSessionService.ChatSessionView> getSessions(
+            @RequestParam(name = "userId", defaultValue = "User") String userId) {
+        return chatSessionService.listSessions(userId);
+    }
+
+    public record CreateSessionRequest(String userId, String title) {
+    }
+
+    @PostMapping("/sessions")
+    public ChatSessionService.ChatSessionView createSession(@RequestBody(required = false) CreateSessionRequest request) {
+        String userId = request != null && request.userId() != null ? request.userId() : "User";
+        String title = request != null ? request.title() : null;
+        return chatSessionService.createSession(userId, title);
+    }
+
     @DeleteMapping("/turns")
     public void clearHistory(@RequestParam(name = "userId", defaultValue = "User") String userId,
                              @RequestParam(name = "sessionId", required = false) Long sessionId) {
@@ -96,7 +112,7 @@ public class ChatController {
         chatService.clearHistory(effectiveSessionId);
     }
 
-    public record ChatRequest(String message, Long agentId, String model, String apiKey, String baseUrl, String userId) {
+    public record ChatRequest(String message, List<String> images, Long sessionId, Long agentId, String model, String apiKey, String baseUrl, String userId) {
     }
 
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -110,8 +126,9 @@ public class ChatController {
         String finalApiKey = request.apiKey() != null ? request.apiKey() : apiKey;
         String finalModel = request.model() != null ? request.model() : model;
         String userId = request.userId() != null ? request.userId() : "User";
+        Long effectiveSessionId = resolveSessionId(userId, request.sessionId());
 
-        return chatService.streamChat(request.message(), request.agentId(), userId, finalModel, finalApiKey, finalBaseUrl);
+        return chatService.streamChat(request.message(), request.images(), effectiveSessionId, request.agentId(), userId, finalModel, finalApiKey, finalBaseUrl, false, null);
     }
 
     @PostMapping(value = "/sync", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -125,8 +142,9 @@ public class ChatController {
         String finalApiKey = request.apiKey() != null ? request.apiKey() : apiKey;
         String finalModel = request.model() != null ? request.model() : model;
         String userId = request.userId() != null ? request.userId() : "User";
+        Long effectiveSessionId = resolveSessionId(userId, request.sessionId());
 
-        return chatService.streamChat(request.message(), request.agentId(), userId, finalModel, finalApiKey, finalBaseUrl)
+        return chatService.streamChat(request.message(), request.images(), effectiveSessionId, request.agentId(), userId, finalModel, finalApiKey, finalBaseUrl, false, null)
                 .reduce("", String::concat)
                 .map(fullResponse -> {
                     String cleanResponse = fullResponse.replaceAll("\\u0001REASONING\\u0001.*?\\u0001/REASONING\\u0001", "");
@@ -135,35 +153,7 @@ public class ChatController {
     }
 
     private Long resolveSessionId(String userId, Long sessionId) {
-        if (sessionId != null) {
-            return sessionId;
-        }
-        String normalizedUserId = userId == null || userId.isBlank() ? "User" : userId.trim();
-        Long byUser = chatSessionRepository.findFirstByUserIdOrderByIdAsc(normalizedUserId)
-                .map(com.lingshu.ai.infrastructure.entity.ChatSession::getId)
-                .orElse(null);
-        if (byUser != null) {
-            return byUser;
-        }
-        if ("User".equals(normalizedUserId)) {
-            Long legacyWs = chatSessionRepository.findFirstByUserIdOrderByIdAsc("web-ws:User")
-                    .map(com.lingshu.ai.infrastructure.entity.ChatSession::getId)
-                    .orElse(null);
-            if (legacyWs != null) {
-                return legacyWs;
-            }
-            Long legacyHttp = chatSessionRepository.findFirstByUserIdOrderByIdAsc("web-http:User")
-                    .map(com.lingshu.ai.infrastructure.entity.ChatSession::getId)
-                    .orElse(null);
-            if (legacyHttp != null) {
-                return legacyHttp;
-            }
-        }
-        return chatSessionRepository.findAll()
-                .stream()
-                .findFirst()
-                .map(com.lingshu.ai.infrastructure.entity.ChatSession::getId)
-                .orElse(null);
+        return chatSessionService.resolveSessionId(userId, sessionId);
     }
 
 }

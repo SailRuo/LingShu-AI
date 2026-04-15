@@ -2,7 +2,7 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { NSpin, NEmpty, NIcon, NTag, NScrollbar } from 'naive-ui'
 import { Zap, BrainCircuit, Workflow, AlertCircle, Database, Search, X } from 'lucide-vue-next'
-import { getClientUserId } from '@/composables/useChat'
+import { getClientUserId } from '@/stores/chatSessionStore'
 import { getFullUrl } from '@/utils/request'
 
 const emit = defineEmits<{

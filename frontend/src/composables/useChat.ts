@@ -1,26 +1,12 @@
-﻿import { ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { getFullUrl } from "@/utils/request";
+import { useChatSessionStore } from "@/stores/chatSessionStore";
 import type {
   ChatMessage,
   ChatMessageSegment,
   ChatToolSegment,
   ChatToolStep,
 } from "@/types";
-
-export function getClientUserId(): string {
-  const storageKey = "lingshu_user_id";
-  const existing = window.localStorage.getItem(storageKey);
-  if (existing && existing.trim()) {
-    return existing.trim();
-  }
-  const randomPart =
-    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const generated = `web:${randomPart}`;
-  window.localStorage.setItem(storageKey, generated);
-  return generated;
-}
 
 interface TurnArtifact {
   artifactType: string;
@@ -180,25 +166,27 @@ function mapTurnsToMessages(turns: TurnHistoryItem[]): ChatMessage[] {
       images: turn.userImages?.length ? turn.userImages : undefined,
     });
 
-    const toolSegments: ChatToolSegment[] = (turn.toolSteps ?? []).map((step) => ({
-      type: "tool",
-      id: step.toolCallId,
-      toolCallId: step.toolCallId,
-      toolName: step.toolName ?? "",
-      skillName: step.skillName,
-      arguments: step.arguments,
-      result: step.result,
-      output: step.result,
-      isError: !!step.isError,
-      status: step.isError ? "error" : step.result ? "success" : "running",
-      timestamp: turn.timestamp,
-      artifacts: step.artifacts?.map((artifact) => ({
-        artifactType: artifact.artifactType,
-        mimeType: artifact.mimeType,
-        url: artifact.url,
-        base64Data: artifact.base64Data,
-      })),
-    }));
+    const toolSegments: ChatToolSegment[] = (turn.toolSteps ?? []).map(
+      (step) => ({
+        type: "tool",
+        id: step.toolCallId,
+        toolCallId: step.toolCallId,
+        toolName: step.toolName ?? "",
+        skillName: step.skillName,
+        arguments: step.arguments,
+        result: step.result,
+        output: step.result,
+        isError: !!step.isError,
+        status: step.isError ? "error" : step.result ? "success" : "running",
+        timestamp: turn.timestamp,
+        artifacts: step.artifacts?.map((artifact) => ({
+          artifactType: artifact.artifactType,
+          mimeType: artifact.mimeType,
+          url: artifact.url,
+          base64Data: artifact.base64Data,
+        })),
+      }),
+    );
 
     const finalText =
       turn.status === "failed"
@@ -282,7 +270,7 @@ function mapTurnsToMessages(turns: TurnHistoryItem[]): ChatMessage[] {
 }
 
 export function useChat() {
-  const clientUserId = getClientUserId();
+  const sessionStore = useChatSessionStore();
   const messages = ref<ChatMessage[]>([]);
   const inputMessage = ref("");
   const inputImages = ref<string[]>([]);
@@ -291,6 +279,13 @@ export function useChat() {
   const isLoadingHistory = ref(false);
   const hasMoreHistory = ref(true);
   const oldestMessageId = ref<number | null>(null);
+  const currentSessionId = computed(() => sessionStore.activeSessionId);
+
+  function resetConversationState() {
+    messages.value = [];
+    hasMoreHistory.value = true;
+    oldestMessageId.value = null;
+  }
 
   function ensureAssistantMessage(): ChatMessage {
     const lastMessage = messages.value[messages.value.length - 1];
@@ -387,7 +382,8 @@ export function useChat() {
       const previous = targetIndex >= 0 ? nextSteps[targetIndex] : undefined;
       const merged: ChatToolStep = {
         id: (toolStep.id ?? previous?.id ?? targetId) || undefined,
-        toolCallId: (toolStep.toolCallId ?? previous?.toolCallId ?? targetId) || undefined,
+        toolCallId:
+          (toolStep.toolCallId ?? previous?.toolCallId ?? targetId) || undefined,
         toolName: toolStep.toolName ?? previous?.toolName ?? "",
         skillName: toolStep.skillName ?? previous?.skillName,
         arguments: toolStep.arguments ?? previous?.arguments,
@@ -500,8 +496,16 @@ export function useChat() {
   }
 
   async function syncLatestAssistantMessage() {
+    if (currentSessionId.value == null) {
+      return null;
+    }
+
     try {
-      const params = new URLSearchParams({ size: "1", userId: clientUserId });
+      const params = new URLSearchParams({
+        size: "1",
+        userId: sessionStore.userId,
+        sessionId: currentSessionId.value.toString(),
+      });
       const res = await fetch(getFullUrl(`/api/chat/turns?${params}`));
       if (!res.ok) throw new Error("History sync failed");
 
@@ -550,9 +554,22 @@ export function useChat() {
     }
   }
 
-  async function loadHistory(size: number = 20): Promise<boolean> {
-    if (isLoadingHistory.value || !hasMoreHistory.value) {
+  async function loadHistory(
+    size: number = 20,
+    options?: { reset?: boolean; sessionId?: number | null },
+  ): Promise<boolean> {
+    const targetSessionId = options?.sessionId ?? currentSessionId.value;
+    if (targetSessionId == null) {
+      resetConversationState();
       return false;
+    }
+
+    if (isLoadingHistory.value || (!hasMoreHistory.value && !options?.reset)) {
+      return false;
+    }
+
+    if (options?.reset) {
+      resetConversationState();
     }
 
     isLoadingHistory.value = true;
@@ -560,9 +577,10 @@ export function useChat() {
     try {
       const params = new URLSearchParams({
         size: size.toString(),
-        userId: clientUserId,
+        userId: sessionStore.userId,
+        sessionId: targetSessionId.toString(),
       });
-      if (oldestMessageId.value) {
+      if (!options?.reset && oldestMessageId.value) {
         params.append("beforeId", oldestMessageId.value.toString());
       }
 
@@ -573,6 +591,9 @@ export function useChat() {
 
       if (turns.length === 0) {
         hasMoreHistory.value = false;
+        if (options?.reset) {
+          messages.value = [];
+        }
         return false;
       }
 
@@ -599,7 +620,10 @@ export function useChat() {
 
   async function initWelcome() {
     try {
-      const welcomeParams = new URLSearchParams({ userId: clientUserId });
+      const welcomeParams = new URLSearchParams({ userId: sessionStore.userId });
+      if (currentSessionId.value != null) {
+        welcomeParams.set("sessionId", currentSessionId.value.toString());
+      }
       const res = await fetch(getFullUrl(`/api/chat/welcome?${welcomeParams}`));
       if (!res.ok) throw new Error("Welcome stream failed");
 
@@ -633,13 +657,20 @@ export function useChat() {
   }
 
   async function initChat() {
-    await loadHistory(20);
+    await sessionStore.ensureActiveSession();
+    await loadHistory(20, { reset: true });
   }
 
   async function sendMessage(scrollCallback?: () => void) {
     const text = inputMessage.value.trim();
     const currentImages = [...inputImages.value];
-    if ((!text && currentImages.length === 0) || isTyping.value) return;
+    if (
+      (!text && currentImages.length === 0) ||
+      isTyping.value ||
+      currentSessionId.value == null
+    ) {
+      return;
+    }
 
     messages.value.push({
       role: "user",
@@ -661,7 +692,11 @@ export function useChat() {
     messages.value.push(assistantMessage);
 
     try {
-      const payload: Record<string, any> = { message: text, userId: clientUserId };
+      const payload: Record<string, any> = {
+        message: text,
+        userId: sessionStore.userId,
+        sessionId: currentSessionId.value,
+      };
       if (currentImages.length > 0) {
         payload.images = currentImages;
       }
@@ -700,7 +735,10 @@ export function useChat() {
               const content = line.slice(prefixLen).replace(/\r$/, "");
 
               const targetIdx = messages.value.length - 1;
-              if (targetIdx >= 0 && messages.value[targetIdx].role === "assistant") {
+              if (
+                targetIdx >= 0 &&
+                messages.value[targetIdx].role === "assistant"
+              ) {
                 messages.value[targetIdx] = {
                   ...messages.value[targetIdx],
                   content: messages.value[targetIdx].content + content,
@@ -725,16 +763,23 @@ export function useChat() {
   }
 
   async function clearHistory() {
+    if (currentSessionId.value == null) {
+      resetConversationState();
+      return;
+    }
+
     try {
-      const params = new URLSearchParams({ userId: clientUserId });
+      const params = new URLSearchParams({
+        userId: sessionStore.userId,
+        sessionId: currentSessionId.value.toString(),
+      });
       const res = await fetch(getFullUrl(`/api/chat/turns?${params}`), {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Clear history failed");
 
-      messages.value = [];
+      resetConversationState();
       hasMoreHistory.value = false;
-      oldestMessageId.value = null;
     } catch (err) {
       console.error("Clear history error:", err);
       throw err;
@@ -751,6 +796,22 @@ export function useChat() {
     });
   }
 
+  watch(
+    () => sessionStore.activeSessionId,
+    async (nextSessionId, previousSessionId) => {
+      if (nextSessionId === previousSessionId) {
+        return;
+      }
+
+      resetConversationState();
+      isTyping.value = false;
+
+      if (nextSessionId != null) {
+        await loadHistory(20, { reset: true, sessionId: nextSessionId });
+      }
+    },
+  );
+
   return {
     messages,
     inputMessage,
@@ -759,6 +820,7 @@ export function useChat() {
     welcomeGreeting,
     isLoadingHistory,
     hasMoreHistory,
+    currentSessionId,
     initWelcome,
     initChat,
     loadHistory,
@@ -770,6 +832,7 @@ export function useChat() {
     syncLatestAssistantMessage,
     sendMessage,
     clearHistory,
+    resetConversationState,
     formatTime,
   };
 }

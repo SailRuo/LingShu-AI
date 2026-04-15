@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { NScrollbar, useDialog, useMessage } from 'naive-ui'
+import { storeToRefs } from 'pinia'
 import { useChat } from '@/composables/useChat'
 import { useWebSocket, type WebSocketMessage } from '@/composables/useWebSocket'
 import { useSettings } from '@/stores/settingsStore'
+import { useChatSessionStore } from '@/stores/chatSessionStore'
 import { useAsr } from '@/composables/useAsr'
 import { useTts } from '@/composables/useTts'
 import ChatMessageComponent from '@/components/chat/ChatMessage.vue'
@@ -24,6 +26,7 @@ const {
   welcomeGreeting,
   isLoadingHistory,
   hasMoreHistory,
+  currentSessionId,
   initWelcome,
   initChat,
   loadHistory,
@@ -36,6 +39,9 @@ const {
   clearHistory,
   formatTime
 } = useChat()
+
+const chatSessionStore = useChatSessionStore()
+const { activeSessionId } = storeToRefs(chatSessionStore)
 
 const {
   isConnected,
@@ -152,7 +158,7 @@ watch(turnGroups, (nextGroups) => {
   selectedTurnIds.value = filtered
 })
 
-// 检测用户是否已经在底部（用于判断是否应该开启自动滚动）
+// 检测用户是否已经在底部(用于判断是否应该开启自动滚动)
 function isAtBottom(el: HTMLElement): boolean {
   const { scrollTop, scrollHeight, clientHeight } = el
   const threshold = 15 // 15px 误差范围
@@ -225,7 +231,8 @@ function handleSend() {
       settings.value.model,
       settings.value.apiKey,
       settings.value.baseUrl,
-      images.length > 0 ? [...images] : undefined
+      images.length > 0 ? [...images] : undefined,
+      currentSessionId.value
     )
   } else {
     message.warning('系统连接已断开，请等待重连')
@@ -237,17 +244,19 @@ function handleQuickAction(text: string) {
   handleSend()
 }
 
+
 async function handleClearHistory() {
   if (messages.value.length === 0) return
 
   dialog.warning({
     title: '确认清空',
-    content: '确定要清空所有会话历史吗？此操作不可撤销。',
+    content: '确定要清空当前会话历史吗？此操作不可撤销。',
     positiveText: '确认清空',
     negativeText: '取消',
     onPositiveClick: async () => {
       try {
         await clearHistory()
+        await chatSessionStore.fetchSessions(activeSessionId.value)
         message.success('已成功清空会话历史')
       } catch (error) {
         message.error('清空历史失败，请稍后重试')
@@ -335,6 +344,7 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
     case 'chatEnd':
       isTyping.value = false
       const lastMsg = await syncLatestAssistantMessage()
+      await chatSessionStore.fetchSessions(activeSessionId.value)
       if (autoScrollEnabled.value) {
         scrollToBottom('smooth')
       }
@@ -378,8 +388,9 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
         }
       }
       break
+
     case 'userState':
-      console.log('用户状态更新:', msg)
+      console.log('用户状态更新', msg)
       break
 
     case 'asrResult':
@@ -533,7 +544,7 @@ async function handleCopyLongImage() {
 
 <template>
   <div class="chat-view">
-    <!-- Action Bar -->
+<!-- Action Bar -->
     <div class="chat-header">
       <div class="connection-status" :class="{ connected: isConnected, disconnected: !isConnected }">
         <Wifi v-if="isConnected" :size="14" />
@@ -597,17 +608,17 @@ async function handleCopyLongImage() {
         <p class="welcome-subtitle">与灵枢建立深度连接，探索内心世界</p>
 
         <div class="quick-actions">
-          <button class="quick-btn" @click="handleQuickAction('我们的回忆')">
+          <button class="quick-btn" @click="handleQuickAction('回忆上次对话')">
             <Sparkles :size="16" />
-            <span>我们的回忆</span>
+            <span>回忆上次对话</span>
           </button>
           <button class="quick-btn" @click="handleQuickAction('帮我分析一下')">
             <Sparkles :size="16" />
             <span>帮我分析一下</span>
           </button>
-          <button class="quick-btn" @click="handleQuickAction('回忆上次对话')">
+          <button class="quick-btn" @click="handleQuickAction('鍥炲繂涓婃瀵硅瘽')">
             <Sparkles :size="16" />
-            <span>回忆上次对话</span>
+            <span>鍥炲繂涓婃瀵硅瘽</span>
           </button>
         </div>
       </div>
@@ -628,7 +639,7 @@ async function handleCopyLongImage() {
           </button>
         </div>
         <div class="no-more-indicator" v-else-if="messages.length > 0 && !hasMoreHistory">
-          <span>— 没有更多历史消息 —</span>
+          <span>—— 没有更多历史消息 ——</span>
         </div>
 
         <div
@@ -665,6 +676,7 @@ async function handleCopyLongImage() {
       v-model="inputMessage"
       v-model:images="inputImages"
       :loading="isTyping"
+      :disabled="currentSessionId == null"
       :asr-enabled="asrConfig.enabled"
       :asr-listening="asrListening"
       :asr-recording="asrRecording"
@@ -731,6 +743,7 @@ async function handleCopyLongImage() {
 
 /* Mobile: Increase z-index to avoid being covered by sidebar */
 @media (max-width: 767px) {
+
   .chat-header {
     z-index: 1000;
     pointer-events: none;
@@ -968,8 +981,8 @@ async function handleCopyLongImage() {
 .messages-content {
   position: relative;
   z-index: 1;
-  width: calc(100% - 48px);
-  max-width: 1050px;
+  width: min(980px, calc(100% - 48px));
+  max-width: 980px;
   margin: 0 auto;
   padding: 24px 0 200px;
   display: flex;
@@ -1021,7 +1034,7 @@ async function handleCopyLongImage() {
 @media (max-width: 768px) {
   .messages-content {
     width: calc(100% - 16px);
-    padding: 60px 0 150px;
+    padding: 92px 0 150px;
   }
 
   .turn-block.export-active {
@@ -1172,3 +1185,7 @@ async function handleCopyLongImage() {
   }
 }
 </style>
+
+
+
+

@@ -1,0 +1,18 @@
+package com.lingshu.ai.core.service;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+public interface ChatSessionService {
+
+    record ChatSessionView(Long id, String userId, String title, LocalDateTime createdAt, LocalDateTime updatedAt) {
+    }
+
+    List<ChatSessionView> listSessions(String userId);
+
+    ChatSessionView createSession(String userId, String title);
+
+    Long resolveSessionId(String userId, Long sessionId);
+
+    void touchSession(Long sessionId);
+}

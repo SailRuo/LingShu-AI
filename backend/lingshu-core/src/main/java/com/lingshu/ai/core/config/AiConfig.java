@@ -135,7 +135,7 @@ public class AiConfig {
                     return "<empty>";
                 }
                 String normalized = text.replaceAll("\\s+", " ").trim();
-                return normalized.length() > 240 ? normalized.substring(0, 240) + "..." : normalized;
+                return normalized.length() > 1000 ? normalized.substring(0, 1000) + "..." : normalized;
             }
         };
     }

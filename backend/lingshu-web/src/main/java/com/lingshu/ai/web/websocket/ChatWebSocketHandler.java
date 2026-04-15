@@ -2,9 +2,10 @@ package com.lingshu.ai.web.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lingshu.ai.core.service.ChatService;
-import com.lingshu.ai.core.service.ProactiveService;
 import com.lingshu.ai.core.service.AffinityService;
 import com.lingshu.ai.core.service.AsrService;
+import com.lingshu.ai.core.service.ChatSessionService;
+import com.lingshu.ai.core.service.ProactiveService;
 import com.lingshu.ai.core.util.SkillNameResolver;
 import com.lingshu.ai.infrastructure.entity.SystemSetting;
 import com.lingshu.ai.infrastructure.entity.UserState;
@@ -31,20 +32,24 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     private final ProactiveService proactiveService;
     private final AffinityService affinityService;
     private final AsrService asrService;
+    private final ChatSessionService chatSessionService;
     private final SettingService settingService;
     
     private static final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
     private static final Map<String, String> sessionUserMap = new ConcurrentHashMap<>();
+    private static final Map<String, Long> sessionChatMap = new ConcurrentHashMap<>();
 
     public ChatWebSocketHandler(ChatService chatService, 
                                 ProactiveService proactiveService,
                                 AffinityService affinityService,
                                 AsrService asrService,
+                                ChatSessionService chatSessionService,
                                 SettingService settingService) {
         this.chatService = chatService;
         this.proactiveService = proactiveService;
         this.affinityService = affinityService;
         this.asrService = asrService;
+        this.chatSessionService = chatSessionService;
         this.settingService = settingService;
     }
 
@@ -92,6 +97,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         String sessionId = session.getId();
         sessions.remove(sessionId);
         sessionUserMap.remove(sessionId);
+        sessionChatMap.remove(sessionId);
         //log.info("WebSocket 连接关闭: {}, 状态: {}", sessionId, status);
     }
 
@@ -102,13 +108,16 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
 
     private void handleRegister(WebSocketSession session, Map<String, Object> data) throws IOException {
         String userId = resolveUserId(session, data.get("userId"));
+        Long chatSessionId = resolveChatSessionId(userId, data.get("sessionId"), session.getId());
         sessionUserMap.put(session.getId(), userId);
+        sessionChatMap.put(session.getId(), chatSessionId);
         
         //log.info("用户注册: {} -> {}", session.getId(), userId);
         
         sendMessage(session, Map.of(
             "type", "registered",
-            "userId", userId
+            "userId", userId,
+            "chatSessionId", chatSessionId
         ));
         
         UserState state = affinityService.getOrCreateUserState(userId);
@@ -125,6 +134,8 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         Long agentId = data.get("agentId") != null ?
                 ((Number) data.get("agentId")).longValue() : null;
         String userId = sessionUserMap.getOrDefault(session.getId(), fallbackUserId(session));
+        Long chatSessionId = resolveChatSessionId(userId, data.get("sessionId"), session.getId());
+        sessionChatMap.put(session.getId(), chatSessionId);
         String model = (String) data.get("model");
         String apiKey = (String) data.get("apiKey");
         String baseUrl = (String) data.get("baseUrl");
@@ -150,11 +161,12 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
 
         sendMessage(session, Map.of(
             "type", "chatStart",
-            "userMessage", message != null ? message : ""
+            "userMessage", message != null ? message : "",
+            "chatSessionId", chatSessionId
         ));
 
         try {
-            chatService.streamChat(message, images, agentId, userId, model, apiKey, baseUrl, enableThinking, new ChatService.ToolEventListener() {
+            chatService.streamChat(message, images, chatSessionId, agentId, userId, model, apiKey, baseUrl, enableThinking, new ChatService.ToolEventListener() {
                         @Override
                         public void onToolStart(String toolCallId, String toolName, String arguments) {
                             try {
@@ -330,6 +342,17 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         return "web-ws:" + session.getId();
     }
 
+    private Long resolveChatSessionId(String userId, Object rawSessionId, String webSocketSessionId) {
+        Long explicitSessionId = null;
+        if (rawSessionId instanceof Number number) {
+            explicitSessionId = number.longValue();
+        } else if (rawSessionId instanceof String value && !value.isBlank()) {
+            explicitSessionId = Long.parseLong(value.trim());
+        }
+        Long cachedSessionId = sessionChatMap.get(webSocketSessionId);
+        return chatSessionService.resolveSessionId(userId, explicitSessionId != null ? explicitSessionId : cachedSessionId);
+    }
+
     private void sendMessage(WebSocketSession session, Map<String, Object> message) throws IOException {
         if (session.isOpen()) {
             String json = objectMapper.writeValueAsString(message);
@@ -391,5 +414,9 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
 
     public static Map<String, String> getSessionUserMap() {
         return sessionUserMap;
+    }
+
+    public static Map<String, Long> getSessionChatMap() {
+        return sessionChatMap;
     }
 }

@@ -54,7 +54,7 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
         PageRequest pageable = PageRequest.of(0, MAX_CONTEXT_TURNS, Sort.by("id").descending());
         List<ChatTurn> turnsDesc = turnRepository.findBySessionIdAndStatusInOrderByIdDesc(
                 sessionId,
-                List.of("running", "completed", "failed"),
+                List.of("completed"),
                 pageable
         );
         if (turnsDesc == null || turnsDesc.isEmpty()) {

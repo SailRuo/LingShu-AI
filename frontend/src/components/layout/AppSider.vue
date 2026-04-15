@@ -32,6 +32,11 @@ const sessionStore = useChatSessionStore()
 const { sessions, activeSessionId, isLoadingSessions } = storeToRefs(sessionStore)
 const isCreatingSession = ref(false)
 
+const menuValue = computed(() => {
+  if (props.activeMenu.startsWith('settings')) return 'settings'
+  return props.activeMenu
+})
+
 const renderIcon = (c: Component) => () => h(NIcon, null, { default: () => h(c) })
 
 const mainNav = [
@@ -59,6 +64,12 @@ async function handleCreateSession() {
   try {
     const created = await sessionStore.createSession()
     message.success(`已创建 ${created.title}`)
+    if (props.activeMenu !== 'resonance') {
+      emit('update:activeMenu', 'resonance')
+    }
+    if (props.mobileVisible) {
+      emit('update:mobileVisible', false)
+    }
   } catch (error) {
     console.error('Failed to create session:', error)
     message.error('新建会话失败，请稍后重试')
@@ -68,8 +79,12 @@ async function handleCreateSession() {
 }
 
 function handleSelectSession(sessionId: number) {
-  if (activeSessionId.value === sessionId) return
-  sessionStore.setActiveSession(sessionId)
+  if (activeSessionId.value !== sessionId) {
+    sessionStore.setActiveSession(sessionId)
+  }
+  if (props.activeMenu !== 'resonance') {
+    emit('update:activeMenu', 'resonance')
+  }
   if (props.mobileVisible) {
     emit('update:mobileVisible', false)
   }
@@ -104,20 +119,26 @@ watch(() => props.activeMenu, () => {
       </div>
 
       <div v-if="!collapsed" class="session-section">
-        <div class="session-header">
+        <div class="section-header">
           <span class="section-label">会话记录</span>
-          <button
-            class="session-create-btn"
-            :disabled="isCreatingSession"
-            @click="handleCreateSession"
-            title="新建会话"
-          >
-            <Loader2 v-if="isCreatingSession" :size="14" class="spin" />
-            <Plus v-else :size="14" />
-          </button>
+          <div class="section-line"></div>
         </div>
 
         <div class="session-list">
+          <button
+            class="session-item new-session-item"
+            :disabled="isCreatingSession"
+            @click="handleCreateSession"
+          >
+            <span class="session-item-icon new-session-icon">
+              <Loader2 v-if="isCreatingSession" :size="14" class="spin" />
+              <Plus v-else :size="14" />
+            </span>
+            <span class="session-item-body">
+              <strong>新建会话</strong>
+            </span>
+          </button>
+
           <button
             v-for="session in sessions"
             :key="session.id"
@@ -149,7 +170,7 @@ watch(() => props.activeMenu, () => {
           <div class="section-line"></div>
         </div>
         <n-menu
-          :value="activeMenu"
+          :value="menuValue"
           :options="mainNav"
           :collapsed="collapsed"
           class="nav-menu"
@@ -166,7 +187,7 @@ watch(() => props.activeMenu, () => {
           <div class="section-line"></div>
         </div>
         <n-menu
-          :value="activeMenu"
+          :value="menuValue"
           :options="infraNav"
           :collapsed="collapsed"
           class="nav-menu infra-menu"
@@ -398,46 +419,20 @@ watch(() => props.activeMenu, () => {
   color: var(--color-primary) !important;
 }
 
-.infra-menu :deep(.n-menu-item-content) {
-  height: 40px !important;
+.new-session-item {
+  margin-bottom: 4px;
 }
 
-.infra-menu :deep(.n-menu-item-content-header) {
-  font-size: 13px !important;
-  color: var(--color-text-dim) !important;
-}
-
-.session-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0 12px;
-  margin-bottom: 8px;
-}
-
-.session-create-btn {
+.new-session-icon {
+  color: var(--color-primary);
+  background: rgba(56, 189, 248, 0.12);
+  border-radius: 6px;
   width: 24px;
   height: 24px;
-  border-radius: 6px;
-  border: 1px solid rgba(56, 189, 248, 0.3);
-  background: rgba(56, 189, 248, 0.12);
-  color: #38bdf8;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s ease;
 }
 
-.session-create-btn:hover:not(:disabled) {
+.new-session-item:hover .new-session-icon {
   background: rgba(56, 189, 248, 0.2);
-  transform: scale(1.05);
-}
-
-.session-create-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .session-list {
@@ -445,35 +440,54 @@ watch(() => props.activeMenu, () => {
   flex-direction: column;
   gap: 2px;
   overflow-y: auto;
-  padding: 0 8px;
+  padding: 0;
 }
 
 .session-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
   border: none;
   background: transparent;
   color: var(--color-text);
-  border-radius: 8px;
-  padding: 8px 12px;
+  border-radius: 0 10px 10px 0;
+  padding: 0 16px;
+  margin: 2px 0;
   cursor: pointer;
   text-align: left;
-  transition: all 0.2s ease;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+  height: 44px;
 }
 
-.session-item:hover {
-  background: rgba(255, 255, 255, 0.04);
+.session-item::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: linear-gradient(270deg, var(--color-surface) 0%, transparent 100%);
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+  border-radius: 0 10px 10px 0;
+  opacity: 0;
+}
+
+.session-item:hover::before {
+  width: 100%;
+  opacity: 1;
 }
 
 .session-item.active {
-  background: linear-gradient(270deg, rgba(56, 189, 248, 0.12) 0%, transparent 100%);
   color: var(--color-primary);
 }
 
-.session-item.active .session-item-body strong {
-  color: var(--color-primary);
+.session-item.active::before {
+  width: 100%;
+  opacity: 1;
+  background: linear-gradient(270deg, var(--color-primary-dim) 0%, transparent 80%);
 }
 
 .session-item-icon {
@@ -484,6 +498,9 @@ watch(() => props.activeMenu, () => {
   justify-content: center;
   flex-shrink: 0;
   color: var(--color-text-dim);
+  position: relative;
+  z-index: 1;
+  transition: color 0.3s ease;
 }
 
 .session-item.active .session-item-icon {
@@ -494,6 +511,101 @@ watch(() => props.activeMenu, () => {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
+  z-index: 1;
+}
+
+.session-item-body strong {
+  font-size: 14px;
+  color: var(--color-text);
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: all 0.3s ease;
+}
+
+.session-item.active .session-item-body strong {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.new-session-item {
+  margin-bottom: 6px;
+}
+
+.new-session-icon {
+  color: var(--color-primary);
+  background: rgba(56, 189, 248, 0.1);
+  border-radius: 6px;
+  width: 24px;
+  height: 24px;
+  transition: background 0.3s ease;
+}
+
+.new-session-item:hover .new-session-icon {
+  background: rgba(56, 189, 248, 0.2);
+}
+
+.session-list {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.session-item::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: linear-gradient(270deg, var(--color-surface) 0%, transparent 100%);
+  transition: width 0.3s ease;
+  border-radius: 0 10px 10px 0;
+}
+
+.session-item:hover::before {
+  width: 100%;
+}
+
+.session-item.active {
+  color: var(--color-primary);
+}
+
+.session-item.active::before {
+  width: 100%;
+  background: linear-gradient(270deg, var(--color-primary-dim) 0%, transparent 80%);
+}
+
+.session-item.active .session-item-body strong {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.session-item-icon {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+  position: relative;
+  z-index: 1;
+}
+
+.session-item.active .session-item-icon {
+  color: var(--color-primary);
+}
+
+.session-item-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 1;
 }
 
 .session-item-body strong {

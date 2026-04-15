@@ -50,6 +50,7 @@ public class ChatServiceImpl implements ChatService {
 
     private final MemoryService memoryService;
     private final AgentConfigService agentConfigService;
+    private final ChatSessionService chatSessionService;
     private final ChatSessionRepository sessionRepository;
     private final StreamingChatModel streamingChatLanguageModel;
     private final RestTemplate restTemplate;
@@ -72,6 +73,7 @@ public class ChatServiceImpl implements ChatService {
 
     public ChatServiceImpl(MemoryService memoryService,
                            AgentConfigService agentConfigService,
+                           ChatSessionService chatSessionService,
                            ChatSessionRepository sessionRepository,
                            StreamingChatModel streamingChatLanguageModel,
                            RestTemplate restTemplate,
@@ -89,6 +91,7 @@ public class ChatServiceImpl implements ChatService {
                            McpToolArtifactRegistry mcpToolArtifactRegistry) {
         this.memoryService = memoryService;
         this.agentConfigService = agentConfigService;
+        this.chatSessionService = chatSessionService;
         this.sessionRepository = sessionRepository;
         this.streamingChatLanguageModel = streamingChatLanguageModel;
         this.restTemplate = restTemplate;
@@ -106,17 +109,10 @@ public class ChatServiceImpl implements ChatService {
         this.mcpToolArtifactRegistry = mcpToolArtifactRegistry;
     }
 
-    private ChatSession getOrCreateSession(String userId) {
-        String normalizedUserId = (userId == null || userId.isBlank()) ? "User" : userId.trim();
-        return sessionRepository.findFirstByUserIdOrderByIdAsc(normalizedUserId).orElseGet(() -> {
-            ChatSession session = ChatSession.builder()
-                    .userId(normalizedUserId)
-                    .title("Default Conversation")
-                    .createdAt(LocalDateTime.now())
-                    .updatedAt(LocalDateTime.now())
-                    .build();
-            return sessionRepository.save(session);
-        });
+    private ChatSession getOrCreateSession(String userId, Long sessionId) {
+        Long resolvedSessionId = chatSessionService.resolveSessionId(userId, sessionId);
+        return sessionRepository.findById(resolvedSessionId)
+                .orElseThrow(() -> new IllegalArgumentException("Session not found: " + resolvedSessionId));
     }
 
     private AgentConfig getAgent(Long agentId) {
@@ -178,19 +174,26 @@ public class ChatServiceImpl implements ChatService {
     @Override
     public Flux<String> streamChat(String message, Long agentId, String userId, String model, String apiKey, String baseUrl,
                                    ToolEventListener toolEventListener) {
-        return streamChat(message, agentId, userId, model, apiKey, baseUrl, false, toolEventListener);
+        return streamChat(message, null, agentId, userId, model, apiKey, baseUrl, false, toolEventListener);
     }
 
     @Override
     public Flux<String> streamChat(String message, Long agentId, String userId, String model, String apiKey, String baseUrl,
                                    Boolean enableThinking, ToolEventListener toolEventListener) {
-        return streamChat(message, null, agentId, userId, model, apiKey, baseUrl, enableThinking, toolEventListener);
+        return streamChat(message, null, null, agentId, userId, model, apiKey, baseUrl, enableThinking, toolEventListener);
     }
 
     @Override
     public Flux<String> streamChat(String message, List<String> images, Long agentId, String userId, String model, String apiKey, String baseUrl,
                                    Boolean enableThinking, ToolEventListener toolEventListener) {
-        ChatSession session = getOrCreateSession(userId);
+        return streamChat(message, images, null, agentId, userId, model, apiKey, baseUrl, enableThinking, toolEventListener);
+    }
+
+    @Override
+    public Flux<String> streamChat(String message, List<String> images, Long sessionId, Long agentId, String userId, String model, String apiKey, String baseUrl,
+                                   Boolean enableThinking, ToolEventListener toolEventListener) {
+        ChatSession session = getOrCreateSession(userId, sessionId);
+        chatSessionService.touchSession(session.getId());
         AgentConfig agent = getAgent(agentId);
 
         if (agent != null) {
@@ -591,7 +594,7 @@ public class ChatServiceImpl implements ChatService {
 
     @Override
     public Flux<String> streamWelcome(String userId) {
-        ChatSession session = getOrCreateSession(userId);
+        ChatSession session = getOrCreateSession(userId, null);
         systemLogService.info("生成欢迎消息...", "CHAT");
 
         AgentConfig defaultAgent = agentConfigService.getDefaultAgent().orElse(null);

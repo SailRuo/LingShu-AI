@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { NConfigProvider, NMessageProvider, NDialogProvider, NNotificationProvider, NLoadingBarProvider, darkTheme } from 'naive-ui'
-import { computed, onMounted, markRaw, h, watch, ref } from 'vue'
+import { computed, onMounted, markRaw, watch, ref } from 'vue'
 import { useThemeStore } from '@/stores/themeStore'
 import { useLocalStorage } from '@vueuse/core'
 import { Menu, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
@@ -8,7 +8,6 @@ import AppSider from '@/components/layout/AppSider.vue'
 import ResonanceView from '@/views/ResonanceView.vue'
 import InsightView from '@/views/InsightView.vue'
 import SettingsView from '@/views/SettingsView.vue'
-import ComingSoonView from '@/views/ComingSoonView.vue'
 import SystemLogView from '@/views/SystemLogView.vue'
 import GovernanceView from '@/views/GovernanceView.vue'
 import StarField from '@/components/common/StarField.vue'
@@ -20,15 +19,15 @@ import SecurityView from '@/views/SecurityView.vue'
 
 const themeStore = useThemeStore()
 
-// 侧边栏状态管理
+// 渚ц竟鏍忕姸鎬佺鐞?
 const sidebarCollapsed = ref(false)
 const mobileSidebarVisible = ref(false)
 const isMobile = ref(false)
 
-// 动画特效，使用 LocalStorage 持久化
+// 鍔ㄧ敾鐗规晥锛屼娇鐢?LocalStorage 鎸佷箙鍖?
 const animationEffect = useLocalStorage('lingshu-animation-effect', 'off')
 
-// 监听窗口大小变化
+// 鐩戝惉绐楀彛澶у皬鍙樺寲
 function checkMobile() {
   isMobile.value = window.innerWidth < 768
   if (!isMobile.value) {
@@ -46,28 +45,31 @@ onMounted(() => {
 
 
 
-// 使用 LocalStorage 持久化当前菜单状态，解决刷新重置问题
+// 浣跨敤 LocalStorage 鎸佷箙鍖栧綋鍓嶈彍鍗曠姸鎬侊紝瑙ｅ喅鍒锋柊閲嶇疆闂
 const activeMenu = useLocalStorage('lingshu-active-menu', 'resonance')
 
-// 监听菜单变化，如果是 settings-* 则自动切换到 settings
+// 鐩戝惉鑿滃崟鍙樺寲锛屽鏋滄槸 settings-* 鍒欒嚜鍔ㄥ垏鎹㈠埌 settings
 watch(activeMenu, (newVal, oldVal) => {
+  if (newVal === 'pocket') {
+    activeMenu.value = 'resonance'
+    return
+  }
   const settingsKeys = ['settings-model', 'settings-agents', 'settings-proactive', 'settings-mcp']
   if (settingsKeys.includes(newVal) && oldVal !== 'settings' && !settingsKeys.includes(oldVal || '')) {
-    // 从外部进入设置页面，保持当前 key 不变
+    // 浠庡閮ㄨ繘鍏ヨ缃〉闈紝淇濇寔褰撳墠 key 涓嶅彉
   } else if (settingsKeys.includes(newVal) && oldVal === 'settings') {
-    // 已经在设置页面内切换，保持当前 key 不变
+    // 宸茬粡鍦ㄨ缃〉闈㈠唴鍒囨崲锛屼繚鎸佸綋鍓?key 涓嶅彉
   } else if (newVal === 'settings') {
-    // 点击系统设置菜单，切换到 settings-model
+    // 鐐瑰嚮绯荤粺璁剧疆鑿滃崟锛屽垏鎹㈠埌 settings-model
     activeMenu.value = 'settings-model'
   }
 }, { immediate: true })
 
-// 视图注册表，优化架构，方便后续扩展
+// 瑙嗗浘娉ㄥ唽琛紝浼樺寲鏋舵瀯锛屾柟渚垮悗缁墿灞?
 const viewMap: Record<string, any> = {
   resonance: markRaw(ResonanceView),
   insight: markRaw(InsightView),
   governance: markRaw(GovernanceView),
-  pocket: markRaw(() => h(ComingSoonView, { title: '全维口袋' })),
   'settings-model': markRaw(SettingsView),
   'settings-agents': markRaw(SettingsView),
   'settings-proactive': markRaw(SettingsView),
@@ -81,7 +83,7 @@ const currentView = computed(() => viewMap[activeMenu.value] || viewMap.resonanc
 
 const naiveTheme = computed(() => themeStore.current.isDark ? darkTheme : null)
 
-// 动态计算组件属性
+// 鍔ㄦ€佽绠楃粍浠跺睘鎬?
 const currentViewComponentProps = computed(() => {
   const settingsKeys = ['settings-model', 'settings-agents', 'settings-proactive', 'settings-mcp', 'settings']
   if (settingsKeys.includes(activeMenu.value)) {
@@ -109,7 +111,7 @@ function getViewKey(menuKey: string): string {
         <n-notification-provider>
           <n-loading-bar-provider>
             <div class="app-container">
-              <!-- Mesh Background (根据开关控制) -->
+              <!-- Mesh Background (鏍规嵁寮€鍏虫帶鍒? -->
               <div class="mesh-bg" v-if="animationEffect !== 'off'">
                 <div class="mesh-blob mesh-1"></div>
                 <div class="mesh-blob mesh-2"></div>
@@ -193,10 +195,10 @@ function getViewKey(menuKey: string): string {
   grid-template-areas:
     "sidebar right"
     "footer footer";
-  background: transparent; /* 保持透明以显示底层星空 */
+  background: transparent; /* 淇濇寔閫忔槑浠ユ樉绀哄簳灞傛槦绌?*/
   transition: grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
-  z-index: 1; /* 在星空之上 */
+  z-index: 1; /* 鍦ㄦ槦绌轰箣涓?*/
 }
 
 /* Desktop Collapsed State */
@@ -208,7 +210,7 @@ function getViewKey(menuKey: string): string {
 .global-collapse-toggle {
   position: fixed;
   top: 16px;
-  left: 212px; /* 260px(侧边栏宽度) - 32px(按钮宽度) - 16px(右边距) */
+  left: 212px; /* 260px(渚ц竟鏍忓搴? - 32px(鎸夐挳瀹藉害) - 16px(鍙宠竟璺? */
   width: 32px;
   height: 32px;
   border-radius: 8px;
@@ -257,7 +259,7 @@ function getViewKey(menuKey: string): string {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: transparent; /* 改为透明以显示星空 */
+  background: transparent; /* 鏀逛负閫忔槑浠ユ樉绀烘槦绌?*/
   position: relative;
   overflow: hidden;
 }
@@ -308,7 +310,7 @@ function getViewKey(menuKey: string): string {
   display: none;
 }
 
-/* 视图切换动画 - 符合 frontend-design 高级感要求 */
+/* 瑙嗗浘鍒囨崲鍔ㄧ敾 - 绗﹀悎 frontend-design 楂樼骇鎰熻姹?*/
 .fade-slide-enter-active,
 .fade-slide-leave-active {
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
