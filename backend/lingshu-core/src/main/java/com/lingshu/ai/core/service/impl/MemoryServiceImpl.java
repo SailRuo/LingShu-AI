@@ -189,7 +189,7 @@ public class MemoryServiceImpl implements MemoryService {
 
         if (extractionResult == null) {
             log.debug("Memory pulse: No cognitive updates required for this message.");
-            systemLogService.info("浜嬪疄鎻愬彇瀹屾垚: 鏃犻渶鏇存柊璁板繂", "FACT");
+            systemLogService.info("事实提取完成: 无需更新记忆", "FACT");
             return;
         }
 
@@ -518,6 +518,7 @@ public class MemoryServiceImpl implements MemoryService {
         metadata.put("user_id", userId);
         metadata.put("emotional_tone", emotionalToneStr);
         metadata.put("category", savedFact.getClusterKey() != null ? savedFact.getClusterKey() : "unknown");
+        metadata.put("content", savedFact.getContent());
         metadata.put("timestamp", java.time.LocalDateTime.now().toString());
         metadata.put("fact_type", extractedFact.getType() != null ? extractedFact.getType().name() : "UNKNOWN");
         metadata.put("confidence",
@@ -671,12 +672,15 @@ public class MemoryServiceImpl implements MemoryService {
             List<Long> rankedIds = new ArrayList<>();
 
             for (EmbeddingMatch<TextSegment> match : matches) {
-                String matchText = match.embedded().text();
-                String displayText = matchText;
-                if (matchText.contains("|||")) {
-                    String[] parts = matchText.split("\\|\\|\\|");
-                    if (parts.length == 2) {
-                        displayText = parts[1].replace("提取事实陈述：", "").trim();
+                String displayText = match.embedded().metadata().getString("content");
+                if (displayText == null || displayText.isBlank()) {
+                    String matchText = match.embedded().text();
+                    displayText = matchText;
+                    if (matchText.contains("|||")) {
+                        String[] parts = matchText.split("\\|\\|\\|");
+                        if (parts.length >= 2) {
+                            displayText = parts[parts.length - 1].replace("提取事实陈述：", "").trim();
+                        }
                     }
                 }
                 result.add(displayText);
@@ -856,24 +860,27 @@ public class MemoryServiceImpl implements MemoryService {
             return 0.0;
         }
 
-        int totalMatches = 0;
+        java.util.Set<String> matchedEntities = new java.util.HashSet<>();
         double totalImportance = 0.0;
 
         for (FactNode fact : activatedFacts) {
             String content = fact.getContent().toLowerCase();
+            boolean factMatched = false;
             for (String entity : entities) {
                 if (content.contains(entity.toLowerCase())) {
-                    totalMatches++;
-                    totalImportance += fact.getImportance();
-                    break;
+                    matchedEntities.add(entity.toLowerCase());
+                    factMatched = true;
                 }
+            }
+            if (factMatched) {
+                totalImportance += fact.getImportance();
             }
         }
 
-        double entityRatio = (double) totalMatches / entities.size();
+        double entityRatio = (double) matchedEntities.size() / entities.size();
         double avgImportance = totalImportance / activatedFacts.size();
 
-        return entityRatio * 0.6 + avgImportance * 0.4;
+        return Math.min(1.0, entityRatio * 0.6 + avgImportance * 0.4);
     }
 
     @Override
@@ -2202,23 +2209,36 @@ public class MemoryServiceImpl implements MemoryService {
         log.info("Starting global embedding rebuild process for migration...");
         systemLogService.info("开始全局向量索引重建流程 (元数据补全)...", "MEMORY");
 
+        java.util.concurrent.atomic.AtomicInteger totalCount = new java.util.concurrent.atomic.AtomicInteger(0);
+        java.util.concurrent.atomic.AtomicInteger successCount = new java.util.concurrent.atomic.AtomicInteger(0);
+
         userRepository.findAll().forEach(user -> {
             String userId = user.getName();
             if (user.getFacts() != null) {
                 user.getFacts().stream()
                         .filter(f -> !"archived".equals(f.getStatus()))
                         .forEach(fact -> {
-                            ExtractionResult.ExtractedFact dummy = new ExtractionResult.ExtractedFact();
-                            dummy.setContent(fact.getContent());
-                            
-                            // 尽量利用已有元数据
-                            dummy.setVolatile("volatile".equals(fact.getStatus()));
-                            
-                            storeFactEmbedding(userId, fact, fact.getOriginalMessage(), null, dummy);
+                            totalCount.incrementAndGet();
+                            try {
+                                // 1. 先根据 fact_id 清除旧向量，确保幂等
+                                if (fact.getId() != null) {
+                                    embeddingStore.removeAll(MetadataFilterBuilder.metadataKey("fact_id").isEqualTo(fact.getId().toString()));
+                                }
+
+                                // 2. 重新写入带元数据的向量
+                                ExtractionResult.ExtractedFact dummy = new ExtractionResult.ExtractedFact();
+                                dummy.setContent(fact.getContent());
+                                dummy.setVolatile("volatile".equals(fact.getStatus()));
+
+                                storeFactEmbedding(userId, fact, fact.getOriginalMessage(), null, dummy);
+                                successCount.incrementAndGet();
+                            } catch (Exception e) {
+                                log.error("Failed to rebuild embedding for fact {}: {}", fact.getId(), e.getMessage());
+                            }
                         });
             }
         });
-        
-        systemLogService.success("全局向量索引重建完成", "MEMORY");
+
+        systemLogService.success(String.format("全局向量索引重建完成: 共处理 %d 条，成功 %d 条", totalCount.get(), successCount.get()), "MEMORY");
     }
 }

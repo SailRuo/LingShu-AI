@@ -100,4 +100,22 @@ class MemoryServiceImplTest {
         // Should call vector search as supplement
         verify(embeddingStore).search(any(EmbeddingSearchRequest.class));
     }
+
+    @Test
+    void rebuildAllEmbeddings_ShouldCallRemoveBeforeAdd() {
+        // Setup users and facts
+        UserNode user = UserNode.builder().name("user_rebuild").build();
+        FactNode fact = FactNode.builder().id(99L).content("Rebuild test fact").status("active").build();
+        user.setFacts(new HashSet<>(Collections.singletonList(fact)));
+        when(userRepository.findAll()).thenReturn(Collections.singletonList(user));
+        when(embeddingModel.embed(any(TextSegment.class))).thenReturn(dev.langchain4j.model.output.Response.from(
+                dev.langchain4j.data.embedding.Embedding.from(new float[]{0.1f})));
+
+        memoryService.rebuildAllEmbeddings();
+
+        // Should remove old embedding for this fact first
+        verify(embeddingStore).removeAll(any(dev.langchain4j.store.embedding.filter.Filter.class));
+        // Should then add the new one
+        verify(embeddingStore).add(any(dev.langchain4j.data.embedding.Embedding.class), any(dev.langchain4j.data.segment.TextSegment.class));
+    }
 }
