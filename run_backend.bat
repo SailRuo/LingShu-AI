@@ -13,12 +13,16 @@ set MAVEN_OPTS=-Xmx1024m -Xms512m
 echo [INFO] Cleaning up potential zombie Java processes...
 taskkill /F /IM java.exe /T >nul 2>&1
 
-echo [INFO] Compiling and Installing modules...
-call mvn clean install -DskipTests
-if %errorlevel% neq 0 (
-    echo [ERROR] Compilation failed.
-    pause
-    exit /b %errorlevel%
+if "%1"=="clean" (
+    echo [INFO] Clean build requested, compiling and installing all modules...
+    call mvn clean install -DskipTests
+    if %errorlevel% neq 0 (
+        echo [ERROR] Compilation failed.
+        pause
+        exit /b %errorlevel%
+    )
+) else (
+    echo [INFO] Skipping build, running directly
 )
 
 echo [INFO] Moving to Web Module...

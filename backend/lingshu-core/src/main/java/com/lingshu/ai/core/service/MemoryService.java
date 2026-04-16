@@ -53,4 +53,9 @@ public interface MemoryService {
      * P2: 记忆治理 - 手动从冷库恢复记忆
      */
     void restoreFact(Long factId);
+
+    /**
+     * 一次性重建所有已知事实的语义向量索引，用于元数据补全或变更。
+     */
+    void rebuildAllEmbeddings();
 }

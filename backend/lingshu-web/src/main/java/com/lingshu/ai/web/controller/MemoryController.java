@@ -59,6 +59,15 @@ public class MemoryController {
     }
 
     /**
+     * 手动触发全局向量索引重建。
+     */
+    @PostMapping("/maintenance/rebuild-embeddings")
+    public void rebuildEmbeddings() {
+        log.info("API 触发：全局向量索引重建");
+        memoryService.rebuildAllEmbeddings();
+    }
+
+    /**
      * 手动更新事实分类。
      */
     @PutMapping("/fact/{id}/classification")

@@ -1,7 +1,11 @@
 package com.lingshu.ai.core.config;
 
+import com.lingshu.ai.core.model.DynamicEmbeddingModel;
+import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.store.embedding.EmbeddingStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -11,6 +15,7 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.concurrent.Executor;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -129,7 +134,7 @@ public class AiConfig {
             public void onError(dev.langchain4j.model.chat.listener.ChatModelErrorContext errorContext) {
                 log.error("LLM Error Summary => {}", errorContext.error().getMessage());
             }
-            
+
             private String compact(String text) {
                 if (text == null || text.isBlank()) {
                     return "<empty>";
@@ -164,13 +169,12 @@ public class AiConfig {
     }
 
     @Bean
-    public dev.langchain4j.model.embedding.EmbeddingModel embeddingModel(
-            com.lingshu.ai.core.model.DynamicEmbeddingModel dynamicEmbeddingModel) {
+    public EmbeddingModel embeddingModel(DynamicEmbeddingModel dynamicEmbeddingModel) {
         return dynamicEmbeddingModel;
     }
 
     @Bean
-    public dev.langchain4j.store.embedding.EmbeddingStore<dev.langchain4j.data.segment.TextSegment> embeddingStore(dev.langchain4j.model.embedding.EmbeddingModel embeddingModel) {
+    public EmbeddingStore<TextSegment> embeddingStore(EmbeddingModel embeddingModel) {
         // 从 JDBC URL 解析数据库配置 (例如：jdbc:postgresql://postgres:5432/lingshu)
         String dbHost = "localhost";
         int dbPort = 5432;
@@ -298,7 +302,7 @@ public class AiConfig {
 
                             int toolResultCount = 0;
                             java.util.List<dev.langchain4j.data.message.UserMessage> injectedMessages = new java.util.ArrayList<>();
-                            
+
                             while (i < messages.size() && toolResultCount < toolCallCount) {
                                 dev.langchain4j.data.message.ChatMessage nextMsg = messages.get(i);
                                 if (nextMsg instanceof dev.langchain4j.data.message.ToolExecutionResultMessage) {
@@ -397,15 +401,15 @@ public class AiConfig {
     public interface Assistant {
         @dev.langchain4j.service.SystemMessage("{{systemPrompt}}")
         String chat(@dev.langchain4j.service.MemoryId Long sessionId,
-                @dev.langchain4j.service.UserMessage String message,
-                @dev.langchain4j.service.V("systemPrompt") String systemPrompt);
+                    @dev.langchain4j.service.UserMessage String message,
+                    @dev.langchain4j.service.V("systemPrompt") String systemPrompt);
     }
 
     public interface StreamingAssistant {
         @dev.langchain4j.service.SystemMessage("{{systemPrompt}}")
         dev.langchain4j.service.TokenStream chat(@dev.langchain4j.service.MemoryId Long sessionId,
-                @dev.langchain4j.service.UserMessage String message,
-                @dev.langchain4j.service.V("systemPrompt") String systemPrompt);
+                                                 @dev.langchain4j.service.UserMessage String message,
+                                                 @dev.langchain4j.service.V("systemPrompt") String systemPrompt);
     }
 
 
@@ -427,7 +431,7 @@ public class AiConfig {
      */
     public interface PlainAssistant {
         String chat(@dev.langchain4j.service.MemoryId Long sessionId,
-                @dev.langchain4j.service.UserMessage String message);
+                    @dev.langchain4j.service.UserMessage String message);
     }
 
     /**
@@ -436,6 +440,6 @@ public class AiConfig {
      */
     public interface PlainStreamingAssistant {
         dev.langchain4j.service.TokenStream chat(@dev.langchain4j.service.MemoryId Long sessionId,
-                @dev.langchain4j.service.UserMessage String message);
+                                                 @dev.langchain4j.service.UserMessage String message);
     }
 }

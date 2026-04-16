@@ -6,7 +6,6 @@ import {
   Settings,
   Zap,
   DatabaseBackup,
-  Hexagon,
   Loader2,
   Plus,
   MessageSquare
@@ -63,7 +62,9 @@ async function handleCreateSession() {
   isCreatingSession.value = true
   try {
     const created = await sessionStore.createSession()
-    message.success(`已创建 ${created.title}`)
+    if (!created.reusedExisting) {
+      message.success(`已创建 ${created.title}`)
+    }
     if (props.activeMenu !== 'resonance') {
       emit('update:activeMenu', 'resonance')
     }
@@ -164,6 +165,7 @@ watch(() => props.activeMenu, () => {
         </div>
       </div>
 
+      <div class="sider-bottom">
       <div class="core-menus">
         <div v-if="!collapsed" class="section-header">
           <span class="section-label">核心能力</span>
@@ -196,6 +198,7 @@ watch(() => props.activeMenu, () => {
             if (mobileVisible) emit('update:mobileVisible', false)
           }"
         />
+      </div>
       </div>
     </div>
   </aside>
@@ -256,6 +259,8 @@ watch(() => props.activeMenu, () => {
   flex-direction: column;
   padding: 20px 12px;
   width: 260px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .logo-section {
@@ -307,12 +312,20 @@ watch(() => props.activeMenu, () => {
 }
 
 .session-section {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.session-section > .section-header {
+  flex: 0 0 auto;
+}
+
+.sider-bottom {
+  flex: 0 0 auto;
 }
 
 .core-menus {
@@ -321,7 +334,6 @@ watch(() => props.activeMenu, () => {
 }
 
 .infra-nav {
-  margin-top: auto;
   flex-shrink: 0;
   width: 100%;
 }
@@ -439,11 +451,46 @@ watch(() => props.activeMenu, () => {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 0;
 }
 
+.session-list::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.session-list::-webkit-scrollbar-track {
+  background: transparent;
+  transition: background 0.2s ease 1s;
+}
+
+.session-list::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 4px;
+  transition: background 0.2s ease 1s;
+}
+
+.app-sider:hover .session-list::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--color-background) 30%, transparent);
+  transition-delay: 0s;
+}
+
+.app-sider:hover .session-list::-webkit-scrollbar-thumb {
+  background: rgb(from var(--color-primary) r g b / 0.18);
+  transition-delay: 0s;
+}
+
+.app-sider:hover .session-list::-webkit-scrollbar-thumb:hover {
+  background: rgb(from var(--color-primary) r g b / 0.32);
+  transition-delay: 0s;
+}
+
 .session-item {
+  flex: 0 0 44px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -530,95 +577,8 @@ watch(() => props.activeMenu, () => {
   font-weight: 600;
 }
 
-.new-session-item {
-  margin-bottom: 6px;
-}
-
-.new-session-icon {
-  color: var(--color-primary);
-  background: rgba(56, 189, 248, 0.1);
-  border-radius: 6px;
-  width: 24px;
-  height: 24px;
-  transition: background 0.3s ease;
-}
-
-.new-session-item:hover .new-session-icon {
-  background: rgba(56, 189, 248, 0.2);
-}
-
-.session-list {
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  padding: 0;
-}
-
-.session-item::before {
-  content: '';
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: 0;
-  background: linear-gradient(270deg, var(--color-surface) 0%, transparent 100%);
-  transition: width 0.3s ease;
-  border-radius: 0 10px 10px 0;
-}
-
-.session-item:hover::before {
-  width: 100%;
-}
-
-.session-item.active {
-  color: var(--color-primary);
-}
-
-.session-item.active::before {
-  width: 100%;
-  background: linear-gradient(270deg, var(--color-primary-dim) 0%, transparent 80%);
-}
-
-.session-item.active .session-item-body strong {
-  color: var(--color-primary);
-  font-weight: 600;
-}
-
-.session-item-icon {
-  width: 20px;
-  height: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: var(--color-text-dim);
-  position: relative;
-  z-index: 1;
-}
-
-.session-item.active .session-item-icon {
-  color: var(--color-primary);
-}
-
-.session-item-body {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  z-index: 1;
-}
-
-.session-item-body strong {
-  font-size: 13px;
-  color: var(--color-text);
-  font-weight: normal;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: color 0.2s ease;
-}
-
 .session-empty {
+  flex-shrink: 0;
   padding: 12px;
   display: flex;
   align-items: center;

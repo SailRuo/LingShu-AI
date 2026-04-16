@@ -1,8 +1,8 @@
 # LingShu-AI Backend Agent 指南
 
-这是给进入 `backend/` 目录的 Codex 用的工作手册。先读它，再看相关文档和实现。
+这是给进入 `backend/` 目录的 Codex 用的目录级工作手册。先读它，再看相关文档和实现。
 
-## 1. 这个后端在做什么
+## 1. 目录职责
 
 这里是 LingShu-AI 的核心编排层，负责聊天、记忆、情感分析、主动关怀、MCP 工具调用、系统设置和日志等能力。
 
@@ -15,7 +15,7 @@
 - PostgreSQL + pgvector
 - Redis
 
-## 2. 先看哪些内容
+## 2. 优先阅读
 
 优先阅读：
 
@@ -49,7 +49,7 @@
 - `lingshu-infrastructure/src/main/java/com/lingshu/ai/infrastructure/repository/*`
 - `lingshu-infrastructure/src/main/java/com/lingshu/ai/infrastructure/memory/DatabaseChatMemoryStore.java`
 
-## 3. 架构和职责
+## 3. 架构职责
 
 后端按三层拆分：
 
@@ -61,22 +61,22 @@
 
 - 控制器保持轻薄。
 - 业务流程尽量放在 Service 层。
-- 记忆、情感和 MCP 是项目核心能力，不要把它们改成普通的 CRUD 逻辑。
+- 记忆、情感和 MCP 是项目核心能力，不要把它们改成普通 CRUD 逻辑。
 - 前端只调后端 API，不要让前端直接接触数据库。
 
-## 4. 聊天链路
+## 4. 关键链路
 
 聊天主链路大致是：
 
 1. 前端通过 WebSocket 发消息到 `ChatWebSocketHandler`。
-2. 后端检索长期记忆（GAM-RAG）和当前上下文。
+2. 后端检索长期记忆（图谱 + 向量混合召回，GAM-RAG）和当前上下文。
 3. `PromptBuilderService` 组装最终 System Prompt（注入记忆和关系状态）。
 4. `ChatServiceImpl` 触发流式回复。
 5. 回复结束后触发异步后处理（`TurnPostProcessingService`），决定是否做情感分析、提取事实或记录互动。
 
 改聊天相关代码时，必须确认这条链路没有断。
 
-## 5. 记忆和情感
+## 5. 记忆与情感
 
 项目的记忆模型分三层：
 
@@ -86,18 +86,18 @@
 
 重要约束：
 
-- 情感分析目前已改为后置异步处理，前置分析（EmotionPreAnalysisService）默认禁用。
-- 事实提取（MemoryService）依赖后处理决策，需支持去重、合并、归类及置信度评估。
+- 情感分析目前已改为后置异步处理，前置分析（`EmotionPreAnalysisService`）默认禁用，仅作为历史实现保留。
+- 事实提取（`MemoryService`）依赖后处理决策，需支持去重、合并、归类及置信度评估。
 - 长期记忆要支持衰减、强化和冲突处理。
 - 图谱检索和向量检索要有明确边界，别混成一个黑盒。
 
-## 6. MCP 和工具
+## 6. MCP 与工具
 
 - MCP 是这个项目的重要扩展点，涉及外部工具、技能和本地任务执行。
 - 修改 MCP 逻辑时，要关注工具结果汇总、技能映射和安全边界。
 - 工具调用链路的变化，通常会影响前端展示和日志输出。
 
-## 7. 常用验证
+## 7. 验证
 
 - 后端编译安装：`mvn clean install -DskipTests`
 - 运行 Web 模块：`cd lingshu-web && mvn spring-boot:run`
@@ -111,7 +111,7 @@
 - 记忆查询和写入是否正常
 - 重要接口返回结构是否和前端一致
 
-## 8. 容易踩坑的地方
+## 8. 常见坑
 
 - `ChatWebSocketHandler` 的消息协议不要随意改。
 - `ChatServiceImpl` 的流式输出、工具事件和后处理耦合很强，改动要小心。
@@ -127,4 +127,3 @@
 - 为什么这么改
 - 哪些文件受影响
 - 你验证了什么
-

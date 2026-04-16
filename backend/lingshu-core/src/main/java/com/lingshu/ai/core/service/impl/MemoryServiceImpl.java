@@ -251,7 +251,7 @@ public class MemoryServiceImpl implements MemoryService {
                 }
 
                 systemLogService.success("新增事实: " + writeResult.savedFact.getContent(), "FACT");
-                storeFactEmbedding(writeResult.savedFact, messageSnapshot, emotion, fact);
+                storeFactEmbedding(userId, writeResult.savedFact, messageSnapshot, emotion, fact);
             }
 
             user.setLastSeen(LocalDateTime.now());
@@ -344,6 +344,7 @@ public class MemoryServiceImpl implements MemoryService {
             dev.langchain4j.store.embedding.EmbeddingSearchRequest searchRequest = dev.langchain4j.store.embedding.EmbeddingSearchRequest
                     .builder()
                     .queryEmbedding(queryEmbedding)
+                    .filter(MetadataFilterBuilder.metadataKey("user_id").isEqualTo(user.getName()))
                     .maxResults(5)
                     .minScore(0.5)
                     .build();
@@ -500,7 +501,7 @@ public class MemoryServiceImpl implements MemoryService {
                 .build();
     }
 
-    private void storeFactEmbedding(FactNode savedFact, String messageSnapshot,
+    private void storeFactEmbedding(String userId, FactNode savedFact, String messageSnapshot,
                                     com.lingshu.ai.core.dto.EmotionAnalysis emotion,
                                     ExtractionResult.ExtractedFact extractedFact) {
         String emotionalToneStr;
@@ -514,6 +515,7 @@ public class MemoryServiceImpl implements MemoryService {
         if (savedFact.getId() != null) {
             metadata.put("fact_id", savedFact.getId().toString());
         }
+        metadata.put("user_id", userId);
         metadata.put("emotional_tone", emotionalToneStr);
         metadata.put("category", savedFact.getClusterKey() != null ? savedFact.getClusterKey() : "unknown");
         metadata.put("timestamp", java.time.LocalDateTime.now().toString());
@@ -555,7 +557,6 @@ public class MemoryServiceImpl implements MemoryService {
 
     @Override
     public String retrieveContext(String userId, String message) {
-        StringBuilder contextBuilder = new StringBuilder();
         com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder = com.lingshu.ai.core.dto.MemoryRetrievalEvent
                 .builder()
                 .userId(userId)
@@ -567,110 +568,110 @@ public class MemoryServiceImpl implements MemoryService {
                 .finalRankedContent(new ArrayList<>())
                 .finalRankedIds(new ArrayList<>());
 
-        List<String> finalFacts = new ArrayList<>();
-
         List<String> entities = extractEntities(message);
-        List<FactNode> keywordMatchedFacts = new ArrayList<>();
+        eventBuilder.extractedEntities(entities);
 
-        userRepository.findByName(userId).ifPresentOrElse(user -> {
-            log.info("Graph Retrieval: Found {} facts for user {}",
-                    user.getFacts() != null ? user.getFacts().size() : 0, userId);
-            systemLogService.debug(String.format("图谱检索: 找到用户 %s 的 %d 条事实", userId,
-                    user.getFacts() != null ? user.getFacts().size() : 0), "MEMORY");
+        // 1. 图谱检索 (Graph Retrieval)
+        List<FactNode> graphFacts = performGraphRetrieval(userId, message, entities, eventBuilder);
 
+        // 2. 路由决策 (Routing Decision)
+        double gain = calculateGain(entities, graphFacts);
+        eventBuilder.gain(gain);
+        String routingDecision;
+        boolean runVector;
+
+        if (gain >= GAIN_THRESHOLD) {
+            routingDecision = "GRAPH_PRIORITIZED_VECTOR_SUPPLEMENT";
+            runVector = true;
+            systemLogService.info(String.format("路由决策: 图谱增益(%.2f) >= 阈值(%.2f)，执行图谱优先+向量补召回", gain, GAIN_THRESHOLD), "MEMORY");
+        } else if (graphFacts.isEmpty()) {
+            routingDecision = "VECTOR_BACKUP";
+            runVector = true;
+            systemLogService.info(String.format("路由决策: 图谱增益(%.2f) < 阈值，但图谱无结果，执行向量兜底", gain), "MEMORY");
+        } else {
+            routingDecision = "GRAPH_ONLY";
+            runVector = false;
+            systemLogService.info(String.format("路由决策: 图谱增益(%.2f) < 阈值，且图谱已有结果，直接返回图谱内容", gain), "MEMORY");
+        }
+        eventBuilder.routingDecision(routingDecision);
+
+        // 3. 向量检索 (Vector Retrieval)
+        List<String> vectorTexts = new ArrayList<>();
+        if (runVector) {
+            vectorTexts = performVectorRetrieval(userId, message, eventBuilder);
+        }
+
+        // 4. 合并与去重 (Merge and Deduplicate) - Task 3.1 & 3.2
+        List<String> finalFacts = mergeAndDeduplicate(graphFacts, vectorTexts);
+
+        // 5. 组装上下文与记录事件
+        StringBuilder contextBuilder = new StringBuilder();
+        if (!finalFacts.isEmpty()) {
+            contextBuilder.append("关于核心上下文的已知事实与记忆：\n");
+            finalFacts.forEach(fact -> contextBuilder.append("- ").append(fact).append("\n"));
+        }
+
+        eventBuilder.finalRankedContent(finalFacts);
+        recordRetrievalEvent(eventBuilder.build());
+
+        return contextBuilder.toString();
+    }
+
+    private List<FactNode> performGraphRetrieval(String userId, String message, List<String> entities,
+                                                 com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder) {
+        List<FactNode> result = new ArrayList<>();
+        userRepository.findByName(userId).ifPresent(user -> {
             if (user.getFacts() != null && !user.getFacts().isEmpty()) {
-                List<FactNode> relevantFacts;
-
+                List<FactNode> relevantFacts = new ArrayList<>();
                 if (!entities.isEmpty()) {
-                    relevantFacts = user.getFacts().stream()
+                    List<FactNode> matched = user.getFacts().stream()
                             .filter(f -> entities.stream()
                                     .anyMatch(e -> f.getContent().toLowerCase().contains(e.toLowerCase())))
                             .sorted((f1, f2) -> Double.compare(f2.getImportance(), f1.getImportance()))
                             .limit(8)
-                            .collect(Collectors.toList());
-
-                    log.debug("Found {} relevant facts by entities: {}", relevantFacts.size(), entities);
-                    systemLogService.debug(String.format("图谱检索: 根据实体 %s 匹配到 %d 条相关事实", entities, relevantFacts.size()),
-                            "MEMORY");
-                    keywordMatchedFacts.addAll(relevantFacts);
-                } else {
-                    relevantFacts = new ArrayList<>();
+                            .toList();
+                    relevantFacts.addAll(matched);
+                    eventBuilder.graphMatchedContent(relevantFacts.stream().map(FactNode::getContent).collect(Collectors.toList()));
+                    eventBuilder.graphMatchedIds(relevantFacts.stream().map(FactNode::getId).collect(Collectors.toList()));
                 }
 
-                boolean isIdentityQuery = isIdentityQuery(message, entities);
-                List<FactNode> coreFactsAdded = new ArrayList<>();
-                if (relevantFacts.size() < 3 || isIdentityQuery) {
-                    if (relevantFacts.isEmpty() || isIdentityQuery) {
-                        List<FactNode> coreFacts = user.getFacts().stream()
-                                .filter(f -> !relevantFacts.contains(f))
-                                .sorted((f1, f2) -> Double.compare(f2.getImportance(), f1.getImportance()))
-                                .limit(isIdentityQuery ? 5 : 2)
-                                .toList();
-                        relevantFacts.addAll(coreFacts);
-                        coreFactsAdded.addAll(coreFacts);
-                        systemLogService.debug(String.format("图谱检索: 保底补充了 %d 条核心事实", coreFacts.size()), "MEMORY");
-                    }
+                boolean isIdentity = isIdentityQuery(message, entities);
+                if (relevantFacts.size() < 3 || isIdentity) {
+                    List<FactNode> coreFacts = user.getFacts().stream()
+                            .filter(f -> !relevantFacts.contains(f))
+                            .sorted((f1, f2) -> Double.compare(f2.getImportance(), f1.getImportance()))
+                            .limit(isIdentity ? 5 : 2)
+                            .toList();
+                    relevantFacts.addAll(coreFacts);
+                    eventBuilder.fallbackActivated(true);
                 }
-
-                if (!relevantFacts.isEmpty()) {
-                    contextBuilder.append("关于用户的已知事实：\n");
-                    systemLogService.info(String.format("图谱检索完成，共获取到 %d 条相关事实:", relevantFacts.size()), "MEMORY");
-                    relevantFacts.forEach(f -> {
-                        log.debug("  Fact: {}", f.getContent());
-                        contextBuilder.append("- ").append(f.getContent()).append("\n");
-                        finalFacts.add(f.getContent());
-                        systemLogService.info(String.format("  - %s (重要度: %.2f)", f.getContent(), f.getImportance()),
-                                "MEMORY");
-                    });
-                    
-                    if (!keywordMatchedFacts.isEmpty()) {
-                        eventBuilder.graphMatchedContent(keywordMatchedFacts.stream().map(FactNode::getContent).collect(Collectors.toList()));
-                        eventBuilder.graphMatchedIds(keywordMatchedFacts.stream().map(FactNode::getId).collect(Collectors.toList()));
-                    }
-
-                    if (!coreFactsAdded.isEmpty() || isIdentityQuery) {
-                        eventBuilder.fallbackActivated(true);
-                        eventBuilder.baseFactContents(coreFactsAdded.stream().map(FactNode::getContent).collect(Collectors.toList()));
-                    }
-                } else {
-                    systemLogService.debug("图谱检索: 未找到与当前对话相关的事实", "MEMORY");
-                }
+                result.addAll(relevantFacts);
             }
-        }, () -> {
-            log.warn("Graph Retrieval: User {} not found in Neo4j", userId);
-            systemLogService.warn(String.format("图谱检索: 未找到用户 %s 的节点", userId), "MEMORY");
         });
+        return result;
+    }
 
-        if (!needsSemanticRetrieval(message, entities, keywordMatchedFacts, eventBuilder)) {
-            eventBuilder.finalRankedContent(finalFacts);
-            recordRetrievalEvent(eventBuilder.build());
-            return contextBuilder.toString();
-        }
+    private List<String> performVectorRetrieval(String userId, String message,
+                                               com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder) {
+        List<String> result = new ArrayList<>();
+        try {
+            systemLogService.debug(String.format("向量检索: 开始查询 '%s'", message), "MEMORY");
+            dev.langchain4j.data.embedding.Embedding queryEmbedding = embeddingModel.embed(message).content();
 
-        log.debug("Semantic Retrieval: Querying vector store for: {}", message);
-        systemLogService.debug(String.format("语义检索: 开始在向量库中查询 '%s'", message), "MEMORY");
-        dev.langchain4j.data.embedding.Embedding queryEmbedding = embeddingModel.embed(message).content();
+            EmbeddingSearchRequest searchRequest = EmbeddingSearchRequest.builder()
+                    .queryEmbedding(queryEmbedding)
+                    .filter(MetadataFilterBuilder.metadataKey("user_id").isEqualTo(userId))
+                    .maxResults(5)
+                    .minScore(0.6)
+                    .build();
+            EmbeddingSearchResult<TextSegment> searchResult = embeddingStore.search(searchRequest);
+            List<EmbeddingMatch<TextSegment>> matches = searchResult.matches();
 
-        EmbeddingSearchRequest searchRequest = EmbeddingSearchRequest.builder()
-                .queryEmbedding(queryEmbedding)
-                .maxResults(5)
-                .minScore(0.6)
-                .build();
-        EmbeddingSearchResult<TextSegment> searchResult = embeddingStore.search(searchRequest);
-        List<EmbeddingMatch<TextSegment>> matches = searchResult.matches();
+            List<com.lingshu.ai.core.dto.MemoryRetrievalEvent.SemanticMatch> semanticMatches = new ArrayList<>();
+            List<Long> rankedIds = new ArrayList<>();
 
-        List<com.lingshu.ai.core.dto.MemoryRetrievalEvent.SemanticMatch> semanticMatches = new ArrayList<>();
-        List<Long> finalRankedIds = new ArrayList<>();
-
-        if (!matches.isEmpty()) {
-            log.debug("Semantic Retrieval: Found {} relevant segments", matches.size());
-            systemLogService.info("语义检索完成，匹配到 " + matches.size() + " 个相关记忆片段:", "MEMORY");
-            contextBuilder.append("Related memories found: ");
-            for (int i = 0; i < matches.size(); i++) {
-                var match = matches.get(i);
+            for (EmbeddingMatch<TextSegment> match : matches) {
                 String matchText = match.embedded().text();
-                double score = match.score();
-
                 String displayText = matchText;
                 if (matchText.contains("|||")) {
                     String[] parts = matchText.split("\\|\\|\\|");
@@ -678,36 +679,60 @@ public class MemoryServiceImpl implements MemoryService {
                         displayText = parts[1].replace("提取事实陈述：", "").trim();
                     }
                 }
-
-                log.trace("Match text: {} (score: {})", matchText, score);
-                contextBuilder.append(matchText).append(" (relevant); ");
-                finalFacts.add(displayText);
-                String abbreviated = displayText.length() > 50 ? displayText.substring(0, 50) + "..." : displayText;
-                systemLogService.info(String.format("  [%d] 相似度: %.3f | 内容: %s", i + 1, score, abbreviated), "MEMORY");
+                result.add(displayText);
 
                 Long factId = null;
                 if (match.embedded().metadata() != null && match.embedded().metadata().getString("fact_id") != null) {
                     try {
                         factId = Long.parseLong(match.embedded().metadata().getString("fact_id"));
-                        finalRankedIds.add(factId);
-                    } catch (NumberFormatException e) {
-                        // ignore
-                    }
+                        rankedIds.add(factId);
+                    } catch (Exception ignored) {}
                 }
-                semanticMatches.add(
-                        new com.lingshu.ai.core.dto.MemoryRetrievalEvent.SemanticMatch(factId, score, displayText));
+                semanticMatches.add(new com.lingshu.ai.core.dto.MemoryRetrievalEvent.SemanticMatch(factId, match.score(), displayText));
             }
-        } else {
-            log.debug("Semantic Retrieval: No relevant segments above threshold.");
-            systemLogService.debug("语义检索: 未找到相关度超过阈值(0.6)的内容", "MEMORY");
+            eventBuilder.semanticMatches(semanticMatches);
+            eventBuilder.finalRankedIds(rankedIds);
+        } catch (Exception e) {
+            log.warn("Vector retrieval failed: {}", e.getMessage());
+            systemLogService.error("向量检索失败: " + e.getMessage(), "MEMORY");
+        }
+        return result;
+    }
+
+    private List<String> mergeAndDeduplicate(List<FactNode> graphFacts, List<String> vectorTexts) {
+        List<String> finalFacts = new ArrayList<>();
+        Set<String> normalizedSet = new java.util.HashSet<>();
+
+        // 图谱结果优先
+        for (FactNode fact : graphFacts) {
+            String content = fact.getContent();
+            String normalized = normalizeSemanticText(content);
+            if (!normalizedSet.contains(normalized)) {
+                finalFacts.add(content);
+                normalizedSet.add(normalized);
+            }
         }
 
-        eventBuilder.semanticMatches(semanticMatches);
-        eventBuilder.finalRankedIds(finalRankedIds);
-        eventBuilder.finalRankedContent(finalFacts);
-        recordRetrievalEvent(eventBuilder.build());
+        // 向量结果补充
+        for (String text : vectorTexts) {
+            String normalized = normalizeSemanticText(text);
+            if (!normalizedSet.contains(normalized)) {
+                // 执行更深度的语义去重检查
+                boolean isDuplicate = false;
+                for (String existing : finalFacts) {
+                    if (lexicalSimilarity(normalized, normalizeSemanticText(existing)) > 0.85) {
+                        isDuplicate = true;
+                        break;
+                    }
+                }
+                if (!isDuplicate) {
+                    finalFacts.add(text);
+                    normalizedSet.add(normalized);
+                }
+            }
+        }
 
-        return contextBuilder.toString();
+        return finalFacts;
     }
 
     private boolean isIdentityQuery(String message, List<String> entities) {
@@ -730,29 +755,7 @@ public class MemoryServiceImpl implements MemoryService {
         return false;
     }
 
-    private boolean needsSemanticRetrieval(String message, List<String> entities, List<FactNode> activatedFacts,
-                                           com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder) {
-        if (message == null || message.trim().isEmpty()) {
-            return false;
-        }
 
-        eventBuilder.extractedEntities(entities);
-        if (entities.isEmpty()) {
-            systemLogService.debug("GAM-RAG: 未提取到实体，增益=0，跳过语义检索", "MEMORY");
-            return false;
-        }
-
-        if (activatedFacts.isEmpty()) {
-            systemLogService.debug("GAM-RAG: 实体未激活任何记忆路径，增益=0，跳过语义检索", "MEMORY");
-            return false;
-        }
-
-        double gain = calculateGain(entities, activatedFacts);
-        systemLogService.info(String.format("GAM-RAG: 激活 %d 个实体，命中 %d 条事实，增益=%.2f",
-                entities.size(), activatedFacts.size(), gain), "MEMORY");
-
-        return gain >= GAIN_THRESHOLD;
-    }
 
     private List<String> extractEntities(String message) {
         if (message == null || message.trim().isEmpty()) {
@@ -2193,5 +2196,29 @@ public class MemoryServiceImpl implements MemoryService {
             factRepository.save(fact);
             systemLogService.info("手动恢复事实: ID=" + factId, "MEMORY");
         });
+    }
+    @Override
+    public void rebuildAllEmbeddings() {
+        log.info("Starting global embedding rebuild process for migration...");
+        systemLogService.info("开始全局向量索引重建流程 (元数据补全)...", "MEMORY");
+
+        userRepository.findAll().forEach(user -> {
+            String userId = user.getName();
+            if (user.getFacts() != null) {
+                user.getFacts().stream()
+                        .filter(f -> !"archived".equals(f.getStatus()))
+                        .forEach(fact -> {
+                            ExtractionResult.ExtractedFact dummy = new ExtractionResult.ExtractedFact();
+                            dummy.setContent(fact.getContent());
+                            
+                            // 尽量利用已有元数据
+                            dummy.setVolatile("volatile".equals(fact.getStatus()));
+                            
+                            storeFactEmbedding(userId, fact, fact.getOriginalMessage(), null, dummy);
+                        });
+            }
+        });
+        
+        systemLogService.success("全局向量索引重建完成", "MEMORY");
     }
 }

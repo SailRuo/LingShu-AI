@@ -608,17 +608,17 @@ async function handleCopyLongImage() {
         <p class="welcome-subtitle">与灵枢建立深度连接，探索内心世界</p>
 
         <div class="quick-actions">
+          <button class="quick-btn" @click="handleQuickAction('我们之间的回忆')">
+            <Sparkles :size="16" />
+            <span>我们之间的回忆</span>
+          </button>
+          <button class="quick-btn" @click="handleQuickAction('今天日程安排')">
+            <Sparkles :size="16" />
+            <span>今天日程安排</span>
+          </button>
           <button class="quick-btn" @click="handleQuickAction('回忆上次对话')">
             <Sparkles :size="16" />
             <span>回忆上次对话</span>
-          </button>
-          <button class="quick-btn" @click="handleQuickAction('帮我分析一下')">
-            <Sparkles :size="16" />
-            <span>帮我分析一下</span>
-          </button>
-          <button class="quick-btn" @click="handleQuickAction('鍥炲繂涓婃瀵硅瘽')">
-            <Sparkles :size="16" />
-            <span>鍥炲繂涓婃瀵硅瘽</span>
           </button>
         </div>
       </div>

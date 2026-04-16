@@ -11,6 +11,10 @@ export interface ChatSessionItem {
   updatedAt: string;
 }
 
+export interface CreateChatSessionResult extends ChatSessionItem {
+  reusedExisting?: boolean;
+}
+
 export function getClientUserId(): string {
   const storageKey = "lingshu_user_id";
   const existing = window.localStorage.getItem(storageKey);
@@ -93,13 +97,41 @@ export const useChatSessionStore = defineStore("chat-session", () => {
     }
   }
 
-  async function createSession(title?: string) {
+  async function isSessionEmpty(sessionId: number): Promise<boolean> {
+    const params = new URLSearchParams({
+      userId: userId.value,
+      sessionId: sessionId.toString(),
+      size: "1",
+    });
+    const response = await fetch(getFullUrl(`/api/chat/turns?${params}`));
+    if (!response.ok) {
+      throw new Error("Failed to check chat session history");
+    }
+
+    const turns = await response.json();
+    return Array.isArray(turns) && turns.length === 0;
+  }
+
+  async function createSession(title?: string): Promise<CreateChatSessionResult> {
+    const normalizedTitle = title?.trim();
+    if (!normalizedTitle) {
+      if (!hasLoadedSessions.value) {
+        await fetchSessions(activeSessionId.value);
+      }
+
+      const existing = currentSession.value;
+      if (existing && (await isSessionEmpty(existing.id))) {
+        activeSessionId.value = existing.id;
+        return { ...existing, reusedExisting: true };
+      }
+    }
+
     const response = await fetch(getFullUrl("/api/chat/sessions"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         userId: userId.value,
-        title: title?.trim() ? title.trim() : null,
+        title: normalizedTitle || null,
       }),
     });
 
@@ -130,6 +162,7 @@ export const useChatSessionStore = defineStore("chat-session", () => {
     currentSession,
     setActiveSession,
     fetchSessions,
+    isSessionEmpty,
     createSession,
     ensureActiveSession,
   };

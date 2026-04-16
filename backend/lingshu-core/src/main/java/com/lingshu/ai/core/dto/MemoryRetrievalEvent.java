@@ -47,6 +47,12 @@ public class MemoryRetrievalEvent {
     // 标记是否通过 fallback 路径（如身份查询）直接使用了图谱基础事实
     private Boolean fallbackActivated;
 
+    // 路由决策结果，例如 "GRAPH_ONLY", "VECTOR_BACKUP", "GRAPH_PRIORITIZED_VECTOR_SUPPLEMENT"
+    private String routingDecision;
+
+    // 计算得到的图谱增益值
+    private Double gain;
+
     @Data
     @Builder
     @NoArgsConstructor
