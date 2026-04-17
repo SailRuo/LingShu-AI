@@ -29,6 +29,8 @@ public class MemoryRetrievalEvent {
     // 图谱阶段：激活的节点具体的记忆文本内容列表
     private List<String> graphMatchedContent;
 
+    private List<Long> adoptedFactIds;
+
     // 阶段二：语义向量检索阶段命中的匹配详情（含相似度分数）
     private List<SemanticMatch> semanticMatches;
 

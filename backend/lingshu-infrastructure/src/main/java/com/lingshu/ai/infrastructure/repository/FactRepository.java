@@ -42,6 +42,11 @@ public interface FactRepository extends Neo4jRepository<FactNode, Long> {
            "SET r.weight = rel.weight, r.lastActivatedAt = rel.lastActivatedAt")
     void saveRelatedRelations(List<Map<String, Object>> relations);
 
+    @Query("MATCH (a:Fact)-[r:RELATED_TO]-(b:Fact) " +
+           "WHERE id(a) = $sourceId AND id(b) = $targetId " +
+           "RETURN r.weight AS weight LIMIT 1")
+    Double findRelatedRelationWeight(Long sourceId, Long targetId);
+
     @Query("UNWIND $relations AS rel " +
            "MATCH (a:Fact) WHERE id(a) = rel.sourceId " +
            "MATCH (b:Fact) WHERE id(b) = rel.targetId " +

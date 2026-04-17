@@ -37,6 +37,7 @@ import java.util.Set;
 import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
@@ -74,6 +75,7 @@ public class MemoryServiceImpl implements MemoryService {
     private final ChatModel chatLanguageModel;
     private final DynamicMemoryModel dynamicMemoryModel;
     private final com.lingshu.ai.core.service.SettingService settingService;
+    private final Executor taskExecutor;
     private FactSemanticClassifier factSemanticClassifier;
     private com.lingshu.ai.core.service.FactRelationshipEvaluator factRelationshipEvaluator;
     private EmotionAwareFactExtractor emotionAwareFactExtractor;
@@ -89,7 +91,8 @@ public class MemoryServiceImpl implements MemoryService {
                              com.lingshu.ai.core.service.SystemLogService systemLogService,
                              com.lingshu.ai.core.service.SettingService settingService,
                              ChatModel chatLanguageModel,
-                             DynamicMemoryModel dynamicMemoryModel) {
+                             DynamicMemoryModel dynamicMemoryModel,
+                             Executor taskExecutor) {
         this.userRepository = userRepository;
         this.embeddingModel = embeddingModel;
         this.embeddingStore = embeddingStore;
@@ -99,6 +102,7 @@ public class MemoryServiceImpl implements MemoryService {
         this.settingService = settingService;
         this.chatLanguageModel = chatLanguageModel;
         this.dynamicMemoryModel = dynamicMemoryModel;
+        this.taskExecutor = taskExecutor;
     }
 
     @PostConstruct
@@ -564,6 +568,7 @@ public class MemoryServiceImpl implements MemoryService {
                 .query(message)
                 .timestamp(LocalDateTime.now())
                 .extractedEntities(new ArrayList<>())
+                .adoptedFactIds(new ArrayList<>())
                 .semanticMatches(new ArrayList<>())
                 .graphMatchedContent(new ArrayList<>())
                 .finalRankedContent(new ArrayList<>())
@@ -573,11 +578,19 @@ public class MemoryServiceImpl implements MemoryService {
         eventBuilder.extractedEntities(entities);
 
         // 1. 图谱检索 (Graph Retrieval)
-        List<FactNode> graphFacts = performGraphRetrieval(userId, message, entities, eventBuilder);
+        List<GraphRetrievalHit> graphFacts = performGraphRetrievalV2(userId, message, entities, eventBuilder);
 
         // 2. 路由决策 (Routing Decision)
-        double gain = calculateGain(entities, graphFacts);
+        double gain = calculateGainV2(entities, graphFacts);
         eventBuilder.gain(gain);
+        long multiHopCount = graphFacts.stream().filter(hit -> hit.hop >= 2).count();
+        long supersededCount = graphFacts.stream()
+                .filter(hit -> hit.fact.getStatus() != null && "superseded".equalsIgnoreCase(hit.fact.getStatus()))
+                .count();
+        long staleCount = graphFacts.stream()
+                .filter(hit -> hit.fact.getObservedAt() != null
+                        && Duration.between(hit.fact.getObservedAt(), LocalDateTime.now()).toDays() > 90)
+                .count();
         String routingDecision;
         boolean runVector;
 
@@ -595,15 +608,19 @@ public class MemoryServiceImpl implements MemoryService {
             systemLogService.info(String.format("路由决策: 图谱增益(%.2f) < 阈值，且图谱已有结果，直接返回图谱内容", gain), "MEMORY");
         }
         eventBuilder.routingDecision(routingDecision);
+        systemLogService.info(String.format(
+                "Routing stats: multiHop=%d, supersededPenalty=%d, stalePenalty=%d, gain=%.2f",
+                multiHopCount, supersededCount, staleCount, gain), "MEMORY");
 
         // 3. 向量检索 (Vector Retrieval)
         List<String> vectorTexts = new ArrayList<>();
+        List<Long> vectorFactIds = new ArrayList<>();
         if (runVector) {
-            vectorTexts = performVectorRetrieval(userId, message, eventBuilder);
+            vectorTexts = performVectorRetrievalV2(userId, message, eventBuilder, vectorFactIds);
         }
 
         // 4. 合并与去重 (Merge and Deduplicate) - Task 3.1 & 3.2
-        List<String> finalFacts = mergeAndDeduplicate(graphFacts, vectorTexts);
+        List<String> finalFacts = mergeAndDeduplicate(graphFacts.stream().map(hit -> hit.fact).collect(Collectors.toList()), vectorTexts);
 
         // 5. 组装上下文与记录事件
         StringBuilder contextBuilder = new StringBuilder();
@@ -612,8 +629,19 @@ public class MemoryServiceImpl implements MemoryService {
             finalFacts.forEach(fact -> contextBuilder.append("- ").append(fact).append("\n"));
         }
 
+        List<Long> adoptedFactIds = new ArrayList<>();
+        graphFacts.stream()
+                .map(hit -> hit.fact.getId())
+                .filter(java.util.Objects::nonNull)
+                .forEach(adoptedFactIds::add);
+        vectorFactIds.stream()
+                .filter(java.util.Objects::nonNull)
+                .forEach(adoptedFactIds::add);
+        eventBuilder.adoptedFactIds(adoptedFactIds.stream().distinct().collect(Collectors.toList()));
         eventBuilder.finalRankedContent(finalFacts);
-        recordRetrievalEvent(eventBuilder.build());
+        com.lingshu.ai.core.dto.MemoryRetrievalEvent event = eventBuilder.build();
+        recordRetrievalEvent(event);
+        updateRelationshipsFromRetrievalEvent(event);
 
         return contextBuilder.toString();
     }
@@ -701,6 +729,269 @@ public class MemoryServiceImpl implements MemoryService {
             systemLogService.error("向量检索失败: " + e.getMessage(), "MEMORY");
         }
         return result;
+    }
+
+    private List<GraphRetrievalHit> performGraphRetrievalV2(String userId, String message, List<String> entities,
+                                                            com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder) {
+        List<GraphRetrievalHit> result = new ArrayList<>();
+        userRepository.findByName(userId).ifPresent(user -> {
+            if (user.getFacts() == null || user.getFacts().isEmpty()) {
+                return;
+            }
+
+            List<GraphRetrievalHit> oneHop = new ArrayList<>();
+            if (!entities.isEmpty()) {
+                List<FactNode> matched = user.getFacts().stream()
+                        .filter(f -> f.getContent() != null && entities.stream()
+                                .anyMatch(e -> f.getContent().toLowerCase().contains(e.toLowerCase())))
+                        .sorted((f1, f2) -> Double.compare(f2.getImportance(), f1.getImportance()))
+                        .limit(8)
+                        .toList();
+                oneHop.addAll(matched.stream().map(fact -> new GraphRetrievalHit(fact, 1, 1.0)).collect(Collectors.toList()));
+            }
+
+            List<GraphRetrievalHit> directHits = new ArrayList<>(oneHop);
+            boolean isIdentity = isIdentityQuery(message, entities);
+            if (directHits.size() < 3 || isIdentity) {
+                List<FactNode> coreFacts = user.getFacts().stream()
+                        .filter(f -> oneHop.stream().noneMatch(hit -> java.util.Objects.equals(hit.fact.getId(), f.getId())))
+                        .sorted((f1, f2) -> Double.compare(f2.getImportance(), f1.getImportance()))
+                        .limit(isIdentity ? 5 : 2)
+                        .toList();
+                oneHop.addAll(coreFacts.stream().map(fact -> new GraphRetrievalHit(fact, 1, 1.0)).collect(Collectors.toList()));
+                eventBuilder.fallbackActivated(true);
+            }
+
+            List<GraphRetrievalHit> expanded = new ArrayList<>(oneHop);
+            if (!directHits.isEmpty() && directHits.size() < 3) {
+                expanded.addAll(loadSecondHopFacts(user, directHits));
+            }
+
+            List<GraphRetrievalHit> deduplicated = deduplicateGraphHits(expanded);
+            result.addAll(deduplicated);
+            eventBuilder.graphMatchedContent(deduplicated.stream().map(hit -> hit.fact.getContent()).collect(Collectors.toList()));
+            eventBuilder.graphMatchedIds(deduplicated.stream()
+                    .map(hit -> hit.fact.getId())
+                    .filter(java.util.Objects::nonNull)
+                    .collect(Collectors.toList()));
+        });
+        return result;
+    }
+
+    private List<String> performVectorRetrievalV2(String userId, String message,
+                                                  com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder,
+                                                  List<Long> rankedIdsOut) {
+        List<String> result = new ArrayList<>();
+        try {
+            dev.langchain4j.data.embedding.Embedding queryEmbedding = embeddingModel.embed(message).content();
+            EmbeddingSearchRequest searchRequest = EmbeddingSearchRequest.builder()
+                    .queryEmbedding(queryEmbedding)
+                    .filter(MetadataFilterBuilder.metadataKey("user_id").isEqualTo(userId))
+                    .maxResults(5)
+                    .minScore(0.6)
+                    .build();
+            EmbeddingSearchResult<TextSegment> searchResult = embeddingStore.search(searchRequest);
+            List<EmbeddingMatch<TextSegment>> matches = searchResult.matches();
+
+            List<com.lingshu.ai.core.dto.MemoryRetrievalEvent.SemanticMatch> semanticMatches = new ArrayList<>();
+            List<Long> rankedIds = new ArrayList<>();
+
+            for (EmbeddingMatch<TextSegment> match : matches) {
+                dev.langchain4j.data.segment.TextSegment embedded = match.embedded();
+                String displayText = embedded.metadata() != null ? embedded.metadata().getString("content") : null;
+                if (displayText == null || displayText.isBlank()) {
+                    displayText = embedded.text();
+                }
+                result.add(displayText);
+
+                Long factId = null;
+                if (embedded.metadata() != null && embedded.metadata().getString("fact_id") != null) {
+                    try {
+                        factId = Long.parseLong(embedded.metadata().getString("fact_id"));
+                        rankedIds.add(factId);
+                        rankedIdsOut.add(factId);
+                    } catch (Exception ignored) {
+                    }
+                }
+                semanticMatches.add(new com.lingshu.ai.core.dto.MemoryRetrievalEvent.SemanticMatch(factId, match.score(), displayText));
+            }
+            eventBuilder.semanticMatches(semanticMatches);
+            eventBuilder.finalRankedIds(rankedIds);
+        } catch (Exception e) {
+            log.warn("Vector retrieval failed: {}", e.getMessage());
+        }
+        return result;
+    }
+
+    private List<GraphRetrievalHit> loadSecondHopFacts(UserNode user, List<GraphRetrievalHit> seedHits) {
+        List<Long> seedIds = seedHits.stream()
+                .map(hit -> hit.fact.getId())
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        if (seedIds.isEmpty()) {
+            return List.of();
+        }
+
+        Set<Long> excludeIds = new java.util.HashSet<>(seedIds);
+
+        String cypher = """
+                MATCH (seed:Fact)-[r:RELATED_TO]-(related:Fact)
+                WHERE id(seed) IN $seedIds
+                  AND NOT id(related) IN $excludeIds
+                RETURN DISTINCT id(related) AS factId,
+                       coalesce(r.weight, 0.5) AS relationWeight
+                ORDER BY relationWeight DESC
+                LIMIT 5
+                """;
+
+        Map<Long, FactNode> factIndex = user.getFacts().stream()
+                .filter(f -> f.getId() != null)
+                .collect(Collectors.toMap(FactNode::getId, fact -> fact, (left, right) -> left, LinkedHashMap::new));
+
+        return neo4jClient.query(cypher)
+                .bind(seedIds).to("seedIds")
+                .bind(excludeIds).to("excludeIds")
+                .fetch().all().stream()
+                .map(row -> {
+                    Long factId = castLong(row.get("factId"));
+                    FactNode fact = factIndex.get(factId);
+                    if (fact == null) {
+                        return null;
+                    }
+                    double relationWeight = row.get("relationWeight") instanceof Number
+                            ? ((Number) row.get("relationWeight")).doubleValue()
+                            : 0.5d;
+                    return new GraphRetrievalHit(fact, 2, relationWeight);
+                })
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toList());
+    }
+
+    private List<GraphRetrievalHit> deduplicateGraphHits(List<GraphRetrievalHit> hits) {
+        Map<Long, GraphRetrievalHit> deduped = new LinkedHashMap<>();
+        for (GraphRetrievalHit hit : hits) {
+            Long factId = hit.fact.getId();
+            if (factId == null) {
+                continue;
+            }
+            GraphRetrievalHit existing = deduped.get(factId);
+            if (existing == null || hit.hop < existing.hop) {
+                deduped.put(factId, hit);
+            }
+        }
+        return new ArrayList<>(deduped.values());
+    }
+
+    private double calculateGainV2(List<String> entities, List<GraphRetrievalHit> activatedFacts) {
+        if (entities.isEmpty() || activatedFacts.isEmpty()) {
+            return 0.0;
+        }
+
+        Set<String> matchedEntities = new java.util.HashSet<>();
+        double totalImportance = 0.0;
+        LocalDateTime now = LocalDateTime.now();
+
+        for (GraphRetrievalHit hit : activatedFacts) {
+            FactNode fact = hit.fact;
+            String content = fact.getContent() == null ? "" : fact.getContent().toLowerCase();
+            boolean factMatched = false;
+            for (String entity : entities) {
+                if (content.contains(entity.toLowerCase())) {
+                    matchedEntities.add(entity.toLowerCase());
+                    factMatched = true;
+                }
+            }
+            if (!factMatched) {
+                continue;
+            }
+
+            double importance = fact.getImportance();
+            if (fact.getStatus() != null && "superseded".equalsIgnoreCase(fact.getStatus())) {
+                importance *= 0.3;
+            }
+            if (fact.getObservedAt() != null && Duration.between(fact.getObservedAt(), now).toDays() > 90) {
+                importance *= 0.7;
+            }
+            if (hit.hop >= 2) {
+                importance *= 0.7;
+            }
+            totalImportance += importance;
+        }
+
+        double entityRatio = (double) matchedEntities.size() / entities.size();
+        double avgImportance = totalImportance / activatedFacts.size();
+        return Math.min(1.0, entityRatio * 0.6 + avgImportance * 0.4);
+    }
+
+    @Override
+    public void updateRelationshipsFromRetrievalEvent(com.lingshu.ai.core.dto.MemoryRetrievalEvent event) {
+        if (event == null || event.getAdoptedFactIds() == null) {
+            return;
+        }
+
+        List<Long> adoptedFactIds = event.getAdoptedFactIds().stream()
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .sorted()
+                .collect(Collectors.toList());
+        if (adoptedFactIds.size() < 2) {
+            return;
+        }
+
+        CompletableFuture.runAsync(() -> {
+            for (int i = 0; i < adoptedFactIds.size(); i++) {
+                for (int j = i + 1; j < adoptedFactIds.size(); j++) {
+                    Long sourceId = adoptedFactIds.get(i);
+                    Long targetId = adoptedFactIds.get(j);
+                    long cooccurrenceCount = recentRetrievalEvents.stream()
+                            .filter(retrievalEvent -> containsAdoptedFacts(retrievalEvent, sourceId, targetId))
+                            .count();
+                    if (cooccurrenceCount >= 2) {
+                        upsertRelatedFactRelation(sourceId, targetId, cooccurrenceCount, event.getTimestamp());
+                    }
+                }
+            }
+        }, taskExecutor).exceptionally(ex -> {
+            log.warn("Failed to update related facts from retrieval event: {}", ex.getMessage());
+            return null;
+        });
+    }
+
+    private boolean containsAdoptedFacts(com.lingshu.ai.core.dto.MemoryRetrievalEvent event, Long sourceId, Long targetId) {
+        if (event == null || event.getAdoptedFactIds() == null) {
+            return false;
+        }
+        Set<Long> adopted = new java.util.HashSet<>(event.getAdoptedFactIds());
+        return adopted.contains(sourceId) && adopted.contains(targetId);
+    }
+
+    private void upsertRelatedFactRelation(Long sourceId, Long targetId, long cooccurrenceCount, LocalDateTime activatedAt) {
+        if (sourceId == null || targetId == null || java.util.Objects.equals(sourceId, targetId)) {
+            return;
+        }
+
+        Long canonicalSource = Math.min(sourceId, targetId);
+        Long canonicalTarget = Math.max(sourceId, targetId);
+        Double existingWeight = factRepository.findRelatedRelationWeight(canonicalSource, canonicalTarget);
+        double nextWeight = existingWeight == null ? 0.5 : Math.min(1.0, existingWeight + 0.1);
+
+        Map<String, Object> relationRow = new LinkedHashMap<>();
+        relationRow.put("sourceId", canonicalSource);
+        relationRow.put("targetId", canonicalTarget);
+        relationRow.put("weight", nextWeight);
+        relationRow.put("lastActivatedAt", activatedAt != null ? activatedAt : LocalDateTime.now());
+        factRepository.saveRelatedRelations(List.of(relationRow));
+
+        if (existingWeight == null) {
+            systemLogService.info(String.format(
+                    "Created RELATED_TO relation: %d <-> %d weight=%.1f cooccurrence=%d",
+                    canonicalSource, canonicalTarget, nextWeight, cooccurrenceCount), "MEMORY");
+        } else {
+            systemLogService.info(String.format(
+                    "Strengthened RELATED_TO relation: %d <-> %d weight %.1f -> %.1f cooccurrence=%d",
+                    canonicalSource, canonicalTarget, existingWeight, nextWeight, cooccurrenceCount), "MEMORY");
+        }
     }
 
     private List<String> mergeAndDeduplicate(List<FactNode> graphFacts, List<String> vectorTexts) {
@@ -1936,6 +2227,18 @@ public class MemoryServiceImpl implements MemoryService {
             importance = round(totalImportance / factCount);
             this.activityScore = round(totalActivity / factCount);
             orbitLevel = calculateOrbitLevel(importance, this.activityScore);
+        }
+    }
+
+    private static final class GraphRetrievalHit {
+        private final FactNode fact;
+        private final int hop;
+        private final double relationWeight;
+
+        private GraphRetrievalHit(FactNode fact, int hop, double relationWeight) {
+            this.fact = fact;
+            this.hop = hop;
+            this.relationWeight = relationWeight;
         }
     }
 

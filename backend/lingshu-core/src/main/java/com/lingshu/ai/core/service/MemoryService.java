@@ -16,6 +16,8 @@ public interface MemoryService {
      */
     String retrieveContext(String userId, String message);
 
+    void updateRelationshipsFromRetrievalEvent(com.lingshu.ai.core.dto.MemoryRetrievalEvent event);
+
     /**
      * 获取完整的记忆图谱数据以供可视化。
      */
