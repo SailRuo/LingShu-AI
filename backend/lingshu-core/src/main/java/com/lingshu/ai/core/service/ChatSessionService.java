@@ -15,4 +15,6 @@ public interface ChatSessionService {
     Long resolveSessionId(String userId, Long sessionId);
 
     void touchSession(Long sessionId);
+
+    void updateSessionTitle(Long sessionId, String title);
 }

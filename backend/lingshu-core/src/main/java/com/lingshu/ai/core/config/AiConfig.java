@@ -398,6 +398,14 @@ public class AiConfig {
         return new com.lingshu.ai.core.model.DynamicMemoryModel(settingService);
     }
 
+    @Bean
+    public com.lingshu.ai.core.service.ConversationTitleSummarizer conversationTitleSummarizer(
+            ChatModel chatLanguageModel) {
+        return dev.langchain4j.service.AiServices.builder(com.lingshu.ai.core.service.ConversationTitleSummarizer.class)
+                .chatModel(chatLanguageModel)
+                .build();
+    }
+
     public interface Assistant {
         @dev.langchain4j.service.SystemMessage("{{systemPrompt}}")
         String chat(@dev.langchain4j.service.MemoryId Long sessionId,

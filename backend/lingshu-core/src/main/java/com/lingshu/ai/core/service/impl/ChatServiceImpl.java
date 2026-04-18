@@ -34,7 +34,6 @@ import reactor.core.publisher.Sinks;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -63,7 +62,6 @@ public class ChatServiceImpl implements ChatService {
     private final List<ChatModelListener> listeners;
     private final TurnPostProcessingServiceImpl turnPostProcessingService;
     private final ToolResultSummarizer toolResultSummarizer;
-    private final EmotionPreAnalysisService emotionPreAnalysisService;
     private final TurnTimelineService turnTimelineService;
     private final McpToolArtifactRegistry mcpToolArtifactRegistry;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -86,7 +84,6 @@ public class ChatServiceImpl implements ChatService {
                            List<ChatModelListener> listeners,
                            TurnPostProcessingServiceImpl turnPostProcessingService,
                            ToolResultSummarizer toolResultSummarizer,
-                           EmotionPreAnalysisService emotionPreAnalysisService,
                            TurnTimelineService turnTimelineService,
                            McpToolArtifactRegistry mcpToolArtifactRegistry) {
         this.memoryService = memoryService;
@@ -104,7 +101,6 @@ public class ChatServiceImpl implements ChatService {
         this.listeners = listeners;
         this.turnPostProcessingService = turnPostProcessingService;
         this.toolResultSummarizer = toolResultSummarizer;
-        this.emotionPreAnalysisService = emotionPreAnalysisService;
         this.turnTimelineService = turnTimelineService;
         this.mcpToolArtifactRegistry = mcpToolArtifactRegistry;
     }
@@ -122,21 +118,22 @@ public class ChatServiceImpl implements ChatService {
         return agentConfigService.getDefaultAgent().orElse(null);
     }
 
-    private void postProcessAfterResponse(String userId, String userMessage, String assistantResponse,
+    private void postProcessAfterResponse(String userId, Long sessionId, String userMessage, String assistantResponse,
                                           com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion) {
         try {
             turnPostProcessingService.processCompletedTurn(
                     userId,
+                    sessionId,
                     userMessage,
                     assistantResponse != null ? assistantResponse : "",
                     preAnalyzedEmotion
             );
         } catch (Exception e) {
-            log.warn("鎻愪氦鍥炲悎鍚庡鐞嗕换鍔″け�? {}", e.getMessage(), e);
+            log.warn("提交回合后处理任务失败 {}", e.getMessage(), e);
             try {
                 affinityService.recordInteraction(userId);
             } catch (Exception ex) {
-                log.warn("璁板綍浜掑姩澶辫�? {}", ex.getMessage(), ex);
+                log.warn("记录互动失败 {}", ex.getMessage(), ex);
             }
         }
     }
@@ -197,7 +194,7 @@ public class ChatServiceImpl implements ChatService {
         AgentConfig agent = getAgent(agentId);
 
         if (agent != null) {
-            log.info("处理聊天消息: 智能�?name={}, systemPrompt长度={}",
+            log.info("处理聊天消息: 智能体name={}, systemPrompt长度={}",
                     agent.getName(),
                     agent.getSystemPrompt() != null ? agent.getSystemPrompt().length() : 0);
         } else {
@@ -241,7 +238,7 @@ public class ChatServiceImpl implements ChatService {
             JdkHttpClientBuilder httpClientBuilder =
                     dev.langchain4j.http.client.jdk.JdkHttpClient.builder()
                             .httpClientBuilder(java.net.http.HttpClient.newBuilder()
-                                    .version(java.net.http.HttpClient.Version.HTTP_1_1)
+                                     .version(java.net.http.HttpClient.Version.HTTP_1_1)
                                     .connectTimeout(Duration.ofSeconds(30))
                                     .executor(Executors.newCachedThreadPool()));
 
@@ -282,7 +279,7 @@ public class ChatServiceImpl implements ChatService {
 
         systemLogService.debug("准备发送流式对话请求，SystemPrompt 长度: " + systemPrompt.length(), "CHAT");
 
-        // 构建多模态?UserMessage
+        // 构建多模态 UserMessage
         List<Content> contents = new ArrayList<>();
         if (!safeMessage.isBlank()) {
             contents.add(TextContent.from(safeMessage));
@@ -296,7 +293,7 @@ public class ChatServiceImpl implements ChatService {
             }
         }
 
-        // 如果既没有文字也没有图片，添加一个默认文字避免报�?
+        // 如果既没有文字也没有图片，添加一个默认文字避免报错
         if (contents.isEmpty()) {
             contents.add(TextContent.from(" "));
         }
@@ -367,7 +364,7 @@ public class ChatServiceImpl implements ChatService {
                 Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize(),
                 enabledBuiltinTools));
 
-        // 官方推荐：把多个动�?ToolProvider 直接交给 AiServices 统一合并
+        // 官方推荐：把多个动态 ToolProvider 直接交给 AiServices 统一合并
         builder.toolProviders(toolProviders);
 
         ToolEventListener timelineToolListener = new ToolEventListener() {
@@ -434,7 +431,7 @@ public class ChatServiceImpl implements ChatService {
                     flushPendingAssistantText(turnId, pendingAssistantText);
                     turnTimelineService.completeTurn(turnId, assistantResponseStore.toString());
                     sink.tryEmitComplete();
-                    postProcessAfterResponse(userId, safeMessage, assistantResponseStore.toString(), preAnalyzedEmotion);
+                    postProcessAfterResponse(userId, session.getId(), safeMessage, assistantResponseStore.toString(), preAnalyzedEmotion);
                 })
                 .onError(error -> {
                     log.error("流式对话发生错误: {}", error.getMessage(), error);
@@ -445,7 +442,7 @@ public class ChatServiceImpl implements ChatService {
                     String errorMsg = error.getMessage() != null ? error.getMessage() : "";
 
                     if (errorMsg.contains("context length") || errorMsg.contains("n_ctx") || errorMsg.contains("n_keep")) {
-                        sink.tryEmitError(new RuntimeException("输入内容过长，超出模型上下文限制。请尝试：1. 减少图片数量或使用更小的图片 2. 清除对话历史后重试 3. 切换到支持更长上下文的模"));
+                        sink.tryEmitError(new RuntimeException("输入内容过长，超出模型上下文限制。请尝试：1. 减少图片数量或使用更小的图片 2. 清除对话历史后重试 3. 切换到支持更长上下文的模型"));
                     } else if (errorMsg.contains("image") || errorMsg.contains("vision") || errorMsg.contains("multimodal")) {
                         sink.tryEmitError(new RuntimeException("当前模型不支持图像识别，请切换到支持视觉的模型（如Qwen-VL等）或移除图片后重试"));
                     } else {
@@ -515,7 +512,7 @@ public class ChatServiceImpl implements ChatService {
                 if (response != null && response.aiMessage() != null) {
                     chatMemory.add(response.aiMessage());
                 }
-                completeStreamingResponse(userId, safeMessage, assistantResponseStore, sink, preAnalyzedEmotion, turnId);
+                completeStreamingResponse(userId, sessionId, safeMessage, assistantResponseStore, sink, preAnalyzedEmotion, turnId);
             }
 
             @Override
@@ -544,6 +541,7 @@ public class ChatServiceImpl implements ChatService {
     }
 
     private void completeStreamingResponse(String userId,
+                                           Long sessionId,
                                            String safeMessage,
                                            StringBuilder assistantResponseStore,
                                            Sinks.Many<String> sink,
@@ -555,7 +553,7 @@ public class ChatServiceImpl implements ChatService {
         turnTimelineService.recordAssistantText(turnId, assistantResponseStore.toString());
         turnTimelineService.completeTurn(turnId, assistantResponseStore.toString());
         sink.tryEmitComplete();
-        postProcessAfterResponse(userId, safeMessage, assistantResponseStore.toString(), preAnalyzedEmotion);
+        postProcessAfterResponse(userId, sessionId, safeMessage, assistantResponseStore.toString(), preAnalyzedEmotion);
     }
 
     private void handleStreamingError(Throwable error, Sinks.Many<String> sink, Long turnId) {
@@ -673,7 +671,7 @@ public class ChatServiceImpl implements ChatService {
 
                 if (responseObj instanceof java.util.Map<?, ?> response) {
                     if (response.containsKey("data") && response.get("data") instanceof java.util.List<?> list) {
-                        //log.debug("获取�? + models.size() + " 个OpenAI兼容模型");
+                        //log.debug("获取? + models.size() + " 个OpenAI兼容模型");
                         return list.stream()
                                 .map(m -> (String) ((java.util.Map<?, ?>) m).get("id"))
                                 .collect(java.util.stream.Collectors.toList());
@@ -725,10 +723,10 @@ public class ChatServiceImpl implements ChatService {
         // 1. 从数据库物理删除记录
         turnTimelineService.clearTurnHistory(idToClear);
 
-        // 2. 清除 LangChain4j �?ChatMemory 缓存（这会调�?store.deleteMessages�?
+        // 2. 清除 LangChain4j 的 ChatMemory 缓存
         chatMemoryProvider.get(idToClear).clear();
 
-        systemLogService.info("已清空会话卷记录 sessionId=" + idToClear, "CHAT");
+        systemLogService.info("已清空会话记录 sessionId=" + idToClear, "CHAT");
     }
 
     private ToolErrorHandlerResult handleToolArgumentsError(Throwable error, ToolErrorContext errorContext) {
@@ -798,4 +796,3 @@ public class ChatServiceImpl implements ChatService {
         return normalized.length() > 240 ? normalized.substring(0, 240) + "..." : normalized;
     }
 }
-

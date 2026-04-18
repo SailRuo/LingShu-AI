@@ -402,6 +402,12 @@ async function handleWebSocketMessage(msg: WebSocketMessage) {
       }
       break
 
+    case 'sessionTitleUpdate':
+      if (msg.sessionId && msg.title) {
+        chatSessionStore.updateSessionTitle(msg.sessionId, msg.title)
+      }
+      break
+
     case 'asrError':
       handleAsrError(msg.message || '语音识别失败')
       break

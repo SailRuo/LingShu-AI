@@ -96,6 +96,19 @@ public class ChatSessionServiceImpl implements ChatSessionService {
         });
     }
 
+    @Override
+    @Transactional(transactionManager = "transactionManager")
+    public void updateSessionTitle(Long sessionId, String title) {
+        if (sessionId == null || title == null || title.isBlank()) {
+            return;
+        }
+        chatSessionRepository.findById(sessionId).ifPresent(session -> {
+            session.setTitle(title.trim());
+            session.setUpdatedAt(LocalDateTime.now());
+            chatSessionRepository.save(session);
+        });
+    }
+
     private ChatSession createSessionEntity(String userId, String title) {
         LocalDateTime now = LocalDateTime.now();
         ChatSession session = ChatSession.builder()

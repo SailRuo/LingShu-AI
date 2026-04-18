@@ -11,8 +11,15 @@ import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.UserMessage;
 import dev.langchain4j.service.V;
+import com.lingshu.ai.core.event.SessionTitleUpdatedEvent;
+import com.lingshu.ai.core.service.*;
+import com.lingshu.ai.infrastructure.repository.ChatSessionRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.regex.Pattern;
 
 @Service
 public class TurnPostProcessingServiceImpl {
@@ -25,23 +32,40 @@ public class TurnPostProcessingServiceImpl {
     private final SystemLogService systemLogService;
     private final DynamicMemoryModel dynamicMemoryModel;
     private final EmotionalEpisodeService emotionalEpisodeService;
+    private final ChatSessionService chatSessionService;
+    private final ChatSessionRepository chatSessionRepository;
+    private final ConversationTitleSummarizer titleSummarizer;
+    private final TurnTimelineService turnTimelineService;
+    private final ApplicationEventPublisher eventPublisher;
+
+    private static final Pattern DEFAULT_TITLE_PATTERN = Pattern.compile("^新对话 \\d+$");
 
     public TurnPostProcessingServiceImpl(EmotionAnalyzer emotionAnalyzer,
                                          MemoryService memoryService,
                                          AffinityService affinityService,
                                          SystemLogService systemLogService,
                                          DynamicMemoryModel dynamicMemoryModel,
-                                         EmotionalEpisodeService emotionalEpisodeService) {
+                                         EmotionalEpisodeService emotionalEpisodeService,
+                                         ChatSessionService chatSessionService,
+                                         ChatSessionRepository chatSessionRepository,
+                                         ConversationTitleSummarizer titleSummarizer,
+                                         TurnTimelineService turnTimelineService,
+                                         ApplicationEventPublisher eventPublisher) {
         this.emotionAnalyzer = emotionAnalyzer;
         this.memoryService = memoryService;
         this.affinityService = affinityService;
         this.systemLogService = systemLogService;
         this.dynamicMemoryModel = dynamicMemoryModel;
         this.emotionalEpisodeService = emotionalEpisodeService;
+        this.chatSessionService = chatSessionService;
+        this.chatSessionRepository = chatSessionRepository;
+        this.titleSummarizer = titleSummarizer;
+        this.turnTimelineService = turnTimelineService;
+        this.eventPublisher = eventPublisher;
     }
 
     @Async("taskExecutor")
-    public void processCompletedTurn(String userId, String userMessage, String assistantResponse,
+    public void processCompletedTurn(String userId, Long sessionId, String userMessage, String assistantResponse,
                                      EmotionAnalysis preAnalyzedEmotion) {
         if (userId == null || userId.isBlank() || userMessage == null || userMessage.isBlank()) {
             return;
@@ -93,6 +117,9 @@ public class TurnPostProcessingServiceImpl {
             if (decision.isRecordInteraction()) {
                 affinityService.recordInteraction(userId);
             }
+
+            // 自动摘要标题
+            tryAutoSummarizeTitle(sessionId, userMessage);
         } catch (Exception e) {
             log.warn("回合后处理失败: {}", e.getMessage(), e);
             try {
@@ -101,6 +128,34 @@ public class TurnPostProcessingServiceImpl {
                 log.warn("记录互动失败: {}", ex.getMessage(), ex);
             }
         }
+    }
+
+    private void tryAutoSummarizeTitle(Long sessionId, String userMessage) {
+        if (sessionId == null) return;
+
+        chatSessionRepository.findById(sessionId).ifPresent(session -> {
+            String currentTitle = session.getTitle();
+            if (currentTitle == null || DEFAULT_TITLE_PATTERN.matcher(currentTitle).matches()) {
+                // 检查是否为第一轮对话 (通常是第一次包含有意义内容的 Turn)
+                List<TurnTimelineService.TurnView> history = turnTimelineService.getTurnHistory(sessionId, null, 5);
+                if (history != null && history.size() == 1) {
+                    log.info("触发对话标题自动摘要: sessionId={}, userMessage={}", sessionId, userMessage);
+                    try {
+                        String summary = titleSummarizer.summarize(userMessage);
+                        if (summary != null && !summary.isBlank()) {
+                            String finalSummary = summary.trim();
+                            chatSessionService.updateSessionTitle(sessionId, finalSummary);
+                            systemLogService.info("对话标题已自动更新: " + finalSummary, "CHAT");
+                            
+                            // 发布事件以便通过 WebSocket 推送给前端
+                            eventPublisher.publishEvent(new SessionTitleUpdatedEvent(this, session.getUserId(), sessionId, finalSummary));
+                        }
+                    } catch (Exception e) {
+                        log.warn("对话标题自动摘要失败: {}", e.getMessage());
+                    }
+                }
+            }
+        });
     }
 
     private EmotionAnalysis analyzeEmotion(String userId, String userMessage) {

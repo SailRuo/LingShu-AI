@@ -153,6 +153,13 @@ export const useChatSessionStore = defineStore("chat-session", () => {
     return activeSessionId.value;
   }
 
+  function updateSessionTitle(sessionId: number, title: string) {
+    const session = sessions.value.find((s) => s.id === sessionId);
+    if (session) {
+      session.title = title;
+    }
+  }
+
   return {
     userId,
     sessions,
@@ -165,5 +172,6 @@ export const useChatSessionStore = defineStore("chat-session", () => {
     isSessionEmpty,
     createSession,
     ensureActiveSession,
+    updateSessionTitle,
   };
 });
