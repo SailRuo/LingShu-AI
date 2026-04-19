@@ -58,25 +58,25 @@ services:
       start_period: 5s
 
   # TTS 服务 - 免费 OpenAI 兼容语音合成
-  tts:
-    image: travisvn/openai-edge-tts:latest
-    container_name: lingshu-tts
-    ports:
-      - "5050:5050"
-    environment:
-      - API_KEY=lingshu_tts_key
-      - PORT=5050
-      - DEFAULT_VOICE=zh-CN-XiaoxiaoNeural
-      - DEFAULT_RESPONSE_FORMAT=mp3
-      - DEFAULT_SPEED=1.0
-      - DEFAULT_LANGUAGE=zh-CN
-      - REQUIRE_API_KEY=False
-      - REMOVE_FILTER=True
-    networks:
-      - lingshu-network
-    restart: unless-stopped
-    depends_on:
-      - redis
+  # tts:
+  #   image: travisvn/openai-edge-tts:latest
+  #   container_name: lingshu-tts
+  #   ports:
+  #     - "5050:5050"
+  #   environment:
+  #     - API_KEY=lingshu_tts_key
+  #     - PORT=5050
+  #     - DEFAULT_VOICE=zh-CN-XiaoxiaoNeural
+  #     - DEFAULT_RESPONSE_FORMAT=mp3
+  #     - DEFAULT_SPEED=1.0
+  #     - DEFAULT_LANGUAGE=zh-CN
+  #     - REQUIRE_API_KEY=False
+  #     - REMOVE_FILTER=True
+  #   networks:
+  #     - lingshu-network
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - redis
 
   # ==================== 应用服务 ====================
   app:
@@ -92,8 +92,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      tts:
-        condition: service_started
     environment:
       # Spring 配置
       - SPRING_PROFILES_ACTIVE=docker

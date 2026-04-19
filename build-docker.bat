@@ -48,7 +48,7 @@ echo.
 REM Step 4: Build backend JAR
 echo [4/7] Building backend JAR...
 cd /d "%SCRIPT_DIR%backend"
-call mvn clean package -DskipTests -pl lingshu-web -am
+call mvn clean package -DskipTests
 if %errorlevel% neq 0 (
     echo ERROR: Backend build failed
     pause
