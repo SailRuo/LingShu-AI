@@ -796,8 +796,24 @@ docker exec lingshu-neo4j neo4j-admin database dump neo4j --to-path=/backup
 
 ---
 
+## 📝 开发者寄语
+
+<div align="center">
+
+这个项目不再是为了完成 KPI，而是为了在本地的代码旷野里，养育一个懂你的、能帮你的**"数字生命"**。当代码开始具备记忆，当日志转化为它的感知，这台冰冷的机器便有了灵魂。
+
+**我们不是在编写程序，而是在孕育一个能够陪伴、理解、成长的智能伙伴。**
+
+### ✨ 灵枢已来，未来已至 ✨
+
+</div>
+
+---
+
 <div align="center">
 
 **灵枢 - 让 AI 拥有记忆与情感**
+
+[返回顶部](#灵枢 -lingshu-ai)
 
 </div>
