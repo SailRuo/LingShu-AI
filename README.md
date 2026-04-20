@@ -58,9 +58,28 @@
 ## 界面预览
 
 <div align="center">
-  <img src="doc/assets/png/lingshu_ai_ui_mockup_1773996576105.png" width="800" alt="灵枢 AI 界面预览">
-  <p><i>灵枢 AI - 沉浸式星空背景下的情感化交互体验</i></p>
+
+### 💬 对话与记忆
+
+| 对话界面 | 记忆图谱 | 记忆治理 |
+|:--------:|:--------:|:--------:|
+| <img src="doc/assets/png/对话流.png" width="300" alt="对话界面"/> | <img src="doc/assets/png/记忆图谱.png" width="300" alt="记忆图谱"/> | <img src="doc/assets/png/记忆治理.png" width="300" alt="记忆治理"/> |
+
+### 📊 监控与配置
+
+| 系统日志 | 系统状态 | 基础设置 |
+|:--------:|:--------:|:--------:|
+| <img src="doc/assets/png/系统日志.png" width="300" alt="系统日志"/> | <img src="doc/assets/png/系统状态.png" width="300" alt="系统状态"/> | <img src="doc/assets/png/基础设置.png" width="300" alt="基础设置"/> |
+
+### 🔧 扩展功能
+
+| MCP 配置 | 模型配置 | 微信 Bot |
+|:--------:|:--------:|:--------:|
+| <img src="doc/assets/png/MCP配置.png" width="300" alt="MCP配置"/> | <img src="doc/assets/png/模型配置.png" width="300" alt="模型配置"/> | <img src="doc/assets/png/微信Bot.png" width="300" alt="微信Bot"/> |
+
 </div>
+
+<p align="center"><i>灵枢 AI - 沉浸式星空背景下的情感化交互体验，全链路透明可追溯</i></p>
 
 ---
 
