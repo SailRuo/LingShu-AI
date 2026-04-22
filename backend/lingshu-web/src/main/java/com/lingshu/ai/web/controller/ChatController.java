@@ -105,6 +105,11 @@ public class ChatController {
         return chatSessionService.createSession(userId, title);
     }
 
+    @DeleteMapping("/sessions/{id}")
+    public void deleteSession(@PathVariable(name = "id") Long id) {
+        chatSessionService.deleteSession(id);
+    }
+
     @DeleteMapping("/turns")
     public void clearHistory(@RequestParam(name = "userId", defaultValue = "User") String userId,
                              @RequestParam(name = "sessionId", required = false) Long sessionId) {

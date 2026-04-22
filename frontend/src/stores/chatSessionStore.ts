@@ -160,6 +160,22 @@ export const useChatSessionStore = defineStore("chat-session", () => {
     }
   }
 
+  async function deleteSession(sessionId: number) {
+    const response = await fetch(getFullUrl(`/api/chat/sessions/${sessionId}`), {
+      method: "DELETE",
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to delete chat session");
+    }
+
+    await fetchSessions();
+
+    if (activeSessionId.value === sessionId) {
+      activeSessionId.value = sessions.value[0]?.id ?? null;
+    }
+  }
+
   return {
     userId,
     sessions,
@@ -173,5 +189,6 @@ export const useChatSessionStore = defineStore("chat-session", () => {
     createSession,
     ensureActiveSession,
     updateSessionTitle,
+    deleteSession,
   };
 });

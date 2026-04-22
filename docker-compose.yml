@@ -80,6 +80,7 @@ services:
 
   # ==================== 应用服务 ====================
   app:
+    image: lingshu-ai:latest
     build:
       context: .
       dockerfile: Dockerfile

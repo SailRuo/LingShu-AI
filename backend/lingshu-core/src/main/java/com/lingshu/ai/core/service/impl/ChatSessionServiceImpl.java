@@ -1,8 +1,11 @@
 package com.lingshu.ai.core.service.impl;
 
 import com.lingshu.ai.core.service.ChatSessionService;
+import com.lingshu.ai.core.service.TurnTimelineService;
 import com.lingshu.ai.infrastructure.entity.ChatSession;
 import com.lingshu.ai.infrastructure.repository.ChatSessionRepository;
+import dev.langchain4j.memory.chat.ChatMemoryProvider;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,9 +18,15 @@ import java.util.Optional;
 public class ChatSessionServiceImpl implements ChatSessionService {
 
     private final ChatSessionRepository chatSessionRepository;
+    private final TurnTimelineService turnTimelineService;
+    private final ChatMemoryProvider chatMemoryProvider;
 
-    public ChatSessionServiceImpl(ChatSessionRepository chatSessionRepository) {
+    public ChatSessionServiceImpl(ChatSessionRepository chatSessionRepository,
+                                  @Lazy TurnTimelineService turnTimelineService,
+                                  ChatMemoryProvider chatMemoryProvider) {
         this.chatSessionRepository = chatSessionRepository;
+        this.turnTimelineService = turnTimelineService;
+        this.chatMemoryProvider = chatMemoryProvider;
     }
 
     @Override
@@ -107,6 +116,20 @@ public class ChatSessionServiceImpl implements ChatSessionService {
             session.setUpdatedAt(LocalDateTime.now());
             chatSessionRepository.save(session);
         });
+    }
+
+    @Override
+    @Transactional(transactionManager = "transactionManager")
+    public void deleteSession(Long sessionId) {
+        if (sessionId == null) {
+            return;
+        }
+        // 1. 删除回合历史
+        turnTimelineService.clearTurnHistory(sessionId);
+        // 2. 清除内存缓存
+        chatMemoryProvider.get(sessionId).clear();
+        // 3. 删除会话记录
+        chatSessionRepository.deleteById(sessionId);
     }
 
     private ChatSession createSessionEntity(String userId, String title) {
