@@ -678,7 +678,7 @@ public class ChatServiceImpl implements ChatService {
                 })
                 .onCompleteResponse(response -> {
                     log.info("欢迎语生成完成，正在手动保存到数据库...");
-                    Long turnId = turnTimelineService.startTurn(session.getId(), "", List.of());
+                    Long turnId = turnTimelineService.startTurn(session.getId(), "请开始我们的对话", List.of());
                     turnTimelineService.recordAssistantText(turnId, welcomeBuilder.toString());
                     turnTimelineService.completeTurn(turnId, welcomeBuilder.toString());
                     sink.tryEmitComplete();

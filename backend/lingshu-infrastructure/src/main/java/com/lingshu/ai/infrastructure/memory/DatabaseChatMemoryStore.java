@@ -1,20 +1,24 @@
 package com.lingshu.ai.infrastructure.memory;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lingshu.ai.infrastructure.entity.ChatTurn;
 import com.lingshu.ai.infrastructure.entity.ChatTurnEvent;
 import com.lingshu.ai.infrastructure.repository.ChatTurnEventRepository;
 import com.lingshu.ai.infrastructure.repository.ChatTurnRepository;
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
-import dev.langchain4j.data.message.*;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.ChatMessageType;
+import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
@@ -29,11 +33,12 @@ import java.util.stream.Collectors;
 public class DatabaseChatMemoryStore implements ChatMemoryStore {
 
     private static final int MAX_CONTEXT_TURNS = 8;
+    private static final List<String> CONTEXT_STATUSES = List.of("completed", "running");
 
     private final ChatTurnRepository turnRepository;
     private final ChatTurnEventRepository eventRepository;
     private final ConcurrentMap<Long, SystemMessage> sessionSystemMessages = new ConcurrentHashMap<>();
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ChatContextAssembler contextAssembler = new ChatContextAssembler();
 
     public DatabaseChatMemoryStore(ChatTurnRepository turnRepository,
                                    ChatTurnEventRepository eventRepository) {
@@ -54,7 +59,7 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
         PageRequest pageable = PageRequest.of(0, MAX_CONTEXT_TURNS, Sort.by("id").descending());
         List<ChatTurn> turnsDesc = turnRepository.findBySessionIdAndStatusInOrderByIdDesc(
                 sessionId,
-                List.of("completed"),
+                CONTEXT_STATUSES,
                 pageable
         );
         if (turnsDesc == null || turnsDesc.isEmpty()) {
@@ -69,60 +74,18 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
         Map<Long, List<ChatTurnEvent>> eventsByTurnId = events.stream()
                 .collect(Collectors.groupingBy(e -> e.getTurn().getId(), LinkedHashMap::new, Collectors.toList()));
 
-        for (ChatTurn turn : turns) {
-            UserMessage userMessage = toUserMessage(turn);
-            List<ChatTurnEvent> turnEvents = eventsByTurnId.getOrDefault(turn.getId(), List.of());
+        ChatContextAssembler.AssemblyResult assemblyResult = contextAssembler.assemble(turns, eventsByTurnId);
+        messages.addAll(assemblyResult.messages());
 
-            // Keep model context aligned to complete user-driven turns.
-            // Assistant-only records such as welcome messages are still stored for UI history,
-            // but should not become the leading conversational message sent back to the LLM.
-            if (userMessage == null) {
-                if (!turnEvents.isEmpty() || !safe(turn.getAssistantMessage()).isBlank()) {
-                    log.debug("Skip assistant-only turn from chat memory context, turnId={}", turn.getId());
-                }
-                continue;
-            }
-
-            messages.add(userMessage);
-            boolean hasAssistantTextEvent = false;
-
-            for (ChatTurnEvent event : turnEvents) {
-                String eventType = safe(event.getEventType());
-                if ("tool_start".equals(eventType)) {
-                    ToolExecutionRequest req = ToolExecutionRequest.builder()
-                            .id(safe(event.getToolCallId()))
-                            .name(safe(event.getToolName()))
-                            .arguments(safe(event.getArguments()))
-                            .build();
-                    messages.add(AiMessage.from(List.of(req)));
-                    continue;
-                }
-                if ("tool_end".equals(eventType)) {
-                    messages.add(ToolExecutionResultMessage.from(
-                            safe(event.getToolCallId()),
-                            safe(event.getToolName()),
-                            safe(event.getContent())
-                    ));
-                    continue;
-                }
-                if ("assistant_text".equals(eventType)) {
-                    String text = safe(event.getContent());
-                    if (!text.isBlank()) {
-                        messages.add(AiMessage.from(text));
-                        hasAssistantTextEvent = true;
-                    }
-                }
-            }
-
-            // Compatibility fallback for turns created before assistant_text event migration.
-            if (!hasAssistantTextEvent) {
-                String assistant = safe(turn.getAssistantMessage());
-                if (!assistant.isBlank()) {
-                    messages.add(AiMessage.from(assistant));
-                }
-            }
+        if (!assemblyResult.diagnostics().isEmpty()) {
+            log.info("ChatContext diagnostics sessionId={} => {}", sessionId, assemblyResult.diagnostics());
         }
 
+        if (!containsUserMessage(messages) && containsAnyUserContent(turns)) {
+            log.warn("ChatContext assembled without USER message while turns contain user content, sessionId={}", sessionId);
+        }
+
+        log.debug("ChatContext message types sessionId={} => {}", sessionId, summarizeTypes(messages));
         return messages;
     }
 
@@ -154,70 +117,27 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
         sessionSystemMessages.remove(sessionId);
     }
 
-    private UserMessage toUserMessage(ChatTurn turn) {
-        String text = safe(turn.getUserMessage());
-        List<String> images = parseImages(turn.getUserImagesJson());
-
-        if ((text == null || text.isBlank()) && images.isEmpty()) {
-            return null;
-        }
-
-        List<Content> contents = new ArrayList<>();
-        if (text != null && !text.isBlank()) {
-            contents.add(TextContent.from(text));
-        }
-        for (String image : images) {
-            addImageContent(contents, image);
-        }
-
-        if (contents.isEmpty()) {
-            return null;
-        }
-        return UserMessage.from(contents);
-    }
-
-    private void addImageContent(List<Content> contents, String image) {
-        if (image == null || image.isBlank()) {
-            return;
-        }
-        String trimmed = image.trim();
-        try {
-            if (trimmed.startsWith("data:") && trimmed.contains(",")) {
-                int sep = trimmed.indexOf(',');
-                String header = trimmed.substring(5, sep);
-                String mime = header.contains(";") ? header.substring(0, header.indexOf(';')) : "image/jpeg";
-                String base64 = trimmed.substring(sep + 1);
-                contents.add(ImageContent.from(base64, mime));
-                return;
-            }
-            if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-                contents.add(ImageContent.from(trimmed));
-                return;
-            }
-            // Treat as raw base64.
-            contents.add(ImageContent.from(trimmed, "image/jpeg"));
-        } catch (Exception e) {
-            log.debug("Skip invalid image payload in turn context: {}", e.getMessage());
-        }
-    }
-
-    private List<String> parseImages(String userImagesJson) {
-        if (userImagesJson == null || userImagesJson.isBlank()) {
-            return List.of();
-        }
-        try {
-            List<String> parsed = objectMapper.readValue(userImagesJson, new TypeReference<List<String>>() {
-            });
-            return parsed == null ? List.of() : parsed;
-        } catch (Exception e) {
-            return List.of();
-        }
-    }
-
     private Long parseId(Object memoryId) {
         if (memoryId instanceof Long) return (Long) memoryId;
         if (memoryId instanceof String) return Long.parseLong((String) memoryId);
         return 1L;
+    }
+
+    private boolean containsUserMessage(List<ChatMessage> messages) {
+        return messages.stream().anyMatch(m -> m.type() == ChatMessageType.USER);
+    }
+
+    private boolean containsAnyUserContent(List<ChatTurn> turns) {
+        return turns.stream().anyMatch(turn ->
+                (turn.getUserMessage() != null && !turn.getUserMessage().isBlank())
+                        || (turn.getUserImagesJson() != null && !turn.getUserImagesJson().isBlank() && !"[]".equals(turn.getUserImagesJson().trim()))
+        );
+    }
+
+    private String summarizeTypes(List<ChatMessage> messages) {
+        return messages.stream()
+                .map(m -> m.type().name())
+                .collect(Collectors.joining(" -> "));
     }
 
     private String safe(String value) {

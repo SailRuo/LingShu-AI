@@ -238,13 +238,31 @@ public class AiConfig {
 
             @Override
             public java.util.List<dev.langchain4j.data.message.ChatMessage> messages() {
-                java.util.List<dev.langchain4j.data.message.ChatMessage> msgs = delegate.messages();
-                if (msgs == null || msgs.isEmpty()) {
-                    return msgs;
+                java.util.List<dev.langchain4j.data.message.ChatMessage> original = delegate.messages();
+                if (original == null || original.isEmpty()) {
+                    return original;
                 }
 
-                msgs = removeOrphanedToolMessages(msgs);
-                return ensureHistoryStartsWithUser(msgs);
+                java.util.List<dev.langchain4j.data.message.ChatMessage> sanitized = removeOrphanedToolMessages(original);
+                java.util.List<dev.langchain4j.data.message.ChatMessage> normalized = ensureHistoryStartsWithUser(sanitized);
+                if (containsUserMessage(normalized)) {
+                    return normalized;
+                }
+
+                // Fail-open: 防止清洗逻辑误删 UserMessage 导致请求仅剩 System，从而触发 Gemini contents 缺失错误
+                if (containsUserMessage(original)) {
+                    log.warn("清洗后无 UserMessage，回退到原始 ChatMemory 消息以避免请求体无 contents");
+                    return ensureHistoryStartsWithUser(original);
+                }
+
+                boolean hasNonSystemMessages = original.stream()
+                        .anyMatch(msg -> !(msg instanceof dev.langchain4j.data.message.SystemMessage));
+                if (hasNonSystemMessages) {
+                    log.warn("清洗后无 UserMessage 且原始存在非系统消息，回退原始消息链");
+                    return original;
+                }
+
+                return normalized;
             }
 
             private java.util.List<dev.langchain4j.data.message.ChatMessage> ensureHistoryStartsWithUser(
@@ -333,12 +351,8 @@ public class AiConfig {
                             if (toolResultCount < toolCallCount) {
                                 log.warn("发现不完整的工具调用块，AiMessage 有 {} 个 tool_calls 但只有 {} 个结果，移除该块",
                                         toolCallCount, toolResultCount);
-                                while (result.size() > startIndex) {
-                                    result.remove(result.size() - 1);
-                                }
-                                // 回退保留期间暂存的注入消息，避免误吞消息链
-                                result.addAll(injectedMessages);
-                                modified = true;
+                                // Fail-open: 工具块不完整时不做破坏性删改，直接回退原始消息链，避免吞掉真实用户消息
+                                return messages;
                             } else {
                                 // 找齐了所有 tool result，将暂存的注入消息附加在后面。
                                 // 这样传递给大模型时，顺序就是合法的 [AiMessage] -> [ToolResults] -> [UserMessage]
@@ -360,6 +374,13 @@ public class AiConfig {
                 }
 
                 return modified ? result : messages;
+            }
+
+            private boolean containsUserMessage(java.util.List<dev.langchain4j.data.message.ChatMessage> messages) {
+                if (messages == null || messages.isEmpty()) {
+                    return false;
+                }
+                return messages.stream().anyMatch(dev.langchain4j.data.message.UserMessage.class::isInstance);
             }
 
             private boolean isInjectedMcpUserMessage(dev.langchain4j.data.message.UserMessage userMessage) {
