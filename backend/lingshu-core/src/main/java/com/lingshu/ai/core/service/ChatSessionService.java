@@ -17,4 +17,6 @@ public interface ChatSessionService {
     void touchSession(Long sessionId);
 
     void updateSessionTitle(Long sessionId, String title);
+
+    void deleteSession(Long sessionId);
 }

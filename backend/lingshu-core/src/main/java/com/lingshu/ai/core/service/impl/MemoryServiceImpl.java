@@ -1003,7 +1003,7 @@ public class MemoryServiceImpl implements MemoryService {
             String content = fact.getContent();
             String normalized = normalizeSemanticText(content);
             if (!normalizedSet.contains(normalized)) {
-                finalFacts.add(content);
+                finalFacts.add(formatFactWithTime(content, fact));
                 normalizedSet.add(normalized);
             }
         }
@@ -1028,6 +1028,64 @@ public class MemoryServiceImpl implements MemoryService {
         }
 
         return finalFacts;
+    }
+
+    private String formatFactWithTime(String content, FactNode fact) {
+        if (fact == null) {
+            return content;
+        }
+
+        StringBuilder builder = new StringBuilder(content);
+        if (fact.getEventTime() != null) {
+            builder.append(" [事件时间: ").append(formatRelativeTime(fact.getEventTime())).append("]");
+        }
+        if (fact.getObservedAt() != null) {
+            builder.append(" [记录于: ").append(formatRelativeTime(fact.getObservedAt())).append("]");
+        }
+        return builder.toString();
+    }
+
+    private String formatRelativeTime(LocalDateTime dateTime) {
+        if (dateTime == null) {
+            return "未知";
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        long days = Duration.between(dateTime, now).toDays();
+
+        if (days == 0) {
+            return "今天";
+        }
+        if (days == 1) {
+            return "昨天";
+        }
+        if (days > 1 && days < 7) {
+            return days + "天前";
+        }
+        if (days >= 7 && days < 30) {
+            return (days / 7) + "周前";
+        }
+        if (days >= 30 && days < 365) {
+            return (days / 30) + "个月前";
+        }
+        if (days >= 365) {
+            return (days / 365) + "年前";
+        }
+
+        long futureDays = Math.abs(days);
+        if (futureDays == 1) {
+            return "明天";
+        }
+        if (futureDays < 7) {
+            return futureDays + "天后";
+        }
+        if (futureDays < 30) {
+            return (futureDays / 7) + "周后";
+        }
+        if (futureDays < 365) {
+            return (futureDays / 30) + "个月后";
+        }
+        return dateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
     }
 
     private boolean isIdentityQuery(String message, List<String> entities) {

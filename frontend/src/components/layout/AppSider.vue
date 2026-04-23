@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NMenu, NIcon, useMessage } from 'naive-ui'
+import { NMenu, NIcon, NPopconfirm, useMessage } from 'naive-ui'
 import {
   Activity as ActivityIcon,
   FileText,
@@ -8,7 +8,8 @@ import {
   DatabaseBackup,
   Loader2,
   Plus,
-  MessageSquare
+  MessageSquare,
+  Trash2
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import { computed, h, onMounted, ref, watch } from 'vue'
@@ -91,6 +92,19 @@ function handleSelectSession(sessionId: number) {
   }
 }
 
+async function handleDeleteSession(id: number) {
+  const session = sessions.value.find(s => s.id === id)
+  if (!session) return
+
+  try {
+    await sessionStore.deleteSession(id)
+    message.success('会话已删除')
+  } catch (error) {
+    console.error('Failed to delete session:', error)
+    message.error('删除会话失败')
+  }
+}
+
 onMounted(() => {
   ensureSessionsLoaded()
 })
@@ -153,6 +167,21 @@ watch(() => props.activeMenu, () => {
             <span class="session-item-body">
               <strong>{{ session.title }}</strong>
             </span>
+            <n-popconfirm
+              @positive-click="handleDeleteSession(session.id)"
+              placement="right"
+            >
+              <template #trigger>
+                <button
+                  class="session-delete-btn"
+                  title="删除会话"
+                  @click.stop
+                >
+                  <Trash2 :size="12" />
+                </button>
+              </template>
+              确认删除此会话？删除后不可恢复。
+            </n-popconfirm>
           </button>
 
           <div v-if="isLoadingSessions && sessions.length === 0" class="session-empty">
@@ -586,6 +615,36 @@ watch(() => props.activeMenu, () => {
   gap: 8px;
   font-size: 12px;
   color: var(--color-text-dim);
+}
+
+.session-delete-btn {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%) translateX(10px);
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.2s ease;
+  z-index: 2;
+}
+
+.session-item:hover .session-delete-btn {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+.session-delete-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
 }
 
 .spin {
