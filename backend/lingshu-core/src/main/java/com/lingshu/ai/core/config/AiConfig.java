@@ -1,6 +1,7 @@
 package com.lingshu.ai.core.config;
 
 import com.lingshu.ai.core.model.DynamicEmbeddingModel;
+import com.lingshu.ai.core.model.DynamicPgVectorEmbeddingStore;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -174,7 +175,9 @@ public class AiConfig {
     }
 
     @Bean
-    public EmbeddingStore<TextSegment> embeddingStore(EmbeddingModel embeddingModel) {
+    public EmbeddingStore<TextSegment> embeddingStore(
+            com.lingshu.ai.core.service.SettingService settingService,
+            DynamicEmbeddingModel dynamicEmbeddingModel) {
         // 从 JDBC URL 解析数据库配置 (例如：jdbc:postgresql://postgres:5432/lingshu)
         String dbHost = "localhost";
         int dbPort = 5432;
@@ -201,15 +204,15 @@ public class AiConfig {
 
         log.info("Initializing PgVectorEmbeddingStore with host={}, port={}, database={}", dbHost, dbPort, dbName);
 
-        return dev.langchain4j.store.embedding.pgvector.PgVectorEmbeddingStore.builder()
-                .host(dbHost)
-                .port(dbPort)
-                .database(dbName)
-                .user(username)
-                .password(password)
-                .table("memory_segments")
-                .dimension(embeddingModel.dimension())
-                .build();
+        return new DynamicPgVectorEmbeddingStore(
+                settingService,
+                dynamicEmbeddingModel,
+                dbHost,
+                dbPort,
+                dbName,
+                username,
+                password
+        );
     }
 
     @Bean
@@ -274,7 +277,8 @@ public class AiConfig {
                 boolean hasNonSystemMessages = messages.stream()
                         .anyMatch(msg -> !(msg instanceof dev.langchain4j.data.message.SystemMessage));
                 if (hasNonSystemMessages) {
-                    log.warn("ChatMemory 中存在缺少 UserMessage 的残缺历史，已跳过这些历史消息");
+                    log.warn("ChatMemory 中存在暂时缺少 UserMessage 的历史，保留原始消息避免请求体为空");
+                    return messages;
                 }
                 return systemMessages;
             }

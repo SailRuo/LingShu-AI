@@ -34,6 +34,12 @@ public class SystemSettingDTO {
     @JsonProperty("embedApiKey")
     private String embedApiKey;
 
+    @JsonProperty("embedDimension")
+    private Integer embedDimension;
+
+    @JsonProperty("embedTable")
+    private String embedTable;
+
     @JsonProperty("proactiveEnabled")
     private Boolean proactiveEnabled;
 

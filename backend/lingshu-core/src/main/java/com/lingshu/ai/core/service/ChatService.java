@@ -20,13 +20,13 @@ public interface ChatService {
     }
 
     Flux<String> streamChat(String message);
-    
+
     Flux<String> streamChat(String message, Long agentId);
-    
+
     Flux<String> streamChat(String message, Long agentId, String userId);
-    
+
     Flux<String> streamChat(String message, String model, String apiKey, String baseUrl);
-    
+
     Flux<String> streamChat(String message, Long agentId, String model, String apiKey, String baseUrl);
 
     Flux<String> streamChat(String message, Long agentId, String userId, String model, String apiKey, String baseUrl);
@@ -41,9 +41,9 @@ public interface ChatService {
     Flux<String> streamChat(String message, List<String> images, Long sessionId, Long agentId, String userId, String model, String apiKey, String baseUrl, Boolean enableThinking, ToolEventListener toolEventListener);
 
     Flux<String> streamWelcome();
-    
+
     Flux<String> streamWelcome(String userId);
-    
+
     void clearHistory(Long sessionId);
 
     java.util.List<String> getModels(String source, String baseUrl, String apiKey);

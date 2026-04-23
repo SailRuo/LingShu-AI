@@ -41,8 +41,10 @@ import java.util.Map; // 添加此行
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors; // 添加此行
+import lombok.RequiredArgsConstructor;
 
 @Service
+@RequiredArgsConstructor
 public class ChatServiceImpl implements ChatService {
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ChatServiceImpl.class);
@@ -69,41 +71,7 @@ public class ChatServiceImpl implements ChatService {
     @Value("${lingshu.ollama.base-url:http://localhost:11434}")
     private String baseUrl;
 
-    public ChatServiceImpl(MemoryService memoryService,
-                           AgentConfigService agentConfigService,
-                           ChatSessionService chatSessionService,
-                           ChatSessionRepository sessionRepository,
-                           StreamingChatModel streamingChatLanguageModel,
-                           RestTemplate restTemplate,
-                           SettingService settingService,
-                           SystemLogService systemLogService,
-                           AffinityService affinityService,
-                           PromptBuilderService promptBuilderService,
-                           ChatMemoryProvider chatMemoryProvider,
-                           McpService mcpService,
-                           List<ChatModelListener> listeners,
-                           TurnPostProcessingServiceImpl turnPostProcessingService,
-                           ToolResultSummarizer toolResultSummarizer,
-                           TurnTimelineService turnTimelineService,
-                           McpToolArtifactRegistry mcpToolArtifactRegistry) {
-        this.memoryService = memoryService;
-        this.agentConfigService = agentConfigService;
-        this.chatSessionService = chatSessionService;
-        this.sessionRepository = sessionRepository;
-        this.streamingChatLanguageModel = streamingChatLanguageModel;
-        this.restTemplate = restTemplate;
-        this.settingService = settingService;
-        this.systemLogService = systemLogService;
-        this.affinityService = affinityService;
-        this.promptBuilderService = promptBuilderService;
-        this.chatMemoryProvider = chatMemoryProvider;
-        this.mcpService = mcpService;
-        this.listeners = listeners;
-        this.turnPostProcessingService = turnPostProcessingService;
-        this.toolResultSummarizer = toolResultSummarizer;
-        this.turnTimelineService = turnTimelineService;
-        this.mcpToolArtifactRegistry = mcpToolArtifactRegistry;
-    }
+
 
     private ChatSession getOrCreateSession(String userId, Long sessionId) {
         Long resolvedSessionId = chatSessionService.resolveSessionId(userId, sessionId);

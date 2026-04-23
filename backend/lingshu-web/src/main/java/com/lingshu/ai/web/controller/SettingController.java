@@ -1,6 +1,7 @@
 package com.lingshu.ai.web.controller;
 
 import com.lingshu.ai.core.service.SettingService;
+import com.lingshu.ai.core.service.MemoryService;
 import com.lingshu.ai.infrastructure.dto.SystemSettingDTO;
 import com.lingshu.ai.infrastructure.entity.SystemSetting;
 import dev.langchain4j.skills.FileSystemSkill;
@@ -10,23 +11,30 @@ import org.springframework.web.bind.annotation.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/api/settings")
 public class SettingController {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SettingController.class);
     private static final Path SKILLS_DIR = Paths.get(System.getProperty("user.dir"), ".lingshu", "skills");
+    private static final String DEFAULT_EMBED_TABLE = "memory_segments";
 
     private final SettingService settingService;
+    private final MemoryService memoryService;
 
-    public SettingController(SettingService settingService) {
+    public SettingController(SettingService settingService, MemoryService memoryService) {
         this.settingService = settingService;
+        this.memoryService = memoryService;
     }
 
     /**
@@ -96,6 +104,8 @@ public class SettingController {
         result.put("embedModel", embeddingConfig.get("model"));
         result.put("embedBaseUrl", embeddingConfig.get("baseUrl"));
         result.put("embedApiKey", embeddingConfig.get("apiKey"));
+        result.put("embedDimension", resolveEmbeddingDimension(embeddingConfig));
+        result.put("embedTable", resolveEmbeddingTableName(embeddingConfig));
 
         Map<String, Object> proactiveConfig = setting.getProactiveConfig();
         result.put("proactiveEnabled", proactiveConfig.get("enabled"));
@@ -129,6 +139,10 @@ public class SettingController {
     public void saveSetting(@RequestBody SystemSettingDTO dto) {
         SystemSetting setting = settingService.getSetting();
 
+        Map<String, Object> oldEmbeddingConfig = new HashMap<>(setting.getEmbeddingConfig());
+        String previousSignature = buildEmbeddingSignature(oldEmbeddingConfig);
+        int previousDimension = resolveEmbeddingDimension(oldEmbeddingConfig);
+
         Map<String, Object> llmConfig = setting.getLlmConfig();
         if (dto.getSource() != null) llmConfig.put("source", dto.getSource());
         if (dto.getChatModel() != null) llmConfig.put("model", dto.getChatModel());
@@ -142,6 +156,26 @@ public class SettingController {
         if (dto.getEmbedModel() != null) embeddingConfig.put("model", dto.getEmbedModel());
         if (dto.getEmbedBaseUrl() != null) embeddingConfig.put("baseUrl", dto.getEmbedBaseUrl());
         if (dto.getEmbedApiKey() != null) embeddingConfig.put("apiKey", dto.getEmbedApiKey());
+        if (dto.getEmbedDimension() != null && dto.getEmbedDimension() > 0) {
+            embeddingConfig.put("dimension", dto.getEmbedDimension());
+        }
+        if (dto.getEmbedTable() != null && !dto.getEmbedTable().isBlank()) {
+            embeddingConfig.put("table", dto.getEmbedTable().trim());
+        }
+
+        int currentDimension = resolveEmbeddingDimension(embeddingConfig);
+        boolean dimensionChanged = currentDimension != previousDimension;
+        if (dimensionChanged) {
+            String migratedTable = buildMigratedEmbeddingTableName(currentDimension);
+            embeddingConfig.put("table", migratedTable);
+            embeddingConfig.put("dimension", currentDimension);
+            log.warn("检测到向量维度变更：{} -> {}，切换到新表 {}", previousDimension, currentDimension, migratedTable);
+        } else {
+            if (!(embeddingConfig.get("table") instanceof String table) || table.isBlank()) {
+                embeddingConfig.put("table", resolveEmbeddingTableName(oldEmbeddingConfig));
+            }
+            embeddingConfig.putIfAbsent("dimension", currentDimension);
+        }
         setting.setEmbeddingConfig(embeddingConfig);
 
         Map<String, Object> proactiveConfig = setting.getProactiveConfig();
@@ -168,6 +202,96 @@ public class SettingController {
         setting.setTtsConfig(ttsConfig);
 
         settingService.saveSetting(setting);
+
+        String currentSignature = buildEmbeddingSignature(setting.getEmbeddingConfig());
+        boolean embeddingConfigChanged = !Objects.equals(previousSignature, currentSignature);
+        if (embeddingConfigChanged) {
+            if (isEmbeddingUsable(setting.getEmbeddingConfig())) {
+                log.info("检测到向量配置变更，自动触发向量重建。old={}, new={}", previousSignature, currentSignature);
+                memoryService.rebuildAllEmbeddings();
+            } else {
+                log.info("向量配置已变更但尚未完整配置（首次安装场景），跳过自动重建。new={}", currentSignature);
+            }
+        }
+    }
+
+    private String resolveEmbeddingTableName(Map<String, Object> config) {
+        Object table = config.get("table");
+        if (table instanceof String tableName && !tableName.isBlank()) {
+            return tableName.trim();
+        }
+        return DEFAULT_EMBED_TABLE;
+    }
+
+    private String buildEmbeddingSignature(Map<String, Object> config) {
+        String source = toNormalizedString(config.get("source"));
+        String model = toNormalizedString(config.get("model"));
+        String baseUrl = toNormalizedString(config.get("baseUrl"));
+        int dimension = resolveEmbeddingDimension(config);
+        return source + "|" + model + "|" + baseUrl + "|" + dimension;
+    }
+
+    private String toNormalizedString(Object value) {
+        if (value == null) {
+            return "";
+        }
+        String str = String.valueOf(value).trim();
+        return str.isEmpty() ? "" : str;
+    }
+
+    private boolean isEmbeddingUsable(Map<String, Object> config) {
+        String source = toNormalizedString(config.get("source"));
+        String model = toNormalizedString(config.get("model"));
+        String baseUrl = toNormalizedString(config.get("baseUrl"));
+        return !source.isBlank() && !model.isBlank() && !baseUrl.isBlank();
+    }
+
+    private int resolveEmbeddingDimension(Map<String, Object> config) {
+        Object configuredDimension = config.get("dimension");
+        Integer parsedDimension = tryParseInteger(configuredDimension);
+        if (parsedDimension != null && parsedDimension > 0) {
+            return parsedDimension;
+        }
+
+        String modelName = toNormalizedString(config.get("model")).toLowerCase();
+        if (modelName.isBlank()) {
+            return 768;
+        }
+        if (modelName.contains("text-embedding-3-large")) {
+            return 3072;
+        }
+        if (modelName.contains("text-embedding-3-small") || modelName.contains("text-embedding-ada-002")) {
+            return 1536;
+        }
+        if (modelName.contains("mxbai-embed-large")
+                || modelName.contains("bge-m3")
+                || modelName.contains("qwen3-embedding")
+                || modelName.contains("qwen-embedding")) {
+            return 1024;
+        }
+        if (modelName.contains("nomic-embed-text")) {
+            return 768;
+        }
+        return 768;
+    }
+
+    private Integer tryParseInteger(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String str) {
+            try {
+                return Integer.parseInt(str.trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private String buildMigratedEmbeddingTableName(int dimension) {
+        String suffix = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        return "memory_segments_d" + dimension + "_" + suffix;
     }
 
     private Map<String, Object> toSkillSummary(FileSystemSkill skill) {

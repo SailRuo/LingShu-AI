@@ -33,7 +33,7 @@ public class ChatController {
 
     @GetMapping(value = "/welcome", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> getWelcome(@RequestParam(name = "userId", defaultValue = "User") String userId) {
-        return Flux.empty();
+        return chatService.streamWelcome(userId);
     }
 
     @GetMapping("/models")

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getFullUrl } from '@/utils/request'
+import { getClientUserId } from '@/stores/chatSessionStore'
 import { NButton, NDropdown, NIcon, NInput, NProgress, NScrollbar, NSlider, NTag, useMessage } from 'naive-ui'
 import { Clock3, Eye, Play, RefreshCcw, Search, Sparkles, Target, Trash2, ZoomIn, ZoomOut } from 'lucide-vue-next'
 import { useIntersectionObserver } from '@vueuse/core'
@@ -240,7 +241,9 @@ async function fetchGraph() {
   showDropdown.value = false
   try {
     const previousIds = new Set(graph.value.nodes.map((n) => n.id))
-    const response = await fetch(getFullUrl('/api/memory/graph'))
+    const userId = getClientUserId()
+    const params = new URLSearchParams({ userId })
+    const response = await fetch(getFullUrl(`/api/memory/graph?${params.toString()}`))
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const payload = await response.json() as GraphPayload
     graph.value = payload

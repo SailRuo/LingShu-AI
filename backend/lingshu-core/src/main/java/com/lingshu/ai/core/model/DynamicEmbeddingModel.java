@@ -11,6 +11,7 @@ import dev.langchain4j.model.output.Response;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 动态向量模型，根据系统设置实时切换底层的 Embedding 模型实例 (Ollama 或 OpenAI)。
@@ -84,8 +85,8 @@ public class DynamicEmbeddingModel implements EmbeddingModel {
 
     @Override
     public int dimension() {
-        ensureDelegate();
-        return delegate.dimension();
+        SystemSetting setting = settingService.getSetting();
+        return resolveConfiguredDimension(setting);
     }
 
     @Override
@@ -98,5 +99,58 @@ public class DynamicEmbeddingModel implements EmbeddingModel {
     public String modelName() {
         ensureDelegate();
         return delegate.modelName();
+    }
+
+    private int resolveConfiguredDimension(SystemSetting setting) {
+        if (setting == null) {
+            return 768;
+        }
+
+        Map<String, Object> embeddingConfig = setting.getEmbeddingConfig();
+        Object configuredDimension = embeddingConfig.get("dimension");
+        Integer parsedDimension = tryParseInteger(configuredDimension);
+        if (parsedDimension != null && parsedDimension > 0) {
+            return parsedDimension;
+        }
+
+        String modelName = setting.getEmbedModel();
+        if (modelName == null || modelName.isBlank()) {
+            return 768;
+        }
+
+        String normalizedModelName = modelName.toLowerCase();
+        if (normalizedModelName.contains("text-embedding-3-large")) {
+            return 3072;
+        }
+        if (normalizedModelName.contains("text-embedding-3-small")
+                || normalizedModelName.contains("text-embedding-ada-002")) {
+            return 1536;
+        }
+        if (normalizedModelName.contains("mxbai-embed-large")
+                || normalizedModelName.contains("bge-m3")
+                || normalizedModelName.contains("qwen3-embedding")
+                || normalizedModelName.contains("qwen-embedding")) {
+            return 1024;
+        }
+        if (normalizedModelName.contains("nomic-embed-text")) {
+            return 768;
+        }
+
+        log.warn("未识别的 embedding 模型维度，使用默认值 768。model={}", modelName);
+        return 768;
+    }
+
+    private Integer tryParseInteger(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        if (value instanceof String strValue) {
+            try {
+                return Integer.parseInt(strValue.trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 }

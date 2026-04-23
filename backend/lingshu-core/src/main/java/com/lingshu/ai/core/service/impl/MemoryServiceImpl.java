@@ -646,90 +646,6 @@ public class MemoryServiceImpl implements MemoryService {
         return contextBuilder.toString();
     }
 
-    private List<FactNode> performGraphRetrieval(String userId, String message, List<String> entities,
-                                                 com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder) {
-        List<FactNode> result = new ArrayList<>();
-        userRepository.findByName(userId).ifPresent(user -> {
-            if (user.getFacts() != null && !user.getFacts().isEmpty()) {
-                List<FactNode> relevantFacts = new ArrayList<>();
-                if (!entities.isEmpty()) {
-                    List<FactNode> matched = user.getFacts().stream()
-                            .filter(f -> entities.stream()
-                                    .anyMatch(e -> f.getContent().toLowerCase().contains(e.toLowerCase())))
-                            .sorted((f1, f2) -> Double.compare(f2.getImportance(), f1.getImportance()))
-                            .limit(8)
-                            .toList();
-                    relevantFacts.addAll(matched);
-                    eventBuilder.graphMatchedContent(relevantFacts.stream().map(FactNode::getContent).collect(Collectors.toList()));
-                    eventBuilder.graphMatchedIds(relevantFacts.stream().map(FactNode::getId).collect(Collectors.toList()));
-                }
-
-                boolean isIdentity = isIdentityQuery(message, entities);
-                if (relevantFacts.size() < 3 || isIdentity) {
-                    List<FactNode> coreFacts = user.getFacts().stream()
-                            .filter(f -> !relevantFacts.contains(f))
-                            .sorted((f1, f2) -> Double.compare(f2.getImportance(), f1.getImportance()))
-                            .limit(isIdentity ? 5 : 2)
-                            .toList();
-                    relevantFacts.addAll(coreFacts);
-                    eventBuilder.fallbackActivated(true);
-                }
-                result.addAll(relevantFacts);
-            }
-        });
-        return result;
-    }
-
-    private List<String> performVectorRetrieval(String userId, String message,
-                                               com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder) {
-        List<String> result = new ArrayList<>();
-        try {
-            systemLogService.debug(String.format("向量检索: 开始查询 '%s'", message), "MEMORY");
-            dev.langchain4j.data.embedding.Embedding queryEmbedding = embeddingModel.embed(message).content();
-
-            EmbeddingSearchRequest searchRequest = EmbeddingSearchRequest.builder()
-                    .queryEmbedding(queryEmbedding)
-                    .filter(MetadataFilterBuilder.metadataKey("user_id").isEqualTo(userId))
-                    .maxResults(5)
-                    .minScore(0.6)
-                    .build();
-            EmbeddingSearchResult<TextSegment> searchResult = embeddingStore.search(searchRequest);
-            List<EmbeddingMatch<TextSegment>> matches = searchResult.matches();
-
-            List<com.lingshu.ai.core.dto.MemoryRetrievalEvent.SemanticMatch> semanticMatches = new ArrayList<>();
-            List<Long> rankedIds = new ArrayList<>();
-
-            for (EmbeddingMatch<TextSegment> match : matches) {
-                String displayText = match.embedded().metadata().getString("content");
-                if (displayText == null || displayText.isBlank()) {
-                    String matchText = match.embedded().text();
-                    displayText = matchText;
-                    if (matchText.contains("|||")) {
-                        String[] parts = matchText.split("\\|\\|\\|");
-                        if (parts.length >= 2) {
-                            displayText = parts[parts.length - 1].replace("提取事实陈述：", "").trim();
-                        }
-                    }
-                }
-                result.add(displayText);
-
-                Long factId = null;
-                if (match.embedded().metadata() != null && match.embedded().metadata().getString("fact_id") != null) {
-                    try {
-                        factId = Long.parseLong(match.embedded().metadata().getString("fact_id"));
-                        rankedIds.add(factId);
-                    } catch (Exception ignored) {}
-                }
-                semanticMatches.add(new com.lingshu.ai.core.dto.MemoryRetrievalEvent.SemanticMatch(factId, match.score(), displayText));
-            }
-            eventBuilder.semanticMatches(semanticMatches);
-            eventBuilder.finalRankedIds(rankedIds);
-        } catch (Exception e) {
-            log.warn("Vector retrieval failed: {}", e.getMessage());
-            systemLogService.error("向量检索失败: " + e.getMessage(), "MEMORY");
-        }
-        return result;
-    }
 
     private List<GraphRetrievalHit> performGraphRetrievalV2(String userId, String message, List<String> entities,
                                                             com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder) {
@@ -1246,7 +1162,11 @@ public class MemoryServiceImpl implements MemoryService {
         List<FactContext> factContexts = new ArrayList<>();
 
         List<UserNode> users = new ArrayList<>();
-        userRepository.findAll().forEach(users::add);
+        if (userId != null && !userId.isBlank()) {
+            userRepository.findByName(userId.trim()).ifPresent(users::add);
+        } else {
+            userRepository.findAll().forEach(users::add);
+        }
 
         Map<String, TopicAggregate> topics = new LinkedHashMap<>();
         LocalDateTime now = LocalDateTime.now();
@@ -2566,6 +2486,7 @@ public class MemoryServiceImpl implements MemoryService {
         });
     }
     @Override
+    @Async("taskExecutor")
     public void rebuildAllEmbeddings() {
         log.info("Starting global embedding rebuild process for migration...");
         systemLogService.info("开始全局向量索引重建流程 (元数据补全)...", "MEMORY");

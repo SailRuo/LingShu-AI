@@ -2,6 +2,7 @@ package com.lingshu.ai.core.tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.lingshu.ai.core.service.ToolResultSummarizer;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.Content;
@@ -33,7 +34,8 @@ import java.util.function.Supplier;
 public class SafeMcpToolProvider implements ToolProvider {
 
     private static final Logger log = LoggerFactory.getLogger(SafeMcpToolProvider.class);
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     private final List<RawMcpClient> mcpClients;
     private final ToolResultSummarizer summarizer;

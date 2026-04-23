@@ -81,6 +81,7 @@ services:
   # ==================== 应用服务 ====================
   app:
     image: lingshu-ai:latest
+    container_name: lingshu-app
     build:
       context: .
       dockerfile: Dockerfile

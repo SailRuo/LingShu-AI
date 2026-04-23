@@ -19,6 +19,7 @@ import {
   Zap 
 } from 'lucide-vue-next'
 import { getFullUrl } from '@/utils/request'
+import { getClientUserId } from '@/stores/chatSessionStore'
 
 const message = useMessage()
 
@@ -58,7 +59,15 @@ const statusOptions = [
 const loadData = async () => {
   isLoading.value = true
   try {
-    const res = await fetch(getFullUrl(`/api/memory/governance/list?page=${pagination.value.page - 1}&size=${pagination.value.pageSize}&status=${filterStatus.value}&t=${Date.now()}`))
+    const userId = getClientUserId()
+    const params = new URLSearchParams({
+      page: String(pagination.value.page - 1),
+      size: String(pagination.value.pageSize),
+      status: filterStatus.value,
+      userId,
+      t: String(Date.now())
+    })
+    const res = await fetch(getFullUrl(`/api/memory/governance/list?${params.toString()}`))
     if (!res.ok) throw new Error('网络请求失败')
     const data = await res.json()
     tableData.value = data.content || []
