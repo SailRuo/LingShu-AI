@@ -39,15 +39,15 @@ function getThemePreviewColors(key: ThemeKey) {
     }
   } else if (key === 'cyberPurple') {
     return {
-      bg: '#1e1b4b', // 深紫背景
-      surface: '#312e81', // 靛蓝表面
-      primary: '#c084fc', // 亮紫色
-      primaryLight: '#e9d5ff', // 浅紫色
-      text: '#faf5ff',
-      outline: 'rgba(192, 132, 252, 0.4)',
-      glow: 'rgba(192, 132, 252, 0.6)',
-      bubbleAi: 'rgba(192, 132, 252, 0.25)', // AI 气泡
-      bubbleUser: '#a855f7', // 用户气泡 - 实色紫
+      bg: '#000000', // 纯黑宇宙背景
+      surface: '#0a0a14', // 深空表面
+      primary: '#e2e8f0', // 银白色主色
+      primaryLight: 'rgba(226, 232, 240, 0.3)',
+      text: '#f1f5f9',
+      outline: 'rgba(226, 232, 240, 0.25)',
+      glow: 'rgba(226, 232, 240, 0.4)',
+      bubbleAi: 'rgba(226, 232, 240, 0.1)', // AI 气泡
+      bubbleUser: '#1e1e32', // 用户气泡 - 深空灰
       bubbleUserText: '#ffffff'
     }
   } else if (key === 'midnightBlue') {

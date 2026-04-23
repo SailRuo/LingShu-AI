@@ -166,7 +166,17 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         ));
 
         try {
-            chatService.streamChat(message, images, chatSessionId, agentId, userId, model, apiKey, baseUrl, enableThinking, new ChatService.ToolEventListener() {
+            chatService.streamChat(ChatService.ChatStreamRequest.builder()
+                    .message(message)
+                    .images(images)
+                    .sessionId(chatSessionId)
+                    .agentId(agentId)
+                    .userId(userId)
+                    .model(model)
+                    .apiKey(apiKey)
+                    .baseUrl(baseUrl)
+                    .enableThinking(enableThinking)
+                    .toolEventListener(new ChatService.ToolEventListener() {
                         @Override
                         public void onToolStart(String toolCallId, String toolName, String arguments) {
                             try {
@@ -188,6 +198,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                             }
                         }
                     })
+                    .build())
                     .doOnNext(chunk -> {
                         try {
                             if (chunk.startsWith("\u0001REASONING\u0001") && chunk.endsWith("\u0001/REASONING\u0001")) {

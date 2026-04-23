@@ -25,6 +25,7 @@ import dev.langchain4j.service.tool.ToolProvider;
 import dev.langchain4j.skills.FileSystemSkill;
 import dev.langchain4j.skills.FileSystemSkillLoader;
 import dev.langchain4j.skills.Skills;
+import jakarta.annotation.PreDestroy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -39,6 +40,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map; // 添加此行
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors; // 添加此行
 import lombok.RequiredArgsConstructor;
@@ -70,6 +72,9 @@ public class ChatServiceImpl implements ChatService {
 
     @Value("${lingshu.ollama.base-url:http://localhost:11434}")
     private String baseUrl;
+    private final ExecutorService customModelHttpExecutor = Executors.newFixedThreadPool(
+            Math.max(4, Runtime.getRuntime().availableProcessors())
+    );
 
 
 
@@ -108,55 +113,141 @@ public class ChatServiceImpl implements ChatService {
 
     @Override
     public Flux<String> streamChat(String message) {
-        return streamChat(message, null, "User", null, null, null);
+        return streamChat(ChatService.ChatStreamRequest.builder()
+                .message(message)
+                .userId("User")
+                .build());
     }
 
     @Override
     public Flux<String> streamChat(String message, Long agentId) {
-        return streamChat(message, agentId, "User", null, null, null);
+        return streamChat(ChatService.ChatStreamRequest.builder()
+                .message(message)
+                .agentId(agentId)
+                .userId("User")
+                .build());
     }
 
     @Override
     public Flux<String> streamChat(String message, Long agentId, String userId) {
-        return streamChat(message, agentId, userId, null, null, null);
+        return streamChat(ChatService.ChatStreamRequest.builder()
+                .message(message)
+                .agentId(agentId)
+                .userId(userId)
+                .build());
     }
 
     @Override
     public Flux<String> streamChat(String message, String model, String apiKey, String baseUrl) {
-        return streamChat(message, null, "User", model, apiKey, baseUrl, null);
+        return streamChat(ChatService.ChatStreamRequest.builder()
+                .message(message)
+                .userId("User")
+                .model(model)
+                .apiKey(apiKey)
+                .baseUrl(baseUrl)
+                .build());
     }
 
     @Override
     public Flux<String> streamChat(String message, Long agentId, String model, String apiKey, String baseUrl) {
-        return streamChat(message, agentId, "User", model, apiKey, baseUrl, null);
+        return streamChat(ChatService.ChatStreamRequest.builder()
+                .message(message)
+                .agentId(agentId)
+                .userId("User")
+                .model(model)
+                .apiKey(apiKey)
+                .baseUrl(baseUrl)
+                .build());
     }
 
     @Override
     public Flux<String> streamChat(String message, Long agentId, String userId, String model, String apiKey, String baseUrl) {
-        return streamChat(message, agentId, userId, model, apiKey, baseUrl, null);
+        return streamChat(ChatService.ChatStreamRequest.builder()
+                .message(message)
+                .agentId(agentId)
+                .userId(userId)
+                .model(model)
+                .apiKey(apiKey)
+                .baseUrl(baseUrl)
+                .build());
     }
 
     @Override
     public Flux<String> streamChat(String message, Long agentId, String userId, String model, String apiKey, String baseUrl,
                                    ToolEventListener toolEventListener) {
-        return streamChat(message, null, agentId, userId, model, apiKey, baseUrl, false, toolEventListener);
+        return streamChat(ChatService.ChatStreamRequest.builder()
+                .message(message)
+                .agentId(agentId)
+                .userId(userId)
+                .model(model)
+                .apiKey(apiKey)
+                .baseUrl(baseUrl)
+                .enableThinking(false)
+                .toolEventListener(toolEventListener)
+                .build());
     }
 
     @Override
     public Flux<String> streamChat(String message, Long agentId, String userId, String model, String apiKey, String baseUrl,
                                    Boolean enableThinking, ToolEventListener toolEventListener) {
-        return streamChat(message, null, null, agentId, userId, model, apiKey, baseUrl, enableThinking, toolEventListener);
+        return streamChat(ChatService.ChatStreamRequest.builder()
+                .message(message)
+                .agentId(agentId)
+                .userId(userId)
+                .model(model)
+                .apiKey(apiKey)
+                .baseUrl(baseUrl)
+                .enableThinking(enableThinking)
+                .toolEventListener(toolEventListener)
+                .build());
     }
 
     @Override
     public Flux<String> streamChat(String message, List<String> images, Long agentId, String userId, String model, String apiKey, String baseUrl,
                                    Boolean enableThinking, ToolEventListener toolEventListener) {
-        return streamChat(message, images, null, agentId, userId, model, apiKey, baseUrl, enableThinking, toolEventListener);
+        return streamChat(ChatService.ChatStreamRequest.builder()
+                .message(message)
+                .images(images)
+                .agentId(agentId)
+                .userId(userId)
+                .model(model)
+                .apiKey(apiKey)
+                .baseUrl(baseUrl)
+                .enableThinking(enableThinking)
+                .toolEventListener(toolEventListener)
+                .build());
     }
 
     @Override
     public Flux<String> streamChat(String message, List<String> images, Long sessionId, Long agentId, String userId, String model, String apiKey, String baseUrl,
                                    Boolean enableThinking, ToolEventListener toolEventListener) {
+        return streamChat(ChatService.ChatStreamRequest.builder()
+                .message(message)
+                .images(images)
+                .sessionId(sessionId)
+                .agentId(agentId)
+                .userId(userId)
+                .model(model)
+                .apiKey(apiKey)
+                .baseUrl(baseUrl)
+                .enableThinking(enableThinking)
+                .toolEventListener(toolEventListener)
+                .build());
+    }
+
+    @Override
+    public Flux<String> streamChat(ChatService.ChatStreamRequest chatRequest) {
+        String userId = chatRequest != null ? chatRequest.effectiveUserId() : "User";
+        List<String> images = chatRequest != null ? chatRequest.images() : null;
+        Long sessionId = chatRequest != null ? chatRequest.sessionId() : null;
+        Long agentId = chatRequest != null ? chatRequest.agentId() : null;
+        String model = chatRequest != null ? chatRequest.model() : null;
+        String apiKey = chatRequest != null ? chatRequest.apiKey() : null;
+        String baseUrl = chatRequest != null ? chatRequest.baseUrl() : null;
+        Boolean enableThinking = chatRequest != null ? chatRequest.enableThinking() : null;
+        ToolEventListener toolEventListener = chatRequest != null ? chatRequest.toolEventListener() : null;
+        String message = chatRequest != null ? chatRequest.message() : null;
+
         ChatSession session = getOrCreateSession(userId, sessionId);
         chatSessionService.touchSession(session.getId());
         AgentConfig agent = getAgent(agentId);
@@ -206,9 +297,9 @@ public class ChatServiceImpl implements ChatService {
             JdkHttpClientBuilder httpClientBuilder =
                     dev.langchain4j.http.client.jdk.JdkHttpClient.builder()
                             .httpClientBuilder(java.net.http.HttpClient.newBuilder()
-                                     .version(java.net.http.HttpClient.Version.HTTP_1_1)
+                                    .version(java.net.http.HttpClient.Version.HTTP_1_1)
                                     .connectTimeout(Duration.ofSeconds(30))
-                                    .executor(Executors.newCachedThreadPool()));
+                                    .executor(customModelHttpExecutor));
 
             if ("ollama".equalsIgnoreCase(baseUrl) || baseUrl.contains("11434")) {
                 log.info("使用 Ollama 模式, baseUrl={}, model={}", baseUrl, model);
@@ -679,22 +770,23 @@ public class ChatServiceImpl implements ChatService {
 
     @Override
     public void clearHistory(Long sessionId) {
-        Long idToClear = sessionId;
-        if (idToClear == null) {
-            ChatSession session = sessionRepository.findAll().stream().findFirst().orElse(null);
-            if (session == null) {
-                return;
-            }
-            idToClear = session.getId();
+        if (sessionId == null) {
+            systemLogService.warn("clearHistory 被拒绝：sessionId 为空", "CHAT");
+            throw new IllegalArgumentException("sessionId must not be null");
         }
 
         // 1. 从数据库物理删除记录
-        turnTimelineService.clearTurnHistory(idToClear);
+        turnTimelineService.clearTurnHistory(sessionId);
 
         // 2. 清除 LangChain4j 的 ChatMemory 缓存
-        chatMemoryProvider.get(idToClear).clear();
+        chatMemoryProvider.get(sessionId).clear();
 
-        systemLogService.info("已清空会话记录 sessionId=" + idToClear, "CHAT");
+        systemLogService.info("已清空会话记录 sessionId=" + sessionId, "CHAT");
+    }
+
+    @PreDestroy
+    public void shutdownResources() {
+        customModelHttpExecutor.shutdown();
     }
 
     private ToolErrorHandlerResult handleToolArgumentsError(Throwable error, ToolErrorContext errorContext) {

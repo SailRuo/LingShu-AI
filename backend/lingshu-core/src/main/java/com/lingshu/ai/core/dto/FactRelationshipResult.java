@@ -4,6 +4,7 @@ public class FactRelationshipResult {
     private String type;
     private double confidence;
     private String reasoning;
+    private Long matchedFactId;
 
     public FactRelationshipResult() {
     }
@@ -12,6 +13,13 @@ public class FactRelationshipResult {
         this.type = type;
         this.confidence = confidence;
         this.reasoning = reasoning;
+    }
+
+    public FactRelationshipResult(String type, double confidence, String reasoning, Long matchedFactId) {
+        this.type = type;
+        this.confidence = confidence;
+        this.reasoning = reasoning;
+        this.matchedFactId = matchedFactId;
     }
 
     public String getType() {
@@ -36,5 +44,13 @@ public class FactRelationshipResult {
 
     public void setReasoning(String reasoning) {
         this.reasoning = reasoning;
+    }
+
+    public Long getMatchedFactId() {
+        return matchedFactId;
+    }
+
+    public void setMatchedFactId(Long matchedFactId) {
+        this.matchedFactId = matchedFactId;
     }
 }

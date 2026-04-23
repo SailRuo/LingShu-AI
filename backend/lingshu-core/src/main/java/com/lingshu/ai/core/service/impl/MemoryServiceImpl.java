@@ -28,6 +28,7 @@ import java.time.OffsetDateTime;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -57,6 +58,7 @@ public class MemoryServiceImpl implements MemoryService {
     private static final long SEMANTIC_CLASSIFY_TIMEOUT_SECONDS = 8;
     private static final long HISTORY_EMBED_TIMEOUT_SECONDS = 6;
     private static final long HISTORY_SEARCH_TIMEOUT_SECONDS = 4;
+    private static final int RECENT_RETRIEVAL_EVENT_LIMIT = 50;
     private static final java.util.Set<String> STOP_WORDS = java.util.Set.of(
             "的", "了", "是", "在", "我", "你", "他", "她", "它", "们",
             "这", "那", "有", "和", "与", "或", "但", "如果", "因为",
@@ -80,8 +82,9 @@ public class MemoryServiceImpl implements MemoryService {
     private com.lingshu.ai.core.service.FactRelationshipEvaluator factRelationshipEvaluator;
     private EmotionAwareFactExtractor emotionAwareFactExtractor;
     // Removed entityExtractor
-    private volatile Map<String, Object> lastMaintenanceSummary = new LinkedHashMap<>();
-    private final java.util.Queue<com.lingshu.ai.core.dto.MemoryRetrievalEvent> recentRetrievalEvents = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    private volatile Map<String, Object> lastMaintenanceSummary = Collections.emptyMap();
+    private final Object retrievalEventsLock = new Object();
+    private final java.util.Deque<com.lingshu.ai.core.dto.MemoryRetrievalEvent> recentRetrievalEvents = new java.util.ArrayDeque<>();
 
     public MemoryServiceImpl(UserRepository userRepository,
                              dev.langchain4j.model.embedding.EmbeddingModel embeddingModel,
@@ -301,7 +304,7 @@ public class MemoryServiceImpl implements MemoryService {
                     confidence, semanticProfile.source, now, originalMessage, emotion, extractedFact);
             factNode.setContradictsFactId(bestMatch.getId());
             factNode.setStatus("conflicted");
-            systemLogService.info("妫€娴嬪埌鍐茬獊璁板繂锛屽垱寤哄啿绐佺増鏈? " + shortenLabel(factText, 24), "MEMORY");
+            systemLogService.info("检测到冲突记忆，创建冲突版本: " + shortenLabel(factText, 24), "MEMORY");
             return saveNewFact(user, factNode);
         }
 
@@ -317,7 +320,7 @@ public class MemoryServiceImpl implements MemoryService {
             factNode.setSupersedesFactId(bestMatch.getId());
             factNode.setVersion((bestMatch.getVersion() == null ? 1 : bestMatch.getVersion()) + 1);
             factNode.setStatus("active");
-            systemLogService.info("妫€娴嬪埌鐩镐技璁板繂锛屽垱寤烘浛浠ｇ増鏈? " + shortenLabel(factText, 24), "MEMORY");
+            systemLogService.info("检测到相似记忆，创建替代版本: " + shortenLabel(factText, 24), "MEMORY");
             return saveNewFact(user, factNode);
         }
 
@@ -364,8 +367,8 @@ public class MemoryServiceImpl implements MemoryService {
                     .map(FactNode::getId)
                     .collect(Collectors.toList());
 
-            for (dev.langchain4j.store.embedding.EmbeddingMatch<dev.langchain4j.data.segment.TextSegment> match : searchResult
-                    .matches()) {
+            List<FactNode> candidates = new java.util.ArrayList<>();
+            for (dev.langchain4j.store.embedding.EmbeddingMatch<dev.langchain4j.data.segment.TextSegment> match : searchResult.matches()) {
                 String factIdStr = match.embedded().metadata().getString("fact_id");
                 if (factIdStr == null) {
                     continue;
@@ -380,24 +383,41 @@ public class MemoryServiceImpl implements MemoryService {
                         .filter(f -> f.getId().equals(factId))
                         .findFirst()
                         .orElse(null);
-                if (existingFact == null) {
-                    continue;
+                if (existingFact != null) {
+                    candidates.add(existingFact);
                 }
+            }
 
-                if (factRelationshipEvaluator != null) {
-                    String modelName = dynamicMemoryModel.getModelName();
-                    systemLogService.llmStart("fact-relationship-evaluator", modelName, "FACT");
-                    com.lingshu.ai.core.dto.FactRelationshipResult relResult = factRelationshipEvaluator
-                            .evaluate(existingFact.getContent() == null ? "" : existingFact.getContent(), factText);
-                    systemLogService.llmEnd(0, "FACT");
+            // 先按字面相似度过滤，保留最相关的 3 条
+            final String finalNormalized = normalized;
+            List<FactNode> filteredCandidates = candidates.stream()
+                    .filter(c -> lexicalSimilarity(finalNormalized, normalizedFactContent(c)) > 0.15)
+                    .sorted((a, b) -> Double.compare(
+                            lexicalSimilarity(finalNormalized, normalizedFactContent(b)),
+                            lexicalSimilarity(finalNormalized, normalizedFactContent(a))))
+                    .limit(3)
+                    .collect(Collectors.toList());
 
-                    if (relResult != null && !"NONE".equals(relResult.getType())) {
-                        bestMatch = existingFact;
-                        relationType = relResult.getType();
-                        if ("SUPERSEDES".equals(relationType) || "CONTRADICTS".equals(relationType)) {
-                            break;
-                        }
-                    }
+            if (!filteredCandidates.isEmpty() && factRelationshipEvaluator != null) {
+                String modelName = dynamicMemoryModel.getModelName();
+                systemLogService.llmStart("fact-relationship-evaluator", modelName, "FACT");
+                
+                StringBuilder sb = new StringBuilder();
+                for (FactNode c : filteredCandidates) {
+                    sb.append(c.getId()).append(": ").append(c.getContent()).append("\n");
+                }
+                
+                com.lingshu.ai.core.dto.FactRelationshipResult relResult = factRelationshipEvaluator
+                        .evaluateBatch(sb.toString(), factText);
+                systemLogService.llmEnd(0, "FACT");
+
+                if (relResult != null && !"NONE".equals(relResult.getType()) && relResult.getMatchedFactId() != null) {
+                    Long matchedId = relResult.getMatchedFactId();
+                    bestMatch = filteredCandidates.stream()
+                            .filter(c -> c.getId().equals(matchedId))
+                            .findFirst()
+                            .orElse(null);
+                    relationType = relResult.getType();
                 }
             }
         } catch (Exception e) {
@@ -856,11 +876,12 @@ public class MemoryServiceImpl implements MemoryService {
         }
 
         CompletableFuture.runAsync(() -> {
+            List<com.lingshu.ai.core.dto.MemoryRetrievalEvent> eventSnapshot = snapshotRecentRetrievalEvents();
             for (int i = 0; i < adoptedFactIds.size(); i++) {
                 for (int j = i + 1; j < adoptedFactIds.size(); j++) {
                     Long sourceId = adoptedFactIds.get(i);
                     Long targetId = adoptedFactIds.get(j);
-                    long cooccurrenceCount = recentRetrievalEvents.stream()
+                    long cooccurrenceCount = eventSnapshot.stream()
                             .filter(retrievalEvent -> containsAdoptedFacts(retrievalEvent, sourceId, targetId))
                             .count();
                     if (cooccurrenceCount >= 2) {
@@ -868,9 +889,11 @@ public class MemoryServiceImpl implements MemoryService {
                     }
                 }
             }
-        }, taskExecutor).exceptionally(ex -> {
-            log.warn("Failed to update related facts from retrieval event: {}", ex.getMessage());
-            return null;
+        }, taskExecutor).whenComplete((unused, ex) -> {
+            if (ex != null) {
+                log.error("Failed to update related facts from retrieval event", ex);
+                systemLogService.error("更新事实关联失败: " + ex.getMessage(), "MEMORY");
+            }
         });
     }
 
@@ -1307,6 +1330,7 @@ public class MemoryServiceImpl implements MemoryService {
                 fact.getClusterKey() != null && !fact.getClusterKey().isBlank() ? fact.getClusterKey() : topicKey);
         node.put("orbitLevel", orbitLevel > 0 ? orbitLevel : calculateOrbitLevel(fact.getImportance(), activityScore));
         node.put("createdAt", formatDateTime(fact.getObservedAt()));
+        node.put("observedAt", formatDateTime(fact.getObservedAt()));
         node.put("lastActivatedAt",
                 formatDateTime(fact.getLastActivatedAt() != null ? fact.getLastActivatedAt() : fact.getObservedAt()));
         node.put("status", fact.getStatus() != null && !fact.getStatus().isBlank() ? fact.getStatus()
@@ -1314,6 +1338,8 @@ public class MemoryServiceImpl implements MemoryService {
         node.put("version", fact.getVersion());
         node.put("supersedesFactId", fact.getSupersedesFactId());
         node.put("contradictsFactId", fact.getContradictsFactId());
+        node.put("classificationSource", fact.getClassificationSource());
+        node.put("originalMessage", fact.getOriginalMessage());
         return node;
     }
 
@@ -1548,145 +1574,6 @@ public class MemoryServiceImpl implements MemoryService {
         boolean rightPositive = containsAny(right, "喜欢", "想要", "会", "正在", "有", "是");
         boolean leftNegative = containsAny(left, "不喜欢", "不想", "不会", "没有", "不是", "停止");
         return (leftPositive && rightNegative) || (rightPositive && leftNegative);
-    }
-
-    private FactWriteResult persistFactCandidate(UserNode user, String factText, String originalMessage,
-                                                 com.lingshu.ai.core.dto.EmotionAnalysis emotion) {
-        LocalDateTime now = LocalDateTime.now();
-        String normalized = normalizeSemanticText(factText);
-        SemanticProfile semanticProfile = classifyFactSemantics(factText, user);
-        String clusterKey = semanticProfile.topicKey;
-        String subType = semanticProfile.subType;
-
-        FactNode exactMatch = findExactFact(user, normalized);
-        if (exactMatch != null) {
-            refreshExistingFact(exactMatch, now);
-            factRepository.save(exactMatch);
-            synchronizeFactRelations(buildFactContextsForUser(user));
-            systemLogService.debug("事实命中精确去重，刷新活跃度: " + shortenLabel(factText, 24), "MEMORY");
-            return new FactWriteResult(user, exactMatch, false);
-        }
-
-        FactNode bestMatch = null;
-        String relationType = "NONE";
-
-        try {
-            systemLogService.embeddingStart(factText.length(), "MEMORY");
-            CompletableFuture<dev.langchain4j.data.embedding.Embedding> embedFuture = CompletableFuture.supplyAsync(
-                    () -> embeddingModel.embed(factText).content());
-            dev.langchain4j.data.embedding.Embedding queryEmbedding = embedFuture.get(HISTORY_EMBED_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            systemLogService.embeddingEnd("MEMORY");
-
-            systemLogService.dbStart("pgvector_query", "embeddingStore", "MEMORY");
-            dev.langchain4j.store.embedding.EmbeddingSearchRequest searchRequest = dev.langchain4j.store.embedding.EmbeddingSearchRequest
-                    .builder()
-                    .queryEmbedding(queryEmbedding)
-                    .maxResults(5)
-                    .minScore(0.5)
-                    .build();
-            CompletableFuture<dev.langchain4j.store.embedding.EmbeddingSearchResult<dev.langchain4j.data.segment.TextSegment>> searchFuture =
-                    CompletableFuture.supplyAsync(() -> embeddingStore.search(searchRequest));
-            dev.langchain4j.store.embedding.EmbeddingSearchResult<dev.langchain4j.data.segment.TextSegment> searchResult =
-                    searchFuture.get(HISTORY_SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            systemLogService.dbEnd("pgvector_query", "MEMORY");
-
-            List<Long> userFactIds = user.getFacts().stream()
-                    .filter(f -> f.getId() != null)
-                    .map(FactNode::getId)
-                    .collect(Collectors.toList());
-
-            for (dev.langchain4j.store.embedding.EmbeddingMatch<dev.langchain4j.data.segment.TextSegment> match : searchResult
-                    .matches()) {
-                String factIdStr = match.embedded().metadata().getString("fact_id");
-                if (factIdStr == null)
-                    continue;
-                Long factId = Long.parseLong(factIdStr);
-                if (!userFactIds.contains(factId))
-                    continue;
-
-                FactNode existingFact = user.getFacts().stream().filter(f -> f.getId().equals(factId)).findFirst()
-                        .orElse(null);
-                if (existingFact == null)
-                    continue;
-
-                if (factRelationshipEvaluator != null) {
-                    String modelName = dynamicMemoryModel.getModelName();
-                    systemLogService.llmStart("fact-relationship-evaluator", modelName, "FACT");
-                    com.lingshu.ai.core.dto.FactRelationshipResult relResult = factRelationshipEvaluator
-                            .evaluate(existingFact.getContent() == null ? "" : existingFact.getContent(), factText);
-                    systemLogService.llmEnd(0, "FACT");
-
-                    if (relResult != null && !"NONE".equals(relResult.getType())) {
-                        bestMatch = existingFact;
-                        relationType = relResult.getType();
-                        if ("SUPERSEDES".equals(relationType) || "CONTRADICTS".equals(relationType)) {
-                            break;
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.warn("Vector search or LLM evaluation failed, falling back to rule-based: {}", e.getMessage());
-            double bestSimilarity = 0.0;
-            boolean contradiction = false;
-            for (FactNode existing : user.getFacts()) {
-                double similarity = lexicalSimilarity(normalized,
-                        normalizeSemanticText(existing.getContent() == null ? "" : existing.getContent()));
-                boolean candidateContradiction = isContradictory(
-                        existing.getContent() == null ? "" : existing.getContent(), factText);
-                if (candidateContradiction && similarity >= 0.22) {
-                    bestMatch = existing;
-                    bestSimilarity = similarity;
-                    contradiction = true;
-                    relationType = "CONTRADICTS";
-                    break;
-                }
-                if (similarity > bestSimilarity) {
-                    bestSimilarity = similarity;
-                    bestMatch = existing;
-                }
-            }
-            if (contradiction) {
-                relationType = "CONTRADICTS";
-            } else if (bestMatch != null && bestSimilarity >= 0.68) {
-                relationType = "SUPERSEDES";
-            } else if (bestMatch != null && bestSimilarity >= 0.38) {
-                relationType = "RELATED_TO";
-            } else {
-                bestMatch = null;
-            }
-        }
-
-        if (bestMatch != null && "CONTRADICTS".equals(relationType)) {
-            bestMatch.setStatus("conflicted");
-            bestMatch.setLastActivatedAt(now);
-            bestMatch.setActivityScore(calculateActivityScore(now, now));
-            factRepository.save(bestMatch);
-            FactNode factNode = buildNewFactNode(factText, normalized, clusterKey, subType, semanticProfile.confidence,
-                    semanticProfile.source, now, originalMessage, emotion);
-            factNode.setContradictsFactId(bestMatch.getId());
-            factNode.setStatus("conflicted");
-            systemLogService.info("检测到冲突记忆，创建冲突版本: " + shortenLabel(factText, 24), "MEMORY");
-            return saveNewFact(user, factNode);
-        }
-
-        if (bestMatch != null && "SUPERSEDES".equals(relationType)) {
-            bestMatch.setStatus("superseded");
-            bestMatch.setLastActivatedAt(now);
-            bestMatch.setActivityScore(calculateActivityScore(now, now));
-            factRepository.save(bestMatch);
-            FactNode factNode = buildNewFactNode(factText, normalized, clusterKey, subType, semanticProfile.confidence,
-                    semanticProfile.source, now, originalMessage, emotion);
-            factNode.setSupersedesFactId(bestMatch.getId());
-            factNode.setVersion((bestMatch.getVersion() == null ? 1 : bestMatch.getVersion()) + 1);
-            factNode.setStatus("active");
-            systemLogService.info("检测到相似记忆，创建替代版本: " + shortenLabel(factText, 24), "MEMORY");
-            return saveNewFact(user, factNode);
-        }
-
-        FactNode factNode = buildNewFactNode(factText, normalized, clusterKey, subType, semanticProfile.confidence,
-                semanticProfile.source, now, originalMessage, emotion);
-        return saveNewFact(user, factNode);
     }
 
     private FactWriteResult saveNewFact(UserNode user, FactNode factNode) {
@@ -2389,7 +2276,7 @@ public class MemoryServiceImpl implements MemoryService {
         summary.put("cooled", cooled);
         summary.put("reactivated", reactivated);
         summary.put("generatedAt", now.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
-        lastMaintenanceSummary = summary;
+        lastMaintenanceSummary = Map.copyOf(summary);
         systemLogService.info(String.format("记忆维护完成: processed=%d archived=%d cooled=%d reactivated=%d", processed,
                 archived, cooled, reactivated), "MEMORY");
         return summary;
@@ -2397,16 +2284,17 @@ public class MemoryServiceImpl implements MemoryService {
 
     @Override
     public Object getMemoryMaintenanceSummary() {
-        if (lastMaintenanceSummary.isEmpty()) {
-            Map<String, Object> summary = new LinkedHashMap<>();
-            summary.put("processed", 0);
-            summary.put("archived", 0);
-            summary.put("cooled", 0);
-            summary.put("reactivated", 0);
-            summary.put("generatedAt", null);
-            return summary;
+        Map<String, Object> summary = lastMaintenanceSummary;
+        if (summary.isEmpty()) {
+            Map<String, Object> emptySummary = new LinkedHashMap<>();
+            emptySummary.put("processed", 0);
+            emptySummary.put("archived", 0);
+            emptySummary.put("cooled", 0);
+            emptySummary.put("reactivated", 0);
+            emptySummary.put("generatedAt", null);
+            return emptySummary;
         }
-        return lastMaintenanceSummary;
+        return new LinkedHashMap<>(summary);
     }
 
     @Override
@@ -2423,20 +2311,32 @@ public class MemoryServiceImpl implements MemoryService {
     }
 
     private void recordRetrievalEvent(com.lingshu.ai.core.dto.MemoryRetrievalEvent event) {
-        recentRetrievalEvents.offer(event);
-        while (recentRetrievalEvents.size() > 50) {
-            recentRetrievalEvents.poll();
+        if (event == null) {
+            return;
+        }
+        synchronized (retrievalEventsLock) {
+            recentRetrievalEvents.addLast(event);
+            while (recentRetrievalEvents.size() > RECENT_RETRIEVAL_EVENT_LIMIT) {
+                recentRetrievalEvents.pollFirst();
+            }
         }
     }
 
     @Override
     public java.util.List<com.lingshu.ai.core.dto.MemoryRetrievalEvent> getRecentRetrievalEvents(String userId) {
+        List<com.lingshu.ai.core.dto.MemoryRetrievalEvent> snapshot = snapshotRecentRetrievalEvents();
         if (userId == null || userId.isBlank()) {
-            return new ArrayList<>(recentRetrievalEvents);
+            return snapshot;
         }
-        return recentRetrievalEvents.stream()
+        return snapshot.stream()
                 .filter(e -> userId.equals(e.getUserId()))
                 .collect(Collectors.toList());
+    }
+
+    private List<com.lingshu.ai.core.dto.MemoryRetrievalEvent> snapshotRecentRetrievalEvents() {
+        synchronized (retrievalEventsLock) {
+            return new ArrayList<>(recentRetrievalEvents);
+        }
     }
 
     @Override

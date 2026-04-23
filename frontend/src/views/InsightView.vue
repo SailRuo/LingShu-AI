@@ -16,7 +16,7 @@ type TimeFilter = 'all' | '24h' | '7d' | '30d'
 type TypeFilter = 'all' | NodeType
 type NodeStatus = 'core' | 'active' | 'stable' | 'cool'
 
-interface GraphNode { id: string; label: string; shortLabel?: string; type: NodeType; subType?: string; importance?: number; confidence?: number; activityScore?: number; cluster?: string; orbitLevel?: number; createdAt?: string | null; lastActivatedAt?: string | null; status?: NodeStatus | string; factCount?: number; version?: number; supersedesFactId?: number | null; contradictsFactId?: number | null }
+interface GraphNode { id: string; label: string; shortLabel?: string; type: NodeType; subType?: string; importance?: number; confidence?: number; activityScore?: number; cluster?: string; orbitLevel?: number; createdAt?: string | null; observedAt?: string | null; lastActivatedAt?: string | null; status?: NodeStatus | string; factCount?: number; version?: number; supersedesFactId?: number | null; contradictsFactId?: number | null; classificationSource?: string | null; originalMessage?: string | null }
 interface GraphLink { source: string; target: string; type: string; weight?: number }
 interface GraphPayload { nodes: GraphNode[]; links: GraphLink[]; stats: { density: number; nodes: number; edges: number; topics: number; activeFacts: number; latency: number } }
 
@@ -820,6 +820,20 @@ function formatDateTime(value?: string | null) { if (!value) return '未知'; co
                 <div class="mini-card"><span>版本号</span><strong>{{ selectedNode.version ?? 1 }}</strong></div>
                 <div class="mini-card"><span>关系状态</span><strong>{{ selectedNode.supersedesFactId ? '替代旧记忆' : selectedNode.contradictsFactId ? '存在冲突' : '稳定事实' }}</strong></div>
               </div>
+              <div v-if="selectedNode.type === 'Fact'" class="meta-list">
+                <div class="meta-row">
+                  <span class="meta-key">记录时间</span>
+                  <span class="meta-value">{{ formatDateTime(selectedNode.observedAt || selectedNode.createdAt) }}</span>
+                </div>
+                <div class="meta-row">
+                  <span class="meta-key">分类来源</span>
+                  <span class="meta-value">{{ selectedNode.classificationSource || 'unknown' }}</span>
+                </div>
+                <div class="meta-row multiline">
+                  <span class="meta-key">原始消息</span>
+                  <span class="meta-value">{{ selectedNode.originalMessage || '暂无' }}</span>
+                </div>
+              </div>
               <div class="time-card"><Clock3 :size="18" /><div><div class="time-main">{{ formatTime(selectedNode.lastActivatedAt || selectedNode.createdAt) }}</div><div class="time-sub">{{ formatDateTime(selectedNode.lastActivatedAt || selectedNode.createdAt) }}</div></div></div>
               <div class="panel-actions">
                 <n-button block secondary @click="selectedNode.cluster && (activeCluster = selectedNode.cluster)">聚焦当前星域</n-button>
@@ -945,6 +959,48 @@ function formatDateTime(value?: string | null) { if (!value) return '未知'; co
   background: var(--color-surface-elevated);
   box-shadow: 0 12px 48px rgba(0,0,0,0.1);
   display: flex; flex-direction: column;
+}
+
+.meta-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--color-text-dim);
+}
+
+.meta-row.multiline {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.meta-key {
+  opacity: 0.82;
+  white-space: nowrap;
+}
+
+.meta-value {
+  color: var(--color-text);
+  text-align: right;
+  word-break: break-word;
+}
+
+.meta-row.multiline .meta-value {
+  text-align: left;
+  display: block;
+  max-height: 140px;
+  overflow: auto;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--color-outline);
+  background: color-mix(in srgb, var(--color-surface) 85%, transparent);
 }
 .panel-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--color-outline); }
 .panel-label { display: block; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--color-text-dim); }

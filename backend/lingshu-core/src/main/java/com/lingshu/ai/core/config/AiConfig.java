@@ -314,10 +314,17 @@ public class AiConfig {
                                     toolResultCount++;
                                     i++;
                                 } else if (nextMsg instanceof dev.langchain4j.data.message.UserMessage) {
-                                    // 暂存 MCP Provider 注入的图片或消息，稍后拼接到 ToolResult 之后
-                                    injectedMessages.add((dev.langchain4j.data.message.UserMessage) nextMsg);
-                                    modified = true;
-                                    i++;
+                                    dev.langchain4j.data.message.UserMessage userMsg =
+                                            (dev.langchain4j.data.message.UserMessage) nextMsg;
+                                    if (isInjectedMcpUserMessage(userMsg)) {
+                                        // 仅暂存 MCP Provider 注入的图片提示消息，稍后拼接到 ToolResult 之后
+                                        injectedMessages.add(userMsg);
+                                        modified = true;
+                                        i++;
+                                    } else {
+                                        // 普通用户消息绝不能吞掉，说明工具结果块到此结束
+                                        break;
+                                    }
                                 } else {
                                     break;
                                 }
@@ -329,6 +336,8 @@ public class AiConfig {
                                 while (result.size() > startIndex) {
                                     result.remove(result.size() - 1);
                                 }
+                                // 回退保留期间暂存的注入消息，避免误吞消息链
+                                result.addAll(injectedMessages);
                                 modified = true;
                             } else {
                                 // 找齐了所有 tool result，将暂存的注入消息附加在后面。
@@ -351,6 +360,23 @@ public class AiConfig {
                 }
 
                 return modified ? result : messages;
+            }
+
+            private boolean isInjectedMcpUserMessage(dev.langchain4j.data.message.UserMessage userMessage) {
+                if (userMessage == null || userMessage.contents() == null || userMessage.contents().isEmpty()) {
+                    return false;
+                }
+                if (!(userMessage.contents().get(0) instanceof dev.langchain4j.data.message.TextContent textContent)) {
+                    return false;
+                }
+                String text = textContent.text();
+                if (text == null) {
+                    return false;
+                }
+                String normalized = text.trim();
+                return normalized.startsWith("[工具 ")
+                        && normalized.contains("返回了")
+                        && normalized.contains("张图片");
             }
 
             @Override

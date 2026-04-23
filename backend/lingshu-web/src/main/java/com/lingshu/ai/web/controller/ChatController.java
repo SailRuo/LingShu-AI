@@ -133,7 +133,17 @@ public class ChatController {
         String userId = request.userId() != null ? request.userId() : "User";
         Long effectiveSessionId = resolveSessionId(userId, request.sessionId());
 
-        return chatService.streamChat(request.message(), request.images(), effectiveSessionId, request.agentId(), userId, finalModel, finalApiKey, finalBaseUrl, false, null);
+        return chatService.streamChat(ChatService.ChatStreamRequest.builder()
+                .message(request.message())
+                .images(request.images())
+                .sessionId(effectiveSessionId)
+                .agentId(request.agentId())
+                .userId(userId)
+                .model(finalModel)
+                .apiKey(finalApiKey)
+                .baseUrl(finalBaseUrl)
+                .enableThinking(false)
+                .build());
     }
 
     @PostMapping(value = "/sync", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -149,9 +159,20 @@ public class ChatController {
         String userId = request.userId() != null ? request.userId() : "User";
         Long effectiveSessionId = resolveSessionId(userId, request.sessionId());
 
-        return chatService.streamChat(request.message(), request.images(), effectiveSessionId, request.agentId(), userId, finalModel, finalApiKey, finalBaseUrl, false, null)
-                .reduce("", String::concat)
-                .map(fullResponse -> {
+        return chatService.streamChat(ChatService.ChatStreamRequest.builder()
+                        .message(request.message())
+                        .images(request.images())
+                        .sessionId(effectiveSessionId)
+                        .agentId(request.agentId())
+                        .userId(userId)
+                        .model(finalModel)
+                        .apiKey(finalApiKey)
+                        .baseUrl(finalBaseUrl)
+                        .enableThinking(false)
+                        .build())
+                .collectList()
+                .map(chunks -> {
+                    String fullResponse = String.join("", chunks);
                     String cleanResponse = fullResponse.replaceAll("\\u0001REASONING\\u0001.*?\\u0001/REASONING\\u0001", "");
                     return Map.of("reply", cleanResponse);
                 });

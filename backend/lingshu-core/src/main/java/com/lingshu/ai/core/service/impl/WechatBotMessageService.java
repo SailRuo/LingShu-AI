@@ -194,7 +194,10 @@ public class WechatBotMessageService {
             sendTyping(fromUserId, contextToken, botToken, baseUrl, 1);
 
             log.info("开始调用 ChatService.streamChat, userId={}, message={}", wechatUserId, text);
-            chatService.streamChat(text, null, wechatUserId, null, null, null, null, new ChatService.ToolEventListener() {
+            chatService.streamChat(ChatService.ChatStreamRequest.builder()
+                    .message(text)
+                    .userId(wechatUserId)
+                    .toolEventListener(new ChatService.ToolEventListener() {
                 @Override
                 public void onToolEnd(String toolCallId, String toolName, String arguments, 
                                       String result, boolean isError, List<TurnTimelineService.ArtifactPayload> artifacts) {
@@ -211,6 +214,7 @@ public class WechatBotMessageService {
                     }
                 }
             })
+                    .build())
                     .reduce("", String::concat)
                     .doOnNext(fullResponse -> {
                         log.info("收到 AI 完整响应，长度={}, 内容={}", fullResponse.length(),
