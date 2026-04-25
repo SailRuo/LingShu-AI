@@ -74,14 +74,18 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
         Map<Long, List<ChatTurnEvent>> eventsByTurnId = events.stream()
                 .collect(Collectors.groupingBy(e -> e.getTurn().getId(), LinkedHashMap::new, Collectors.toList()));
 
-        ChatContextAssembler.AssemblyResult assemblyResult = contextAssembler.assemble(turns, eventsByTurnId);
+        List<ChatTurn> replayableTurns = turns.stream()
+                .filter(turn -> shouldReplayTurn(turn, eventsByTurnId.getOrDefault(turn.getId(), List.of())))
+                .toList();
+
+        ChatContextAssembler.AssemblyResult assemblyResult = contextAssembler.assemble(replayableTurns, eventsByTurnId);
         messages.addAll(assemblyResult.messages());
 
         if (!assemblyResult.diagnostics().isEmpty()) {
             log.info("ChatContext diagnostics sessionId={} => {}", sessionId, assemblyResult.diagnostics());
         }
 
-        if (!containsUserMessage(messages) && containsAnyUserContent(turns)) {
+        if (!containsUserMessage(messages) && containsAnyUserContent(replayableTurns)) {
             log.warn("ChatContext assembled without USER message while turns contain user content, sessionId={}", sessionId);
         }
 
@@ -125,6 +129,20 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
 
     private boolean containsUserMessage(List<ChatMessage> messages) {
         return messages.stream().anyMatch(m -> m.type() == ChatMessageType.USER);
+    }
+
+    private boolean shouldReplayTurn(ChatTurn turn, List<ChatTurnEvent> events) {
+        if (!"running".equals(safe(turn.getStatus()))) {
+            return true;
+        }
+
+        boolean hasEvents = events != null && !events.isEmpty();
+        boolean hasAssistantMessage = !safe(turn.getAssistantMessage()).isBlank();
+        if (!hasEvents && !hasAssistantMessage) {
+            log.debug("Skip empty running turn from ChatMemory replay, turnId={}", turn.getId());
+            return false;
+        }
+        return true;
     }
 
     private boolean containsAnyUserContent(List<ChatTurn> turns) {
