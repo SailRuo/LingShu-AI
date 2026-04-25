@@ -624,6 +624,7 @@ public class SystemSetting {
         config.put("defaultVoice", "alloy");
         config.put("defaultSpeed", 1.0);
         config.put("defaultFormat", "mp3");
+        config.put("defaultSeed", -1);
         return config;
     }
 }

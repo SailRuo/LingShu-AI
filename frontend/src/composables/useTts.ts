@@ -70,7 +70,7 @@ async function speak(text: string, messageId?: string): Promise<void> {
 
   try {
     const url = getFullUrl(
-      `/api/tts/speak?text=${encodeURIComponent(cleanText)}`,
+      `/api/tts/speak?text=${encodeURIComponent(cleanText)}&seed=${settings.value.ttsDefaultSeed}`,
     );
     currentAudio = new Audio(url);
 

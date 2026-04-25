@@ -79,6 +79,9 @@ public class SystemSettingDTO {
     @JsonProperty("ttsDefaultFormat")
     private String ttsDefaultFormat;
 
+    @JsonProperty("ttsDefaultSeed")
+    private Integer ttsDefaultSeed;
+
     @JsonProperty("ttsEnabled")
     private Boolean ttsEnabled;
 

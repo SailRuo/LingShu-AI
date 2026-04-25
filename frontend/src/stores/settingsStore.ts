@@ -11,6 +11,7 @@ export interface SystemSettings {
   ttsDefaultVoice: string
   ttsDefaultSpeed: number
   ttsDefaultFormat: string
+  ttsDefaultSeed: number
   ttsEnabled: boolean
   enableThinking: boolean
 }
@@ -31,6 +32,7 @@ const settings = ref<SystemSettings>({
   ttsDefaultVoice: 'alloy',
   ttsDefaultSpeed: 1.0,
   ttsDefaultFormat: 'mp3',
+  ttsDefaultSeed: -1,
   ttsEnabled: false,
   enableThinking: false
 })
@@ -58,6 +60,7 @@ async function fetchSettings() {
         ttsDefaultVoice: data.ttsDefaultVoice || 'alloy',
         ttsDefaultSpeed: data.ttsDefaultSpeed || 1.0,
         ttsDefaultFormat: data.ttsDefaultFormat || 'mp3',
+        ttsDefaultSeed: data.ttsDefaultSeed ?? -1,
         ttsEnabled: data.ttsEnabled ?? false,
         enableThinking: data.enableThinking ?? false
       }
@@ -99,6 +102,7 @@ async function saveSettings() {
         ttsDefaultVoice: settings.value.ttsDefaultVoice,
         ttsDefaultSpeed: settings.value.ttsDefaultSpeed,
         ttsDefaultFormat: settings.value.ttsDefaultFormat,
+        ttsDefaultSeed: settings.value.ttsDefaultSeed,
         ttsEnabled: settings.value.ttsEnabled,
         enableThinking: settings.value.enableThinking
       })

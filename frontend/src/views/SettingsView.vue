@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { ref, onMounted, watch, onUnmounted } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { getFullUrl } from '@/utils/request'
@@ -6,7 +6,7 @@ import {
   NInput, NSelect, NButton, NIcon, NRadioGroup, NRadioButton,
   NCard, NGrid, NGridItem, useMessage, NTabs, NTabPane,
   NTag, NSwitch, NPopconfirm, NModal, NForm, NFormItem,
-  NInputNumber, NDivider
+  NInputNumber, NDivider, NCollapse, NCollapseItem
 } from 'naive-ui'
 import {
   RefreshCw, Settings, Cpu, Globe, Activity, Zap, Plus,
@@ -46,6 +46,7 @@ const settings = ref({
   ttsDefaultVoice: 'alloy',
   ttsDefaultSpeed: 1.0,
   ttsDefaultFormat: 'mp3',
+  ttsDefaultSeed: -1,
   enableThinking: false,
 })
 
@@ -490,6 +491,7 @@ async function fetchSettings() {
       ttsDefaultVoice: data.ttsDefaultVoice || 'alloy',
       ttsDefaultSpeed: data.ttsDefaultSpeed || 1.0,
       ttsDefaultFormat: data.ttsDefaultFormat || 'mp3',
+      ttsDefaultSeed: data.ttsDefaultSeed ?? -1,
       enableThinking: data.enableThinking ?? false,
     }
     fetchChatModels(true)
@@ -580,6 +582,7 @@ const handleSave = async () => {
         ttsDefaultVoice: settings.value.ttsDefaultVoice,
         ttsDefaultSpeed: settings.value.ttsDefaultSpeed,
         ttsDefaultFormat: settings.value.ttsDefaultFormat,
+        ttsDefaultSeed: settings.value.ttsDefaultSeed,
         enableThinking: settings.value.enableThinking,
       })
     })
@@ -735,10 +738,6 @@ async function setDefaultAgent(id: number) {
       <n-tab-pane name="basic" tab="基础设置">
         <div class="tab-content">
           <section class="settings-section">
-            <div class="section-header">
-              <n-icon :component="Palette" />
-              <h2>主题外观</h2>
-            </div>
 
             <n-card class="glass-card">
               <div class="theme-selector">
@@ -811,11 +810,6 @@ async function setDefaultAgent(id: number) {
         <div class="tab-content">
           <n-tabs type="segment" animated>
             <n-tab-pane name="llm" tab="对话模型 (LLM)">
-              <section class="settings-section pt-4">
-                <div class="section-header">
-                  <n-icon :component="Cpu" />
-                  <h2>神经网络源</h2>
-                </div>
 
                 <n-card class="glass-card">
                   <div class="source-selector">
@@ -875,15 +869,10 @@ async function setDefaultAgent(id: number) {
                     </div>
                   </div>
                 </n-card>
-              </section>
+
             </n-tab-pane>
 
             <n-tab-pane name="embedding" tab="向量模型 (Embedding)">
-              <section class="settings-section pt-4">
-                <div class="section-header">
-                  <n-icon :component="Brain" />
-                  <h2>语义编码源</h2>
-                </div>
 
                 <n-card class="glass-card">
                   <div class="source-selector">
@@ -931,15 +920,10 @@ async function setDefaultAgent(id: number) {
                     </div>
                   </div>
                 </n-card>
-              </section>
+
             </n-tab-pane>
 
             <n-tab-pane name="memoryModel" tab="记忆模型 (Memory)">
-              <section class="settings-section pt-4">
-                <div class="section-header">
-                  <n-icon :component="Brain" />
-                  <h2>记忆模型源</h2>
-                </div>
 
                 <n-card class="glass-card">
                   <div class="source-selector">
@@ -987,15 +971,10 @@ async function setDefaultAgent(id: number) {
                       </div>
                     </div>
                 </n-card>
-              </section>
+
             </n-tab-pane>
 
             <n-tab-pane name="tts" tab="语音合成 (TTS)">
-              <section class="settings-section pt-4">
-                <div class="section-header">
-                  <n-icon :component="Volume2" />
-                  <h2>语音合成服务</h2>
-                </div>
 
                 <n-card class="glass-card">
                   <div class="setting-item">
@@ -1023,9 +1002,9 @@ async function setDefaultAgent(id: number) {
                     />
                   </div>
 
-                  <n-divider />
 
-                  <div class="setting-item">
+
+                  <div class="setting-item mt-4">
                     <div class="item-label">
                       <span class="label-text">默认语音</span>
                       <n-button quaternary circle size="small" @click="fetchVoices(false)" :loading="loadingVoices">
@@ -1065,8 +1044,26 @@ async function setDefaultAgent(id: number) {
                       />
                     </div>
                   </div>
+
+                  <n-collapse class="mt-4" :default-expanded-names="[]">
+                    <n-collapse-item title="高级设置" name="advanced">
+                      <div class="setting-item">
+                        <div class="item-label">
+                          <span class="label-text">随机种子 (Seed)</span>
+                        </div>
+                        <n-input-number
+                          v-model:value="settings.ttsDefaultSeed"
+                          :min="-1"
+                          :step="1"
+                          size="large"
+                          placeholder="固定种子以复现语气，-1 为随机"
+                        />
+                        <div class="item-hint">固定种子可复现特定语气，设为 -1 则每次合成随机。</div>
+                      </div>
+                    </n-collapse-item>
+                  </n-collapse>
                 </n-card>
-              </section>
+
             </n-tab-pane>
           </n-tabs>
 
@@ -1082,9 +1079,7 @@ async function setDefaultAgent(id: number) {
       <n-tab-pane name="agents" tab="智能体管理">
         <div class="tab-content">
           <section class="settings-section">
-            <div class="section-header">
-              <n-icon :component="Users" />
-              <h2>智能体列表</h2>
+            <div class="section-header flex justify-end">
               <n-button type="primary" size="small" @click="openCreateAgent" class="create-btn">
                 <template #icon><n-icon :component="Plus" /></template>
                 创建智能体
@@ -1146,10 +1141,7 @@ async function setDefaultAgent(id: number) {
       <n-tab-pane name="proactive" tab="主动问候">
         <div class="tab-content">
           <section class="settings-section">
-            <div class="section-header">
-              <n-icon :component="Bell" />
-              <h2>主动问候配置</h2>
-            </div>
+
 
             <n-card class="glass-card">
               <div class="setting-item">
@@ -1184,10 +1176,7 @@ async function setDefaultAgent(id: number) {
               </div>
             </n-card>
 
-            <div class="section-header mt-8">
-              <n-icon :component="Send" />
-              <h2>测试问候</h2>
-            </div>
+
 
             <n-card class="glass-card">
               <div class="test-section">
@@ -1220,9 +1209,7 @@ async function setDefaultAgent(id: number) {
       <n-tab-pane name="skills" tab="Skills">
         <div class="tab-content">
           <section class="settings-section">
-            <div class="section-header">
-              <n-icon :component="Sparkles" />
-              <h2>Skills 管理</h2>
+            <div class="section-header flex justify-end">
               <div class="section-actions">
                 <n-button quaternary circle size="small" @click="showSkillsHelp = true">
                   <template #icon><n-icon :component="Info" /></template>
@@ -1305,10 +1292,7 @@ async function setDefaultAgent(id: number) {
       <n-tab-pane name="asr" tab="语音识别">
         <div class="tab-content">
           <section class="settings-section">
-            <div class="section-header">
-              <n-icon :component="Mic" />
-              <h2>ASR 语音识别配置</h2>
-            </div>
+
 
             <n-card class="glass-card">
               <div class="setting-item">
@@ -1363,10 +1347,7 @@ async function setDefaultAgent(id: number) {
       <n-tab-pane name="wechat" tab="微信 Bot (iLink)">
         <div class="tab-content">
           <section class="settings-section">
-            <div class="section-header">
-              <n-icon :component="MessageCircle" />
-              <h2>微信智能体接入 (基于 iLink 协议)</h2>
-            </div>
+
 
             <div class="wechat-bot-header">
               <p class="section-desc">支持多账户授权，每个微信用户独立记忆和对话上下文</p>
@@ -1607,6 +1588,8 @@ async function setDefaultAgent(id: number) {
 
 <style scoped>
 .settings-view {
+  height: 100%;
+  overflow-y: auto;
   padding: 24px 32px;
   max-width: 1200px;
   margin: 0 auto;
@@ -1680,6 +1663,7 @@ async function setDefaultAgent(id: number) {
   backdrop-filter: blur(20px);
   border: 1px solid var(--color-glass-border) !important;
   border-radius: 16px !important;
+  padding: 14px !important;
 }
 
 .source-selector {
@@ -1697,13 +1681,14 @@ async function setDefaultAgent(id: number) {
 }
 
 .item-label {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  color: var(--color-text-dim);
-  margin-bottom: 8px;
+  color: var(--color-text);
+  margin-bottom: 10px;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  letter-spacing: 0.01em;
 }
 
 .switch-row {

@@ -2,7 +2,6 @@ package com.lingshu.ai.web.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lingshu.ai.core.service.SettingService;
-import com.lingshu.ai.infrastructure.dto.TtsSpeakRequest;
 import com.lingshu.ai.infrastructure.entity.SystemSetting;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -36,14 +35,10 @@ public class TtsController {
 
     @RequestMapping(value = "/speak", method = {RequestMethod.GET, RequestMethod.POST}, produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
     public ResponseEntity<StreamingResponseBody> speak(
-            @RequestBody(required = false) TtsSpeakRequest postRequest,
-            @RequestParam(required = false) String text) {
+            @RequestParam(required = false) String text,
+            @RequestParam(required = false) Integer seed) {
 
         String finalText = text;
-        if (postRequest != null && postRequest.getText() != null) {
-            finalText = postRequest.getText();
-        }
-
         if (finalText == null || finalText.isBlank()) {
             return ResponseEntity.ok().build();
         }
@@ -62,16 +57,30 @@ public class TtsController {
         log.info("[TTS] Voice: {}, Speed: {}, Format: {}", voice, speed, format);
 
         final String requestText = finalText;
+        Integer resolvedSeed = seed;
+        if (resolvedSeed == null) {
+            Object defaultSeed = ttsConfig.get("defaultSeed");
+            if (defaultSeed instanceof Number number) {
+                resolvedSeed = number.intValue();
+            } else if (defaultSeed instanceof String s) {
+                try {
+                    resolvedSeed = Integer.parseInt(s);
+                } catch (Exception ignored) {}
+            }
+        }
+        final Integer finalSeed = (resolvedSeed != null) ? resolvedSeed : -1;
 
         StreamingResponseBody stream = outputStream -> {
             try {
-                Map<String, Object> requestBody = Map.of(
-                        "model", "tts-1",
-                        "input", requestText,
-                        "voice", voice,
-                        "speed", speed,
-                        "response_format", format
-                );
+                java.util.Map<String, Object> requestBody = new java.util.HashMap<>();
+                requestBody.put("model", "voxcpm-2");
+                requestBody.put("input", requestText);
+                requestBody.put("voice", voice);
+                requestBody.put("speed", speed);
+                requestBody.put("response_format", format);
+                if (finalSeed != null) {
+                    requestBody.put("seed", finalSeed);
+                }
 
                 String jsonBody = objectMapper.writeValueAsString(requestBody);
                 String targetUrl = baseUrl + "/v1/audio/speech";

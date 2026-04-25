@@ -125,6 +125,7 @@ public class SettingController {
         result.put("ttsDefaultVoice", ttsConfig.get("defaultVoice"));
         result.put("ttsDefaultSpeed", ttsConfig.get("defaultSpeed"));
         result.put("ttsDefaultFormat", ttsConfig.get("defaultFormat"));
+        result.put("ttsDefaultSeed", ttsConfig.getOrDefault("defaultSeed", -1));
         result.put("ttsEnabled", ttsConfig.get("enabled"));
 
         result.put("enableThinking", setting.getEnableThinking());
@@ -198,6 +199,7 @@ public class SettingController {
         if (dto.getTtsDefaultVoice() != null) ttsConfig.put("defaultVoice", dto.getTtsDefaultVoice());
         if (dto.getTtsDefaultSpeed() != null) ttsConfig.put("defaultSpeed", dto.getTtsDefaultSpeed());
         if (dto.getTtsDefaultFormat() != null) ttsConfig.put("defaultFormat", dto.getTtsDefaultFormat());
+        if (dto.getTtsDefaultSeed() != null) ttsConfig.put("defaultSeed", dto.getTtsDefaultSeed());
         if (dto.getTtsEnabled() != null) ttsConfig.put("enabled", dto.getTtsEnabled());
         setting.setTtsConfig(ttsConfig);
 
