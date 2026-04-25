@@ -10,8 +10,8 @@ import {
 } from 'naive-ui'
 import {
   RefreshCw, Settings, Cpu, Globe, Activity, Zap, Plus,
-  Trash2, Edit, Star, Users, Bell, Send, Brain, Palette, Mic,
-  Bot, Gem, Rocket, Sparkles, Volume2, MessageCircle, Info,
+  Trash2, Edit, Star, Send, Brain, Palette,
+  Bot, Gem, Rocket, Sparkles, MessageCircle, Info,
   Cloud, Flame, Wind
 } from 'lucide-vue-next'
 import McpSettings from '@/components/McpSettings.vue'
@@ -1588,12 +1588,23 @@ async function setDefaultAgent(id: number) {
 
 <style scoped>
 .settings-view {
+  --settings-shell-bg: color-mix(in srgb, var(--color-glass-bg) 26%, transparent);
+  --settings-card-bg: color-mix(in srgb, var(--color-glass-bg) 30%, transparent);
+  --settings-field-bg: color-mix(in srgb, var(--color-glass-bg) 22%, transparent);
+  --settings-hint-bg: color-mix(in srgb, var(--color-primary-dim) 50%, transparent);
   height: 100%;
   overflow-y: auto;
   padding: 24px 32px;
   max-width: 1200px;
   margin: 0 auto;
   animation: fadeIn 0.6s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+:global(.light) .settings-view {
+  --settings-shell-bg: rgba(255, 255, 255, 0.36);
+  --settings-card-bg: rgba(255, 255, 255, 0.42);
+  --settings-field-bg: rgba(255, 255, 255, 0.28);
+  --settings-hint-bg: rgba(13, 148, 136, 0.08);
 }
 
 @keyframes fadeIn {
@@ -1626,7 +1637,7 @@ async function setDefaultAgent(id: number) {
 }
 
 .settings-tabs {
-  background: rgba(10, 16, 28, 0.1);
+  background: var(--settings-shell-bg);
   backdrop-filter: blur(4px) saturate(106%);
   -webkit-backdrop-filter: blur(4px) saturate(106%);
   border: 1px solid var(--color-glass-border);
@@ -1662,7 +1673,7 @@ async function setDefaultAgent(id: number) {
 }
 
 .glass-card {
-  background: rgba(10, 16, 28, 0.12) !important;
+  background: var(--settings-card-bg) !important;
   backdrop-filter: blur(6px) saturate(108%);
   -webkit-backdrop-filter: blur(6px) saturate(108%);
   border: 1px solid var(--color-glass-border) !important;
@@ -1922,7 +1933,7 @@ async function setDefaultAgent(id: number) {
 
 :deep(.n-input), :deep(.n-select .n-base-selection), :deep(.n-textarea) {
   --n-border-radius: 12px !important;
-  background-color: rgba(10, 16, 28, 0.08) !important;
+  background-color: var(--settings-field-bg) !important;
 }
 
 :deep(.n-input-wrapper),
@@ -1946,7 +1957,7 @@ async function setDefaultAgent(id: number) {
 
 .test-result {
   padding: 16px;
-  background: rgba(10, 16, 28, 0.1);
+  background: var(--settings-field-bg);
   border-radius: 12px;
   border: 1px solid var(--color-glass-border);
 }
@@ -1964,7 +1975,7 @@ async function setDefaultAgent(id: number) {
 }
 
 .prompt-tabs {
-  background: rgba(10, 16, 28, 0.1);
+  background: var(--settings-field-bg);
   border-radius: 12px;
   padding: 12px;
   border: 1px solid var(--color-glass-border);
@@ -1983,7 +1994,7 @@ async function setDefaultAgent(id: number) {
   color: var(--color-text-dim);
   margin-bottom: 8px;
   padding: 8px 12px;
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--settings-hint-bg);
   border-radius: 8px;
   border-left: 3px solid var(--color-primary);
 }
@@ -2000,7 +2011,7 @@ async function setDefaultAgent(id: number) {
   min-width: 280px;
   max-width: 400px;
   padding: 20px;
-  background: rgba(10, 16, 28, 0.1);
+  background: var(--settings-field-bg);
   border: 1px solid var(--color-outline);
   border-radius: 12px;
   cursor: pointer;
@@ -2043,7 +2054,7 @@ async function setDefaultAgent(id: number) {
   align-items: center;
   margin-bottom: 24px;
   padding: 16px 20px;
-  background: rgba(10, 16, 28, 0.1);
+  background: var(--settings-field-bg);
   border-radius: 12px;
   border: 1px solid var(--color-glass-border);
 }
@@ -2057,7 +2068,7 @@ async function setDefaultAgent(id: number) {
 .empty-state {
   text-align: center;
   padding: 48px 24px;
-  background: rgba(10, 16, 28, 0.08);
+  background: var(--settings-field-bg);
   border-radius: 12px;
   border: 1px dashed var(--color-outline);
 }
@@ -2086,7 +2097,7 @@ async function setDefaultAgent(id: number) {
 }
 
 .account-card {
-  background: rgba(10, 16, 28, 0.1) !important;
+  background: var(--settings-field-bg) !important;
   border: 1px solid var(--color-glass-border) !important;
   border-radius: 12px !important;
   transition: all 0.3s ease;
