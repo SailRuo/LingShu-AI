@@ -128,7 +128,7 @@ const GlobalMessage = defineComponent({
               </div>
               
               <!-- Background Effects -->
-              <StarField v-if="animationEffect === 'starfield'" />
+              <StarField v-if="animationEffect === 'starfield' || animationEffect === 'aurora'" />
               <RainEffect v-if="animationEffect === 'rain'" />
               <AuroraEffect v-if="animationEffect === 'aurora'" />
               <FireflyEffect v-if="animationEffect === 'firefly'" />

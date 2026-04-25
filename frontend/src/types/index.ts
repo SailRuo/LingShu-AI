@@ -76,6 +76,7 @@ export interface ThemeCSSVars {
   "--color-warning": string;
   "--color-error": string;
   "--color-glass-bg": string;
+  "--color-popover-bg": string;
   "--color-glass-border": string;
   "--color-bg-mesh-1": string;
   "--color-bg-mesh-2": string;

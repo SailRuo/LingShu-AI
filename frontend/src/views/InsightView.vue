@@ -33,7 +33,20 @@ interface PositionedNode3D extends GraphNode {
   isBorn: boolean;
 }
 
+interface LabelCandidate {
+  id: string;
+  node: PositionedNode3D;
+  element: HTMLElement;
+  rect: { left: number; right: number; top: number; bottom: number };
+  priority: number;
+}
+
 const message = useMessage()
+
+const LABEL_MAX_CHARS = 12
+const LABEL_COLLISION_PADDING = 8
+const LABEL_EDGE_PADDING = 18
+const FOCUSED_FACT_LABEL_LIMIT = 12
 
 const graph = ref<GraphPayload>({ nodes: [], links: [], stats: { density: 0, nodes: 0, edges: 0, topics: 0, activeFacts: 0, latency: 0 } })
 const selectedNode = ref<GraphNode | null>(null)
@@ -66,6 +79,8 @@ let nodeMeshes = new Map<string, THREE.Group>()
 let linkMeshes = new Map<string, THREE.Line>()
 const raycaster = new THREE.Raycaster()
 const mouse = new THREE.Vector2()
+const labelWorldPosition = new THREE.Vector3()
+const labelScreenPosition = new THREE.Vector3()
 
 const replayTimer = ref<number | null>(null)
 const birthFlashIds = ref<Set<string>>(new Set())
@@ -124,12 +139,11 @@ function withinTime(node: GraphNode) {
 const filteredNodes = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase()
   return graph.value.nodes.filter((node) => {
-    const clusterOk = !activeCluster.value || node.cluster === activeCluster.value || node.type === 'User'
     const keywordOk = !keyword || node.label.toLowerCase().includes(keyword) || (node.shortLabel || '').toLowerCase().includes(keyword) || (node.cluster || '').toLowerCase().includes(keyword)
     const typeOk = typeFilter.value === 'all' || node.type === typeFilter.value
     const score = node.activityScore || 0
     const activityOk = activityFilter.value === 'all' || (activityFilter.value === 'active' && score >= 0.75) || (activityFilter.value === 'stable' && score >= 0.38 && score < 0.75) || (activityFilter.value === 'cool' && score < 0.38)
-    return clusterOk && keywordOk && typeOk && activityOk && withinTime(node)
+    return keywordOk && typeOk && activityOk && withinTime(node)
   })
 })
 
@@ -144,15 +158,56 @@ const filteredLinks = computed(() => graph.value.links.filter((l) => {
 
 const searchKeyword = computed(() => searchQuery.value.trim().toLowerCase())
 
+function stableNoise(seed: string, salt = 0) {
+  let hash = 2166136261 + salt
+  for (let i = 0; i < seed.length; i += 1) {
+    hash ^= seed.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return ((hash >>> 0) % 10000) / 10000
+}
+
+function compactLabel(label: string, maxChars = LABEL_MAX_CHARS) {
+  const value = label.trim()
+  if (value.length <= maxChars) return value
+  return `${value.slice(0, maxChars)}...`
+}
+
+function getLabelPriority(node: PositionedNode3D) {
+  let score = (node.importance || 0) * 100
+  if (node.isFocus) score += 1000
+  if (node.isHit) score += 800
+  if (node.type === 'User') score += 500
+  if (node.type === 'Topic') score += 320
+  if (node.isRecent) score += 120
+  if (node.status === 'active') score += 80
+  if (node.faded) score -= 500
+  return score
+}
+
+function getLabelBudget() {
+  if (!camera || !controls) return 30
+  const distance = camera.position.distanceTo(controls.target)
+  if (searchKeyword.value || selectedNode.value) return 46
+  if (distance < 190) return 42
+  if (distance < 360) return 30
+  return 18
+}
+
+function doRectsOverlap(a: LabelCandidate['rect'], b: LabelCandidate['rect']) {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+}
+
 const positionedNodes3D = computed<PositionedNode3D[]>(() => {
   const topics = filteredNodes.value.filter((n) => n.type === 'Topic')
   const facts = filteredNodes.value.filter((n) => n.type === 'Fact')
   const users = filteredNodes.value.filter((n) => n.type === 'User')
   const pos = new Map<string, PositionedNode3D>()
+  const hasSearch = !!searchKeyword.value
 
   users.forEach((n, i) => {
     const angle = (i / Math.max(1, users.length)) * Math.PI * 2
-    const radius = 40
+    const radius = users.length > 1 ? 36 : 0
     pos.set(n.id, {
       ...n, x: Math.cos(angle) * radius, y: 0, z: Math.sin(angle) * radius, size: 24, color: resolvedColors.value.nodeUser,
       showLabel: true, faded: false, hiddenByReplay: false,
@@ -162,18 +217,18 @@ const positionedNodes3D = computed<PositionedNode3D[]>(() => {
 
   topics.forEach((n, i) => {
     const angle = (i / Math.max(1, topics.length)) * Math.PI * 2
-    const radius = 120
+    const radius = 220
     const faded = !!activeCluster.value && n.cluster !== activeCluster.value
     const activatedAt = n.lastActivatedAt ? new Date(n.lastActivatedAt).getTime() : 0
     const hiddenByReplay = replayEnabled.value && activatedAt > replayCutoff.value
     const isRecent = activatedAt >= Date.now() - 86400000
     const isHit = !!searchKeyword.value && (n.label.toLowerCase().includes(searchKeyword.value) || (n.shortLabel || '').toLowerCase().includes(searchKeyword.value))
-    const isFocus = selectedNode.value?.id === n.id || (!!selectedNode.value?.cluster && selectedNode.value.cluster === n.cluster)
+    const isFocus = selectedNode.value?.id === n.id || (!!activeCluster.value && activeCluster.value === n.cluster)
 
     pos.set(n.id, {
       ...n,
       x: Math.cos(angle) * radius,
-      y: (Math.random() - 0.5) * 20,
+      y: (stableNoise(n.id, 1) - 0.5) * 18,
       z: Math.sin(angle) * radius,
       size: 10 + (n.importance || 0.5) * 12,
       color: resolvedColors.value.primary,
@@ -190,16 +245,19 @@ const positionedNodes3D = computed<PositionedNode3D[]>(() => {
 
     items.sort((a, b) => (b.importance || 0) - (a.importance || 0)).forEach((n, i) => {
       const level = n.orbitLevel || 2
-      const radius = (level === 1 ? 30 : level === 2 ? 60 : 90) + (i % 5) * 4
-      const angle = (i / items.length) * Math.PI * 2 + gi
-      const zAngle = (Math.random() - 0.5) * Math.PI * 0.4
+      const focused = activeCluster.value === cluster
+      const ringRadius = level === 1 ? 42 : level === 2 ? 76 : 112
+      const radius = ringRadius + (i % 6) * 7 + stableNoise(n.id, 2) * 8
+      const angle = (i / Math.max(1, items.length)) * Math.PI * 2 + gi * 0.42
+      const zAngle = (stableNoise(n.id, 3) - 0.5) * Math.PI * (focused ? 0.18 : 0.08)
 
       const faded = !!activeCluster.value && cluster !== activeCluster.value
       const activatedAt = n.lastActivatedAt ? new Date(n.lastActivatedAt).getTime() : 0
       const hiddenByReplay = replayEnabled.value && activatedAt > replayCutoff.value
       const isRecent = activatedAt >= Date.now() - 86400000
       const isHit = !!searchKeyword.value && (n.label.toLowerCase().includes(searchKeyword.value) || (n.shortLabel || '').toLowerCase().includes(searchKeyword.value))
-      const isFocus = selectedNode.value?.id === n.id || (!!selectedNode.value?.cluster && selectedNode.value.cluster === n.cluster)
+      const isFocus = selectedNode.value?.id === n.id
+      const isPrimaryInFocusedCluster = focused && i < FOCUSED_FACT_LABEL_LIMIT
 
       pos.set(n.id, {
         ...n,
@@ -208,7 +266,7 @@ const positionedNodes3D = computed<PositionedNode3D[]>(() => {
         z: anchor!.z + Math.sin(angle) * Math.cos(zAngle) * radius,
         size: 3 + (n.importance || 0.5) * 6,
         color: n.status === 'active' ? resolvedColors.value.nodeFact : resolvedColors.value.accent,
-        showLabel: (n.importance || 0) >= 0.76 || isRecent || isFocus,
+        showLabel: isFocus || isHit || (hasSearch ? false : isPrimaryInFocusedCluster),
         faded, hiddenByReplay, isRecent, isHit, isFocus, isBorn: birthFlashIds.value.has(n.id)
       })
     })
@@ -290,6 +348,7 @@ function handleSelectDropdown(key: string) {
 function openNodeDetail(node: GraphNode) {
   selectedNode.value = node
   if (node.type === 'Topic') activeCluster.value = activeCluster.value === node.cluster ? null : node.cluster || null
+  if (node.type === 'Fact' && node.cluster) activeCluster.value = node.cluster
 
   // Pivot camera to node
   if (controls && camera) {
@@ -403,6 +462,78 @@ function onContextMenu(event: MouseEvent) {
   }
 }
 
+function updateLabelVisibility() {
+  if (!camera || !galaxyStageRef.value) return
+
+  const width = galaxyStageRef.value.clientWidth
+  const height = galaxyStageRef.value.clientHeight
+  const candidates: LabelCandidate[] = []
+
+  scene.updateMatrixWorld()
+  camera.updateMatrixWorld()
+
+  for (const node of positionedNodes3D.value) {
+    const group = nodeMeshes.get(node.id)
+    if (!group) continue
+
+    const cssObject = group.children.find(c => c instanceof CSS2DObject) as CSS2DObject | undefined
+    const element = cssObject?.element as HTMLElement | undefined
+    if (!element) continue
+
+    element.style.visibility = 'hidden'
+
+    if (!node.showLabel || node.hiddenByReplay) continue
+    if (node.faded && !node.isFocus && !node.isHit) continue
+
+    group.getWorldPosition(labelWorldPosition)
+    labelScreenPosition.copy(labelWorldPosition).project(camera)
+    if (labelScreenPosition.z < -1 || labelScreenPosition.z > 1) continue
+
+    const x = (labelScreenPosition.x * 0.5 + 0.5) * width
+    const y = (-labelScreenPosition.y * 0.5 + 0.5) * height
+    const labelWidth = element.offsetWidth || Math.min(132, Math.max(42, element.textContent?.length || 0) * 12)
+    const labelHeight = element.offsetHeight || 18
+    const halfWidth = labelWidth / 2
+
+    const rect = {
+      left: x - halfWidth - LABEL_COLLISION_PADDING,
+      right: x + halfWidth + LABEL_COLLISION_PADDING,
+      top: y - labelHeight - LABEL_COLLISION_PADDING,
+      bottom: y + LABEL_COLLISION_PADDING
+    }
+
+    const insideViewport =
+      rect.left >= LABEL_EDGE_PADDING &&
+      rect.right <= width - LABEL_EDGE_PADDING &&
+      rect.top >= LABEL_EDGE_PADDING &&
+      rect.bottom <= height - LABEL_EDGE_PADDING
+
+    if (!insideViewport && !node.isFocus && !node.isHit) continue
+
+    candidates.push({
+      id: node.id,
+      node,
+      element,
+      rect,
+      priority: getLabelPriority(node)
+    })
+  }
+
+  const placed: LabelCandidate[] = []
+  const budget = getLabelBudget()
+
+  candidates
+    .sort((a, b) => b.priority - a.priority)
+    .forEach((candidate) => {
+      if (placed.length >= budget && !candidate.node.isFocus && !candidate.node.isHit) return
+      if (placed.some((item) => doRectsOverlap(candidate.rect, item.rect))) return
+
+      candidate.element.style.visibility = 'visible'
+      candidate.element.style.opacity = candidate.node.faded ? '0.28' : '1'
+      placed.push(candidate)
+    })
+}
+
 function renderLoop() {
   controls.update()
 
@@ -430,6 +561,7 @@ function renderLoop() {
   }
 
   renderer.render(scene, camera)
+  updateLabelVisibility()
   cssRenderer.render(scene, camera)
 }
 
@@ -514,8 +646,10 @@ watch(positionedNodes3D, (nodes) => {
 
     const cssObject = group.children[1] as CSS2DObject
     const labelDiv = cssObject.element
-    labelDiv.textContent = node.shortLabel || node.label
-    labelDiv.style.visibility = node.showLabel ? 'visible' : 'hidden'
+    const fullLabel = node.shortLabel || node.label
+    labelDiv.textContent = compactLabel(fullLabel)
+    labelDiv.title = node.label
+    labelDiv.style.visibility = 'hidden'
     labelDiv.style.opacity = node.faded ? '0.2' : '1'
     if (node.isFocus) {
       labelDiv.style.color = 'var(--color-text)'
@@ -682,7 +816,7 @@ function formatDateTime(value?: string | null) { if (!value) return '未知'; co
 <template>
   <div class="insight-view" :style="sceneStyle">
     <div class="insight-content">
-      <div class="graph-area">
+      <div class="graph-area" :class="{ 'has-detail-panel': selectedNode }">
         <div class="stars stars-a"></div>
         <div class="stars stars-b"></div>
         <div class="nebula"></div>
@@ -787,62 +921,62 @@ function formatDateTime(value?: string | null) { if (!value) return '未知'; co
         <!-- THREE.JS SCENE CONTAINER -->
         <div class="galaxy-stage" ref="galaxyStageRef"></div>
 
+        <transition name="panel">
+          <aside v-if="selectedNode" class="detail-panel">
+            <div class="panel-header">
+              <div><span class="panel-label">节点解析</span><h3 class="panel-title">记忆图谱</h3></div>
+              <button class="close-btn" @click="selectedNode = null"><RefreshCcw :size="15" style="transform: rotate(90deg)" /></button>
+            </div>
+            <n-scrollbar class="panel-body">
+              <div class="panel-content">
+                <div class="tag-row">
+                  <n-tag :bordered="false" size="small" :type="selectedNode.type === 'User' ? 'success' : selectedNode.type === 'Topic' ? 'info' : 'warning'">{{ selectedNode.type === 'User' ? '核心用户' : selectedNode.type === 'Topic' ? '主题轨道' : '记忆碎片' }}</n-tag>
+                  <n-tag v-if="selectedNode.status" :bordered="false" size="small">{{ selectedNode.status }}</n-tag>
+                </div>
+                <div class="content-card">
+                  <p class="node-title">{{ selectedNode.label }}</p>
+                  <p class="node-meta">{{ selectedNode.subType || '未分类记忆' }}<span v-if="selectedNode.cluster"> · {{ selectedNode.cluster }}</span></p>
+                </div>
+                <div class="metric-row"><span>活跃度</span><span>{{ ((selectedNode.activityScore || 0) * 100).toFixed(0) }}%</span></div>
+                <n-progress type="line" :percentage="(selectedNode.activityScore || 0) * 100" :show-indicator="false" :height="5" />
+                <div class="metric-row"><span>置信度</span><span>{{ ((selectedNode.confidence || 0) * 100).toFixed(0) }}%</span></div>
+                <n-progress type="line" :percentage="(selectedNode.confidence || 0) * 100" :show-indicator="false" :height="5" />
+                <div class="mini-grid">
+                  <div class="mini-card"><span>重要性</span><strong>{{ ((selectedNode.importance || 0) * 100).toFixed(0) }}%</strong></div>
+                  <div class="mini-card"><span>轨道层级</span><strong>{{ selectedNode.orbitLevel ?? 0 }}</strong></div>
+                </div>
+                <div v-if="selectedNode.type === 'Fact'" class="mini-grid">
+                  <div class="mini-card"><span>版本号</span><strong>{{ selectedNode.version ?? 1 }}</strong></div>
+                  <div class="mini-card"><span>关系状态</span><strong>{{ selectedNode.supersedesFactId ? '替代旧记忆' : selectedNode.contradictsFactId ? '存在冲突' : '稳定事实' }}</strong></div>
+                </div>
+                <div v-if="selectedNode.type === 'Fact'" class="meta-list">
+                  <div class="meta-row">
+                    <span class="meta-key">记录时间</span>
+                    <span class="meta-value">{{ formatDateTime(selectedNode.observedAt || selectedNode.createdAt) }}</span>
+                  </div>
+                  <div class="meta-row">
+                    <span class="meta-key">分类来源</span>
+                    <span class="meta-value">{{ selectedNode.classificationSource || 'unknown' }}</span>
+                  </div>
+                  <div class="meta-row multiline">
+                    <span class="meta-key">原始消息</span>
+                    <span class="meta-value">{{ selectedNode.originalMessage || '暂无' }}</span>
+                  </div>
+                </div>
+                <div class="time-card"><Clock3 :size="18" /><div><div class="time-main">{{ formatTime(selectedNode.lastActivatedAt || selectedNode.createdAt) }}</div><div class="time-sub">{{ formatDateTime(selectedNode.lastActivatedAt || selectedNode.createdAt) }}</div></div></div>
+                <div class="panel-actions">
+                  <n-button block secondary @click="selectedNode.cluster && (activeCluster = selectedNode.cluster)">聚焦当前星域</n-button>
+                  <n-button v-if="selectedNode.type === 'Fact'" type="error" secondary circle @click="rightClickedNode = selectedNode; handleDeleteFact()"><template #icon><Trash2 :size="16" /></template></n-button>
+                </div>
+              </div>
+            </n-scrollbar>
+          </aside>
+        </transition>
+
         <div v-if="!isLoaded || isLoading" class="loading-overlay">
           <div class="loading-text">正在重构3D宇宙场景</div>
         </div>
       </div>
-
-      <transition name="panel">
-        <aside v-if="selectedNode" class="detail-panel">
-          <div class="panel-header">
-            <div><span class="panel-label">节点解析</span><h3 class="panel-title">记忆图谱</h3></div>
-            <button class="close-btn" @click="selectedNode = null"><RefreshCcw :size="15" style="transform: rotate(90deg)" /></button>
-          </div>
-          <n-scrollbar class="panel-body">
-            <div class="panel-content">
-              <div class="tag-row">
-                <n-tag :bordered="false" size="small" :type="selectedNode.type === 'User' ? 'success' : selectedNode.type === 'Topic' ? 'info' : 'warning'">{{ selectedNode.type === 'User' ? '核心用户' : selectedNode.type === 'Topic' ? '主题轨道' : '记忆碎片' }}</n-tag>
-                <n-tag v-if="selectedNode.status" :bordered="false" size="small">{{ selectedNode.status }}</n-tag>
-              </div>
-              <div class="content-card">
-                <p class="node-title">{{ selectedNode.label }}</p>
-                <p class="node-meta">{{ selectedNode.subType || '未分类记忆' }}<span v-if="selectedNode.cluster"> · {{ selectedNode.cluster }}</span></p>
-              </div>
-              <div class="metric-row"><span>活跃度</span><span>{{ ((selectedNode.activityScore || 0) * 100).toFixed(0) }}%</span></div>
-              <n-progress type="line" :percentage="(selectedNode.activityScore || 0) * 100" :show-indicator="false" :height="5" />
-              <div class="metric-row"><span>置信度</span><span>{{ ((selectedNode.confidence || 0) * 100).toFixed(0) }}%</span></div>
-              <n-progress type="line" :percentage="(selectedNode.confidence || 0) * 100" :show-indicator="false" :height="5" />
-              <div class="mini-grid">
-                <div class="mini-card"><span>重要性</span><strong>{{ ((selectedNode.importance || 0) * 100).toFixed(0) }}%</strong></div>
-                <div class="mini-card"><span>轨道层级</span><strong>{{ selectedNode.orbitLevel ?? 0 }}</strong></div>
-              </div>
-              <div v-if="selectedNode.type === 'Fact'" class="mini-grid">
-                <div class="mini-card"><span>版本号</span><strong>{{ selectedNode.version ?? 1 }}</strong></div>
-                <div class="mini-card"><span>关系状态</span><strong>{{ selectedNode.supersedesFactId ? '替代旧记忆' : selectedNode.contradictsFactId ? '存在冲突' : '稳定事实' }}</strong></div>
-              </div>
-              <div v-if="selectedNode.type === 'Fact'" class="meta-list">
-                <div class="meta-row">
-                  <span class="meta-key">记录时间</span>
-                  <span class="meta-value">{{ formatDateTime(selectedNode.observedAt || selectedNode.createdAt) }}</span>
-                </div>
-                <div class="meta-row">
-                  <span class="meta-key">分类来源</span>
-                  <span class="meta-value">{{ selectedNode.classificationSource || 'unknown' }}</span>
-                </div>
-                <div class="meta-row multiline">
-                  <span class="meta-key">原始消息</span>
-                  <span class="meta-value">{{ selectedNode.originalMessage || '暂无' }}</span>
-                </div>
-              </div>
-              <div class="time-card"><Clock3 :size="18" /><div><div class="time-main">{{ formatTime(selectedNode.lastActivatedAt || selectedNode.createdAt) }}</div><div class="time-sub">{{ formatDateTime(selectedNode.lastActivatedAt || selectedNode.createdAt) }}</div></div></div>
-              <div class="panel-actions">
-                <n-button block secondary @click="selectedNode.cluster && (activeCluster = selectedNode.cluster)">聚焦当前星域</n-button>
-                <n-button v-if="selectedNode.type === 'Fact'" type="error" secondary circle @click="rightClickedNode = selectedNode; handleDeleteFact()"><template #icon><Trash2 :size="16" /></template></n-button>
-              </div>
-            </div>
-          </n-scrollbar>
-        </aside>
-      </transition>
     </div>
 
     <n-dropdown placement="bottom-start" trigger="manual" :x="dropdownX" :y="dropdownY" :options="dropdownOptions" :show="showDropdown" :on-clickoutside="() => (showDropdown = false)" @select="handleSelectDropdown" />
@@ -851,11 +985,11 @@ function formatDateTime(value?: string | null) { if (!value) return '未知'; co
 
 <style scoped>
 .insight-view, .insight-content { height: 100%; box-sizing: border-box; }
-.insight-content { display: flex; gap: 16px; font-family: 'Inter', system-ui, sans-serif; }
+.insight-content { position: relative; display: flex; gap: 16px; font-family: 'Inter', system-ui, sans-serif; }
 .graph-area {
   position: relative; flex: 1; min-width: 0; overflow: hidden; border-radius: 20px;
   border: 1px solid var(--color-glass-border);
-  background: var(--color-background);
+  background: rgba(4, 8, 16, 0.08);
   box-shadow: 0 12px 48px var(--color-primary-dim);
 }
 .stars, .nebula, .galaxy-stage, .loading-overlay { position: absolute; inset: 0; pointer-events: none; }
@@ -880,6 +1014,10 @@ function formatDateTime(value?: string | null) { if (!value) return '未知'; co
   position: absolute; top: 16px; left: 16px; right: 16px; z-index: 10;
   display: flex; justify-content: space-between; align-items: flex-start;
   pointer-events: none;
+  transition: right 0.24s ease;
+}
+.graph-area.has-detail-panel .top-hud {
+  right: 372px;
 }
 .stats-bar {
   display: flex; gap: 12px; align-items: center; padding: 10px 18px;
@@ -954,10 +1092,17 @@ function formatDateTime(value?: string | null) { if (!value) return '未知'; co
 
 /* Detail panel */
 .detail-panel {
-  width: 320px; border-radius: 20px; overflow: hidden;
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 12;
+  width: 340px; border-radius: 20px; overflow: hidden;
   border: 1px solid var(--color-glass-border);
-  background: var(--color-surface-elevated);
-  box-shadow: 0 12px 48px rgba(0,0,0,0.1);
+  background: rgba(10, 16, 28, 0.12) !important;
+  backdrop-filter: blur(6px) saturate(108%);
+  -webkit-backdrop-filter: blur(6px) saturate(108%);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.12);
   display: flex; flex-direction: column;
 }
 
@@ -1000,7 +1145,7 @@ function formatDateTime(value?: string | null) { if (!value) return '未知'; co
   padding: 6px 8px;
   border-radius: 8px;
   border: 1px solid var(--color-outline);
-  background: color-mix(in srgb, var(--color-surface) 85%, transparent);
+  background: rgba(15, 23, 42, 0.12);
 }
 .panel-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--color-outline); }
 .panel-label { display: block; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--color-text-dim); }
@@ -1010,7 +1155,13 @@ function formatDateTime(value?: string | null) { if (!value) return '未知'; co
 .panel-body { height: calc(100% - 74px); }
 .panel-content { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
 .tag-row { display: flex; gap: 8px; flex-wrap: wrap; }
-.content-card, .mini-card, .time-card { padding: 14px; border-radius: 16px; border: 1px solid var(--color-outline); background: var(--color-surface); }
+.content-card, .mini-card, .time-card { padding: 14px; border-radius: 16px; border: 1px solid var(--color-outline); background: rgba(15, 23, 42, 0.1); }
+
+.detail-panel :deep(.n-scrollbar),
+.detail-panel :deep(.n-scrollbar-container),
+.detail-panel :deep(.n-scrollbar-content) {
+  background: transparent !important;
+}
 .node-title { margin: 0; color: var(--color-text); font-size: 16px; line-height: 1.55; font-weight: 600; }
 .node-meta { margin: 6px 0 0; color: var(--color-text-dim); font-size: 13px; font-weight: 500; }
 .metric-row { display: flex; justify-content: space-between; color: var(--color-text); font-size: 13px; font-weight: 500; }
@@ -1037,6 +1188,9 @@ function formatDateTime(value?: string | null) { if (!value) return '未知'; co
   color: var(--color-text-dim);
   text-shadow: 0 1px 4px var(--color-background);
   white-space: nowrap;
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   pointer-events: auto;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -1049,7 +1203,14 @@ function formatDateTime(value?: string | null) { if (!value) return '未知'; co
 
 @media (max-width: 1100px) {
   .insight-content { flex-direction: column; }
-  .detail-panel { width: 100%; min-height: 320px; }
+  .graph-area.has-detail-panel .top-hud {
+    right: 16px;
+  }
+  .detail-panel {
+    position: static;
+    width: 100%;
+    min-height: 320px;
+  }
   .left-hud {
     position: static;
     width: 100%;

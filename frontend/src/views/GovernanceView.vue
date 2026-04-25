@@ -337,7 +337,9 @@ onMounted(() => {
   align-items: center;
   padding: 12px 16px;
   border-radius: 12px;
-  background: rgba(var(--color-surface-rgb), 0.3);
+  background: rgba(10, 16, 28, 0.16);
+  backdrop-filter: blur(6px) saturate(108%);
+  -webkit-backdrop-filter: blur(6px) saturate(108%);
   border: 1px solid var(--color-outline);
 }
 
@@ -351,7 +353,9 @@ onMounted(() => {
   flex: 1;
   min-height: 0;
   border-radius: 12px;
-  background: rgba(var(--color-surface-rgb), 0.3);
+  background: rgba(10, 16, 28, 0.12);
+  backdrop-filter: blur(4px) saturate(106%);
+  -webkit-backdrop-filter: blur(4px) saturate(106%);
   border: 1px solid var(--color-outline);
   padding: 16px;
   display: flex;
@@ -361,5 +365,40 @@ onMounted(() => {
 .custom-table {
   flex: 1;
   min-height: 0;
+  --n-td-color: transparent !important;
+  --n-td-color-hover: rgba(56, 189, 248, 0.08) !important;
+  --n-th-color: rgba(15, 23, 42, 0.18) !important;
+  --n-border-color: rgba(125, 211, 252, 0.12) !important;
+  --n-merged-th-color: rgba(15, 23, 42, 0.18) !important;
+  --n-merged-td-color: transparent !important;
+}
+
+.custom-table :deep(.n-data-table),
+.custom-table :deep(.n-data-table-wrapper),
+.custom-table :deep(.n-data-table-base-table),
+.custom-table :deep(.n-data-table-base-table-body),
+.custom-table :deep(.n-data-table-table),
+.custom-table :deep(.n-data-table-tbody),
+.custom-table :deep(.n-data-table-tr),
+.custom-table :deep(.n-data-table-td) {
+  background: transparent !important;
+}
+
+.custom-table :deep(.n-data-table-th) {
+  background: rgba(15, 23, 42, 0.18) !important;
+}
+
+.custom-table :deep(.n-data-table-td) {
+  border-color: rgba(125, 211, 252, 0.1) !important;
+}
+
+.custom-table :deep(.n-data-table-tr:hover .n-data-table-td) {
+  background: rgba(56, 189, 248, 0.08) !important;
+}
+
+.custom-table :deep(.n-data-table-empty),
+.custom-table :deep(.n-data-table-loading-wrapper),
+.custom-table :deep(.n-pagination) {
+  background: transparent !important;
 }
 </style>

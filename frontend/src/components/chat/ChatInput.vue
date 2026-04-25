@@ -218,10 +218,9 @@ function handleMicMouseUp() {
   max-width: 1050px;
   margin: 0 auto;
   padding: 12px 16px;
-  /* 高级毛玻璃效果：极高透明度 */
-  background: color-mix(in srgb, var(--color-glass-bg) 20%, transparent);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  background: rgba(10, 16, 28, 0.1);
+  backdrop-filter: blur(8px) saturate(112%);
+  -webkit-backdrop-filter: blur(8px) saturate(112%);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 20px;
   pointer-events: auto;
@@ -233,7 +232,7 @@ function handleMicMouseUp() {
 
 .input-wrapper:focus-within {
   border-color: var(--color-primary);
-  background: color-mix(in srgb, var(--color-surface-elevated) 25%, transparent);
+  background: rgba(10, 16, 28, 0.16);
   box-shadow: 
     0 12px 40px 0 rgba(0, 0, 0, 0.3),
     0 0 0 1px var(--color-primary);

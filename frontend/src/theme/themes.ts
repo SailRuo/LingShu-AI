@@ -22,6 +22,7 @@ export const polarLight: ThemeConfig = {
     '--color-warning': '#b45309',
     '--color-error': '#b91c1c',
     '--color-glass-bg': 'rgba(255, 255, 255, 0.4)',
+    '--color-popover-bg': 'rgba(255, 255, 255, 0.96)',
     '--color-glass-border': 'rgba(0, 0, 0, 0.12)',
     '--color-bg-mesh-1': '#f1f5f9',
     '--color-bg-mesh-2': '#cbd5e1',
@@ -71,6 +72,7 @@ export const cyberPurple: ThemeConfig = {
     
     // 玻璃态效果
     '--color-glass-bg': 'rgba(10, 10, 20, 0.4)', // 黑玻璃
+    '--color-popover-bg': 'rgba(20, 20, 35, 0.96)', // 浮层需要比玻璃面板更实，保证选项可读
     '--color-glass-border': 'rgba(226, 232, 240, 0.2)',
     
     // Mesh 渐变背景 - 宇宙基调
@@ -128,6 +130,7 @@ export const deepTechFuturistic: ThemeConfig = {
     
     // 玻璃态效果
     '--color-glass-bg': 'rgba(5, 45, 35, 0.45)', // 深绿玻璃
+    '--color-popover-bg': 'rgba(10, 70, 55, 0.96)', // 浮层需要比玻璃面板更实，保证选项可读
     '--color-glass-border': 'rgba(52, 211, 153, 0.28)',
     
     // Mesh 渐变背景 - 深色基调
@@ -185,6 +188,7 @@ export const midnightBlue: ThemeConfig = {
     
     // 玻璃态效果
     '--color-glass-bg': 'rgba(15, 30, 60, 0.45)', // 深蓝玻璃
+    '--color-popover-bg': 'rgba(20, 50, 90, 0.96)', // 浮层需要比玻璃面板更实，保证选项可读
     '--color-glass-border': 'rgba(56, 189, 248, 0.25)',
     
     // Mesh 渐变背景 - 深蓝基调
@@ -231,7 +235,7 @@ export function buildNaiveOverrides(theme: ThemeConfig): GlobalThemeOverrides {
       bodyColor: t['--color-background'],
       cardColor: t['--color-surface'],
       modalColor: t['--color-surface-elevated'],
-      popoverColor: t['--color-glass-bg'],
+      popoverColor: t['--color-popover-bg'],
       textColor1: t['--color-text'],
       textColor2: t['--color-text-dim'],
       fontFamily: "'Inter', 'Plus Jakarta Sans', system-ui, sans-serif",
@@ -283,7 +287,7 @@ export function buildNaiveOverrides(theme: ThemeConfig): GlobalThemeOverrides {
       borderRadius: '12px',
     },
     Dropdown: {
-      color: t['--color-glass-bg'],
+      color: t['--color-popover-bg'],
       dividerColor: t['--color-outline'],
       borderRadius: '12px',
     },

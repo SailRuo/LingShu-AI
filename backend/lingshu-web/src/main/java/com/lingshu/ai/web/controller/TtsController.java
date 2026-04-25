@@ -90,7 +90,7 @@ public class TtsController {
             HttpRequest.Builder httpRequestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(targetUrl))
                     .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(60))
+                    .timeout(Duration.ofHours(1))
                     .POST(HttpRequest.BodyPublishers.ofString(jsonBody));
 
             if (apiKey != null && !apiKey.isBlank()) {
@@ -106,7 +106,7 @@ public class TtsController {
             if (statusCode == 200 && response.body() != null) {
                 StreamingResponseBody stream = outputStream -> {
                     try (java.io.InputStream is = response.body()) {
-                        byte[] buffer = new byte[4096];
+                        byte[] buffer = new byte[1024];
                         int bytesRead;
                         long totalSize = 0;
                         while ((bytesRead = is.read(buffer)) != -1) {

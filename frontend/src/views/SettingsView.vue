@@ -1626,7 +1626,10 @@ async function setDefaultAgent(id: number) {
 }
 
 .settings-tabs {
-  background: var(--color-surface);
+  background: rgba(10, 16, 28, 0.1);
+  backdrop-filter: blur(4px) saturate(106%);
+  -webkit-backdrop-filter: blur(4px) saturate(106%);
+  border: 1px solid var(--color-glass-border);
   border-radius: 16px;
   padding: 12px;
 }
@@ -1659,11 +1662,19 @@ async function setDefaultAgent(id: number) {
 }
 
 .glass-card {
-  background: var(--color-glass-bg) !important;
-  backdrop-filter: blur(20px);
+  background: rgba(10, 16, 28, 0.12) !important;
+  backdrop-filter: blur(6px) saturate(108%);
+  -webkit-backdrop-filter: blur(6px) saturate(108%);
   border: 1px solid var(--color-glass-border) !important;
   border-radius: 16px !important;
   padding: 14px !important;
+}
+
+.glass-card :deep(.n-card),
+.glass-card :deep(.n-card__content),
+.glass-card :deep(.n-card-header),
+.glass-card :deep(.n-card__footer) {
+  background: transparent !important;
 }
 
 .source-selector {
@@ -1911,7 +1922,14 @@ async function setDefaultAgent(id: number) {
 
 :deep(.n-input), :deep(.n-select .n-base-selection), :deep(.n-textarea) {
   --n-border-radius: 12px !important;
-  background-color: rgba(0,0,0,0.05) !important;
+  background-color: rgba(10, 16, 28, 0.08) !important;
+}
+
+:deep(.n-input-wrapper),
+:deep(.n-input__input),
+:deep(.n-input__textarea),
+:deep(.n-base-selection-label) {
+  background: transparent !important;
 }
 
 .item-hint {
@@ -1928,7 +1946,7 @@ async function setDefaultAgent(id: number) {
 
 .test-result {
   padding: 16px;
-  background: var(--color-glass-bg);
+  background: rgba(10, 16, 28, 0.1);
   border-radius: 12px;
   border: 1px solid var(--color-glass-border);
 }
@@ -1946,7 +1964,7 @@ async function setDefaultAgent(id: number) {
 }
 
 .prompt-tabs {
-  background: var(--color-glass-bg);
+  background: rgba(10, 16, 28, 0.1);
   border-radius: 12px;
   padding: 12px;
   border: 1px solid var(--color-glass-border);
@@ -1982,7 +2000,7 @@ async function setDefaultAgent(id: number) {
   min-width: 280px;
   max-width: 400px;
   padding: 20px;
-  background: var(--color-glass-bg);
+  background: rgba(10, 16, 28, 0.1);
   border: 1px solid var(--color-outline);
   border-radius: 12px;
   cursor: pointer;
@@ -2025,7 +2043,7 @@ async function setDefaultAgent(id: number) {
   align-items: center;
   margin-bottom: 24px;
   padding: 16px 20px;
-  background: var(--color-glass-bg);
+  background: rgba(10, 16, 28, 0.1);
   border-radius: 12px;
   border: 1px solid var(--color-glass-border);
 }
@@ -2039,7 +2057,7 @@ async function setDefaultAgent(id: number) {
 .empty-state {
   text-align: center;
   padding: 48px 24px;
-  background: var(--color-glass-bg);
+  background: rgba(10, 16, 28, 0.08);
   border-radius: 12px;
   border: 1px dashed var(--color-outline);
 }
@@ -2068,7 +2086,7 @@ async function setDefaultAgent(id: number) {
 }
 
 .account-card {
-  background: var(--color-glass-bg) !important;
+  background: rgba(10, 16, 28, 0.1) !important;
   border: 1px solid var(--color-glass-border) !important;
   border-radius: 12px !important;
   transition: all 0.3s ease;
