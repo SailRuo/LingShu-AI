@@ -72,22 +72,46 @@ async function speak(text: string, messageId?: string): Promise<void> {
     const url = getFullUrl(
       `/api/tts/speak?text=${encodeURIComponent(cleanText)}&seed=${settings.value.ttsDefaultSeed}`,
     );
-    currentAudio = new Audio(url);
+
+    // 使用 fetch 替代直接 new Audio，以便捕获 400 等错误状态码
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const errorDetail = errorData.detail || errorData.message || `HTTP ${response.status}`;
+      console.error("TTS request failed:", errorDetail);
+      // 可以在此处通过 message 组件提示用户，或者抛出错误
+      throw new Error(errorDetail);
+    }
+
+    const audioBlob = await response.blob();
+    const audioUrl = URL.createObjectURL(audioBlob);
+    
+    currentAudio = new Audio(audioUrl);
 
     currentAudio.onended = () => {
       isPlaying.value = false;
       currentPlayingId.value = null;
+      URL.revokeObjectURL(audioUrl); // 播放结束释放资源
     };
 
     currentAudio.onerror = (e) => {
       console.error("TTS audio playback error:", e);
       isPlaying.value = false;
       currentPlayingId.value = null;
+      URL.revokeObjectURL(audioUrl);
     };
 
     await currentAudio.play();
-  } catch (error) {
-    console.error("TTS error:", error);
+  } catch (error: any) {
+    const errorDetail = error.message || error;
+    console.error("TTS error:", errorDetail);
+    
+    // 弹窗提示用户
+    if ((window as any).$message) {
+      (window as any).$message.error(`语音合成失败: ${errorDetail}`);
+    }
+    
     isPlaying.value = false;
     currentPlayingId.value = null;
   }

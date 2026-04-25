@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { NConfigProvider, NMessageProvider, NDialogProvider, NNotificationProvider, NLoadingBarProvider, darkTheme } from 'naive-ui'
-import { computed, onMounted, markRaw, watch, ref } from 'vue'
+import { NConfigProvider, NMessageProvider, NDialogProvider, NNotificationProvider, NLoadingBarProvider, darkTheme, useMessage } from 'naive-ui'
+import { computed, onMounted, markRaw, watch, ref, defineComponent } from 'vue'
 import { useThemeStore } from '@/stores/themeStore'
 import { useLocalStorage } from '@vueuse/core'
 import { Menu, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
@@ -102,11 +102,20 @@ function getViewKey(menuKey: string): string {
   }
   return menuKey
 }
+
+// 挂载全局消息组件
+const GlobalMessage = defineComponent({
+  setup() {
+    (window as any).$message = useMessage()
+    return () => null
+  }
+})
 </script>
 
 <template>
   <n-config-provider :theme="naiveTheme" :theme-overrides="themeStore.naiveOverrides">
     <n-message-provider>
+      <GlobalMessage />
       <n-dialog-provider>
         <n-notification-provider>
           <n-loading-bar-provider>

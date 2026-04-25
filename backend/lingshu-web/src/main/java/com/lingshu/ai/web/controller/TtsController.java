@@ -70,43 +70,41 @@ public class TtsController {
         }
         final Integer finalSeed = (resolvedSeed != null) ? resolvedSeed : -1;
 
-        StreamingResponseBody stream = outputStream -> {
-            try {
-                java.util.Map<String, Object> requestBody = new java.util.HashMap<>();
-                requestBody.put("model", "voxcpm-2");
-                requestBody.put("input", requestText);
-                requestBody.put("voice", voice);
-                requestBody.put("speed", speed);
-                requestBody.put("response_format", format);
-                if (finalSeed != null) {
-                    requestBody.put("seed", finalSeed);
-                }
+        try {
+            java.util.Map<String, Object> requestBody = new java.util.HashMap<>();
+            requestBody.put("model", "voxcpm-2");
+            requestBody.put("input", requestText);
+            requestBody.put("voice", voice);
+            requestBody.put("speed", speed);
+            requestBody.put("response_format", format);
+            if (finalSeed != null) {
+                requestBody.put("seed", finalSeed);
+            }
 
-                String jsonBody = objectMapper.writeValueAsString(requestBody);
-                String targetUrl = baseUrl + "/v1/audio/speech";
+            String jsonBody = objectMapper.writeValueAsString(requestBody);
+            String targetUrl = baseUrl + "/v1/audio/speech";
 
-                log.info("[TTS] Target URL: {}", targetUrl);
-                log.info("[TTS] Request Payload: {}", jsonBody);
+            log.info("[TTS] Target URL: {}", targetUrl);
+            log.info("[TTS] Request Payload: {}", jsonBody);
 
-                HttpRequest.Builder httpRequestBuilder = HttpRequest.newBuilder()
-                        .uri(URI.create(targetUrl))
-                        .header("Content-Type", "application/json")
-                        .timeout(Duration.ofSeconds(60))
-                        .POST(HttpRequest.BodyPublishers.ofString(jsonBody));
+            HttpRequest.Builder httpRequestBuilder = HttpRequest.newBuilder()
+                    .uri(URI.create(targetUrl))
+                    .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(60))
+                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody));
 
-                if (apiKey != null && !apiKey.isBlank()) {
-                    httpRequestBuilder.header("Authorization", "Bearer " + apiKey);
-                    log.info("[TTS] Authorization header included. Token length: {}", apiKey.length());
-                } else {
-                    log.info("[TTS] No Authorization token provided.");
-                }
+            if (apiKey != null && !apiKey.isBlank()) {
+                httpRequestBuilder.header("Authorization", "Bearer " + apiKey);
+            }
 
-                log.info("[TTS] Sending HTTP POST request...");
-                HttpResponse<java.io.InputStream> response = httpClient.send(httpRequestBuilder.build(), HttpResponse.BodyHandlers.ofInputStream());
+            log.info("[TTS] Sending HTTP POST request...");
+            HttpResponse<java.io.InputStream> response = httpClient.send(httpRequestBuilder.build(), HttpResponse.BodyHandlers.ofInputStream());
 
-                log.info("[TTS] Received response. HTTP Status: {}", response.statusCode());
+            int statusCode = response.statusCode();
+            log.info("[TTS] Received response. HTTP Status: {}", statusCode);
 
-                if (response.statusCode() == 200 && response.body() != null) {
+            if (statusCode == 200 && response.body() != null) {
+                StreamingResponseBody stream = outputStream -> {
                     try (java.io.InputStream is = response.body()) {
                         byte[] buffer = new byte[4096];
                         int bytesRead;
@@ -117,24 +115,30 @@ public class TtsController {
                             totalSize += bytesRead;
                         }
                         log.info("[TTS] Audio stream write completed. Total size: {} bytes", totalSize);
+                    } catch (Exception e) {
+                        log.error("[TTS] Error while streaming audio: {}", e.getMessage());
                     }
-                } else {
-                    String errBody = "null";
-                    if (response.body() != null) {
-                        try (java.io.InputStream is = response.body()) {
-                            errBody = new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-                        }
+                };
+                return ResponseEntity.ok()
+                        .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                        .body(stream);
+            } else {
+                String errBody = "null";
+                if (response.body() != null) {
+                    try (java.io.InputStream is = response.body()) {
+                        errBody = new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
                     }
-                    log.error("[TTS] HTTP request failed. Status: {}, Body: {}", response.statusCode(), errBody);
                 }
-            } catch (Exception e) {
-                log.error("[TTS] Exception occurred during TTS request: {}", e.getMessage(), e);
+                log.error("[TTS] HTTP request failed. Status: {}, Body: {}", statusCode, errBody);
+                String finalErrBody = errBody;
+                return ResponseEntity.status(statusCode)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(errBody != null ? (StreamingResponseBody) out -> out.write(finalErrBody.getBytes()) : null);
             }
-        };
-
-        return ResponseEntity.ok()
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                .body(stream);
+        } catch (Exception e) {
+            log.error("[TTS] Exception occurred during TTS request: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
     }
 
     @GetMapping(value = "/voices", produces = MediaType.APPLICATION_JSON_VALUE)
