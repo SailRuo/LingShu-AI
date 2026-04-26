@@ -33,7 +33,7 @@ function handleSelect(item: any) {
       @mousedown="() => getCurrentWindow().startDragging()"
     >
       <div class="user-avatar" title="个人设置">
-        <img src="/linger.png" alt="avatar" />
+        <img src="/linger2.png" alt="avatar" />
       </div>
     </div>
 

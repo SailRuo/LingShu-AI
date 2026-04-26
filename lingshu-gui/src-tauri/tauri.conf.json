@@ -30,7 +30,7 @@
     "active": true,
     "targets": "all",
     "icon": [
-      "../public/ico.ico"
+      "../public/ico2.ico"
     ]
   }
 }

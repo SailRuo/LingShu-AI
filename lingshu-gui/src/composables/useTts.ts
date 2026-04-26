@@ -34,7 +34,15 @@ function stripMarkdown(text: string): string {
 
 const isPlaying = ref(false);
 const currentPlayingId = ref<string | null>(null);
-const autoTtsEnabled = ref(false);
+
+// 从 localStorage 读取持久化的自动语音状态
+const storedAutoTts = localStorage.getItem('lingshu_auto_tts');
+const autoTtsEnabled = ref(storedAutoTts === 'true');
+
+// 监听状态变化并持久化到 localStorage
+watch(autoTtsEnabled, (newValue) => {
+  localStorage.setItem('lingshu_auto_tts', String(newValue));
+});
 
 interface TtsChunk {
   text: string;
@@ -142,9 +150,11 @@ watch([isPlaying, currentIndex, chunks], () => {
 }, { deep: true });
 
 async function speak(text: string, messageId?: string): Promise<void> {
+  console.log('[TTS] speak called, text length:', text.length, 'messageId:', messageId);
   if (!text) return;
 
   if (isPlaying.value && currentPlayingId.value === messageId) {
+    console.log('[TTS] Stopping current playback for same message');
     stop();
     return;
   }
@@ -168,7 +178,10 @@ async function speak(text: string, messageId?: string): Promise<void> {
       return acc;
     }, []);
 
+  console.log('[TTS] Parsed chunks count:', textChunks.length);
+
   if (textChunks.length === 0) {
+    console.log('[TTS] No valid chunks, stopping');
     stop();
     return;
   }
@@ -181,12 +194,16 @@ async function speak(text: string, messageId?: string): Promise<void> {
   }));
 
   currentIndex.value = 0;
+  console.log('[TTS] Starting playback, calling fillLoadWindow');
   fillLoadWindow();
 }
 
 // 增量添加文本（用于流式输出）
 function appendText(text: string, messageId: string, isFinished: boolean = false) {
+  console.log('[TTS] appendText called, text length:', text.length, 'isFinished:', isFinished, 'currentPlayingId:', currentPlayingId.value);
+  
   if (!isPlaying.value || currentPlayingId.value !== messageId) {
+    console.log('[TTS] Not playing this message, starting new playback');
     // 如果当前没有在播放这条消息，则启动播放
     speak(text, messageId);
     return;
@@ -212,6 +229,8 @@ function appendText(text: string, messageId: string, isFinished: boolean = false
     }
   }
 
+  console.log('[TTS] appendText parsed chunks:', textChunks.length, 'existing chunks:', chunks.value.length);
+
   if (textChunks.length === 0) return;
 
   // 找出新增的 chunk
@@ -225,6 +244,7 @@ function appendText(text: string, messageId: string, isFinished: boolean = false
       index: existingCount + i
     }));
 
+    console.log('[TTS] Adding', newChunks.length, 'new chunks');
     chunks.value.push(...newChunks);
     fillLoadWindow();
   }

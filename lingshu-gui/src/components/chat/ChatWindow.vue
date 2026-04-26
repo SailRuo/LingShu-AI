@@ -4,10 +4,24 @@ import MessageList from './MessageList.vue';
 import InputArea from './InputArea.vue';
 import { useChatStore } from '../../stores/chat';
 import { useTts } from '../../composables/useTts';
-import { watch } from 'vue';
+import { watch, ref } from 'vue';
 
 const chatStore = useChatStore();
 const { autoTtsEnabled, speak, appendText } = useTts();
+
+// 记录上次处理的消息 ID 和内容，用于检测流式更新
+const lastProcessedMessageId = ref<string | null>(null);
+const lastProcessedContent = ref<string>('');
+
+// 切换会话时重置处理记录，防止误触发
+watch(
+  () => chatStore.currentConversationId,
+  () => {
+    console.log('[TTS Debug] Conversation changed, resetting processed records');
+    lastProcessedMessageId.value = null;
+    lastProcessedContent.value = '';
+  }
+);
 
 async function handleSend(content: string, attachments: any[]) {
   await chatStore.sendMessage(content, attachments);
@@ -16,38 +30,47 @@ async function handleSend(content: string, attachments: any[]) {
 // 监听消息变化，实现自动语音合成
 watch(
   () => chatStore.currentMessages,
-  (newMessages, oldMessages) => {
+  (newMessages) => {
     if (!autoTtsEnabled.value) return;
+    if (newMessages.length === 0) return;
     
-    // 找到新增加的消息
-    const oldLength = oldMessages?.length || 0;
-    if (newMessages.length > oldLength) {
-      const latestMessage = newMessages[newMessages.length - 1];
+    // 获取最后一条 AI 消息
+    const latestMessage = newMessages[newMessages.length - 1];
+    
+    // 只处理 AI 的消息，且是文本消息
+    if (latestMessage.isSelf || latestMessage.type !== 'text') return;
+    
+    const content = latestMessage.content || '';
+    const messageId = latestMessage.id;
+    const isFinished = latestMessage.status === 'sent';
+    
+    // 检查是否是新的消息 ID
+    if (messageId !== lastProcessedMessageId.value) {
+      console.log('[TTS Debug] New message ID detected:', messageId, 'status:', latestMessage.status);
       
-      // 只处理 AI 的消息，且是文本消息
-      if (!latestMessage.isSelf && latestMessage.type === 'text') {
-        const content = latestMessage.content;
-        if (content && content.trim().length > 0) {
-          speak(content, latestMessage.id);
-        }
+      // 关键逻辑：如果新消息的状态已经是 'sent'，说明是加载的历史记录，不触发 TTS
+      if (latestMessage.status === 'sent') {
+        console.log('[TTS Debug] History message detected, skipping TTS');
+        lastProcessedMessageId.value = messageId;
+        lastProcessedContent.value = content;
+        return;
       }
-    } else if (newMessages.length > 0) {
-      // 处理流式更新的消息
-      const latestMessage = newMessages[newMessages.length - 1];
-      if (!latestMessage.isSelf && latestMessage.type === 'text') {
-        const oldMessage = oldMessages?.find(m => m.id === latestMessage.id);
-        if (oldMessage && oldMessage.type === 'text') {
-          const newContent = latestMessage.content;
-          const oldContent = oldMessage.content;
-          const isFinished = latestMessage.status === 'sent';
-          
-          if (newContent !== oldContent || (isFinished && oldMessage.status === 'sending')) {
-             // 使用 appendText 进行增量处理，它会根据标点符号自动分段并追加播放队列
-             // 如果 isFinished 为 true，则会强制处理最后一段文本
-             appendText(newContent, latestMessage.id, isFinished);
-          }
-        }
+      
+      // 只有状态为 'sending' 的新消息才触发 speak
+      lastProcessedMessageId.value = messageId;
+      lastProcessedContent.value = content;
+      if (content.trim().length > 0) {
+        console.log('[TTS Debug] New real-time message, calling speak');
+        speak(content, messageId);
       }
+      return;
+    }
+    
+    // 同一条消息的内容更新（流式输出）
+    if (content !== lastProcessedContent.value) {
+      console.log('[TTS Debug] Content updated, calling appendText');
+      lastProcessedContent.value = content;
+      appendText(content, messageId, isFinished);
     }
   },
   { deep: true }
