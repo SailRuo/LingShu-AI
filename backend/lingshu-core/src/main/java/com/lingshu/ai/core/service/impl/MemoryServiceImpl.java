@@ -5,13 +5,16 @@ import com.lingshu.ai.core.dto.RetrievalContextSnapshot;
 import com.lingshu.ai.core.dto.RetrievalFactCandidate;
 import com.lingshu.ai.core.service.FactSemanticClassifier;
 import com.lingshu.ai.core.service.MemoryService;
+import com.lingshu.ai.core.service.MemoryStateProjector;
 import com.lingshu.ai.core.service.EmotionAwareFactExtractor;
 import com.lingshu.ai.core.dto.ExtractionResult;
 import com.lingshu.ai.core.model.DynamicMemoryModel;
 import com.lingshu.ai.core.service.RetrievalContextSnapshotStore;
 import com.lingshu.ai.infrastructure.entity.FactNode;
+import com.lingshu.ai.infrastructure.entity.MemoryStateRecord;
 import com.lingshu.ai.infrastructure.entity.UserNode;
 import com.lingshu.ai.infrastructure.repository.FactRepository;
+import com.lingshu.ai.infrastructure.repository.MemoryStateRecordRepository;
 import com.lingshu.ai.infrastructure.repository.UserRepository;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
@@ -20,8 +23,10 @@ import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
 import dev.langchain4j.store.embedding.EmbeddingSearchResult;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import dev.langchain4j.data.segment.TextSegment;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.neo4j.core.Neo4jClient;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -63,6 +68,11 @@ public class MemoryServiceImpl implements MemoryService {
     private static final long HISTORY_EMBED_TIMEOUT_SECONDS = 6;
     private static final long HISTORY_SEARCH_TIMEOUT_SECONDS = 4;
     private static final int RECENT_RETRIEVAL_EVENT_LIMIT = 50;
+    private static final double MEMORY_STATE_BONUS_ALPHA = 0.12d;
+    private static final String METRIC_STATE_BONUS_EVALUATED = "lingshu.memory.state.bonus.evaluated";
+    private static final String METRIC_STATE_BONUS_APPLIED = "lingshu.memory.state.bonus.applied";
+    private static final String METRIC_STATE_BONUS_SKIPPED = "lingshu.memory.state.bonus.skipped";
+    private static final String METRIC_STATE_BONUS_VALUE = "lingshu.memory.state.bonus.value";
     private static final java.util.Set<String> STOP_WORDS = java.util.Set.of(
             "的", "了", "是", "在", "我", "你", "他", "她", "它", "们",
             "这", "那", "有", "和", "与", "或", "但", "如果", "因为",
@@ -83,6 +93,9 @@ public class MemoryServiceImpl implements MemoryService {
     private final com.lingshu.ai.core.service.SettingService settingService;
     private final Executor taskExecutor;
     private final RetrievalContextSnapshotStore retrievalContextSnapshotStore;
+    private final MemoryStateRecordRepository memoryStateRecordRepository;
+    private final MemoryStateProjector memoryStateProjector;
+    private final boolean memoryStateReadEnabled;
     private FactSemanticClassifier factSemanticClassifier;
     private com.lingshu.ai.core.service.FactRelationshipEvaluator factRelationshipEvaluator;
     private EmotionAwareFactExtractor emotionAwareFactExtractor;
@@ -90,6 +103,10 @@ public class MemoryServiceImpl implements MemoryService {
     private volatile Map<String, Object> lastMaintenanceSummary = Collections.emptyMap();
     private final Object retrievalEventsLock = new Object();
     private final java.util.Deque<com.lingshu.ai.core.dto.MemoryRetrievalEvent> recentRetrievalEvents = new java.util.ArrayDeque<>();
+    private final ThreadLocal<double[]> stateBonusQueryVector = new ThreadLocal<>();
+    private final ThreadLocal<Map<Long, java.util.Optional<MemoryStateRecord>>> stateRecordCache = new ThreadLocal<>();
+    @Autowired(required = false)
+    private MeterRegistry meterRegistry;
 
     public MemoryServiceImpl(UserRepository userRepository,
                              dev.langchain4j.model.embedding.EmbeddingModel embeddingModel,
@@ -103,7 +120,7 @@ public class MemoryServiceImpl implements MemoryService {
                              Executor taskExecutor) {
         this(userRepository, embeddingModel, embeddingStore, factRepository, neo4jClient, systemLogService,
                 settingService, chatLanguageModel, dynamicMemoryModel, taskExecutor,
-                new InMemoryRetrievalContextSnapshotStore());
+                new InMemoryRetrievalContextSnapshotStore(), null, null, false);
     }
 
     @Autowired
@@ -117,7 +134,10 @@ public class MemoryServiceImpl implements MemoryService {
                              ChatModel chatLanguageModel,
                              DynamicMemoryModel dynamicMemoryModel,
                              Executor taskExecutor,
-                             RetrievalContextSnapshotStore retrievalContextSnapshotStore) {
+                             RetrievalContextSnapshotStore retrievalContextSnapshotStore,
+                             MemoryStateRecordRepository memoryStateRecordRepository,
+                             MemoryStateProjector memoryStateProjector,
+                             @Value("${feature.memory.state.read.enabled:false}") boolean memoryStateReadEnabled) {
         this.userRepository = userRepository;
         this.embeddingModel = embeddingModel;
         this.embeddingStore = embeddingStore;
@@ -129,6 +149,25 @@ public class MemoryServiceImpl implements MemoryService {
         this.dynamicMemoryModel = dynamicMemoryModel;
         this.taskExecutor = taskExecutor;
         this.retrievalContextSnapshotStore = retrievalContextSnapshotStore;
+        this.memoryStateRecordRepository = memoryStateRecordRepository;
+        this.memoryStateProjector = memoryStateProjector;
+        this.memoryStateReadEnabled = memoryStateReadEnabled;
+    }
+
+    protected MemoryServiceImpl(UserRepository userRepository,
+                                dev.langchain4j.model.embedding.EmbeddingModel embeddingModel,
+                                dev.langchain4j.store.embedding.EmbeddingStore<TextSegment> embeddingStore,
+                                FactRepository factRepository,
+                                Neo4jClient neo4jClient,
+                                com.lingshu.ai.core.service.SystemLogService systemLogService,
+                                com.lingshu.ai.core.service.SettingService settingService,
+                                ChatModel chatLanguageModel,
+                                DynamicMemoryModel dynamicMemoryModel,
+                                Executor taskExecutor,
+                                RetrievalContextSnapshotStore retrievalContextSnapshotStore) {
+        this(userRepository, embeddingModel, embeddingStore, factRepository, neo4jClient, systemLogService,
+                settingService, chatLanguageModel, dynamicMemoryModel, taskExecutor, retrievalContextSnapshotStore,
+                null, null, false);
     }
 
     @PostConstruct
@@ -622,81 +661,90 @@ public class MemoryServiceImpl implements MemoryService {
                 .finalRankedContent(new ArrayList<>())
                 .finalRankedIds(new ArrayList<>());
 
-        List<String> entities = extractEntities(message);
-        eventBuilder.extractedEntities(entities);
+        stateBonusQueryVector.set(buildStateBonusQueryVector(message));
+        stateRecordCache.set(new HashMap<>());
+        try {
+            List<String> entities = extractEntities(message);
+            eventBuilder.extractedEntities(entities);
 
-        // 1. 图谱检索 (Graph Retrieval)
-        List<GraphRetrievalHit> graphFacts = performGraphRetrievalV2(userId, message, entities, eventBuilder);
+            // 1. 图谱检索 (Graph Retrieval)
+            List<GraphRetrievalHit> graphFacts = performGraphRetrievalV2(userId, message, entities, eventBuilder);
 
-        // 2. 路由决策 (Routing Decision)
-        double gain = calculateGainV2(entities, graphFacts);
-        eventBuilder.gain(gain);
-        long multiHopCount = graphFacts.stream().filter(hit -> hit.hop >= 2).count();
-        long supersededCount = graphFacts.stream()
-                .filter(hit -> hit.fact.getStatus() != null && "superseded".equalsIgnoreCase(hit.fact.getStatus()))
-                .count();
-        long staleCount = graphFacts.stream()
-                .filter(hit -> hit.fact.getObservedAt() != null
-                        && Duration.between(hit.fact.getObservedAt(), LocalDateTime.now()).toDays() > 90)
-                .count();
-        String routingDecision;
-        boolean runVector;
+            // 2. 路由决策 (Routing Decision)
+            double gain = calculateGainV2(entities, graphFacts);
+            eventBuilder.gain(gain);
+            long multiHopCount = graphFacts.stream().filter(hit -> hit.hop >= 2).count();
+            long supersededCount = graphFacts.stream()
+                    .filter(hit -> hit.fact.getStatus() != null && "superseded".equalsIgnoreCase(hit.fact.getStatus()))
+                    .count();
+            long staleCount = graphFacts.stream()
+                    .filter(hit -> hit.fact.getObservedAt() != null
+                            && Duration.between(hit.fact.getObservedAt(), LocalDateTime.now()).toDays() > 90)
+                    .count();
+            String routingDecision;
+            boolean runVector;
 
-        if (gain >= GAIN_THRESHOLD) {
-            routingDecision = "GRAPH_PRIORITIZED_VECTOR_SUPPLEMENT";
-            runVector = true;
-            systemLogService.info(String.format("路由决策: 图谱增益(%.2f) >= 阈值(%.2f)，执行图谱优先+向量补召回", gain, GAIN_THRESHOLD), "MEMORY");
-        } else if (graphFacts.isEmpty()) {
-            routingDecision = "VECTOR_BACKUP";
-            runVector = true;
-            systemLogService.info(String.format("路由决策: 图谱增益(%.2f) < 阈值，但图谱无结果，执行向量兜底", gain), "MEMORY");
-        } else {
-            routingDecision = "GRAPH_ONLY";
-            runVector = false;
-            systemLogService.info(String.format("路由决策: 图谱增益(%.2f) < 阈值，且图谱已有结果，直接返回图谱内容", gain), "MEMORY");
+            if (gain >= GAIN_THRESHOLD) {
+                routingDecision = "GRAPH_PRIORITIZED_VECTOR_SUPPLEMENT";
+                runVector = true;
+                systemLogService.info(String.format("路由决策: 图谱增益(%.2f) >= 阈值(%.2f)，执行图谱优先+向量补召回", gain, GAIN_THRESHOLD), "MEMORY");
+            } else if (graphFacts.isEmpty()) {
+                routingDecision = "VECTOR_BACKUP";
+                runVector = true;
+                systemLogService.info(String.format("路由决策: 图谱增益(%.2f) < 阈值，但图谱无结果，执行向量兜底", gain), "MEMORY");
+            } else {
+                routingDecision = "GRAPH_ONLY";
+                runVector = false;
+                systemLogService.info(String.format("路由决策: 图谱增益(%.2f) < 阈值，且图谱已有结果，直接返回图谱内容", gain), "MEMORY");
+            }
+            eventBuilder.routingDecision(routingDecision);
+            systemLogService.info(String.format(
+                    "Routing stats: multiHop=%d, supersededPenalty=%d, stalePenalty=%d, gain=%.2f",
+                    multiHopCount, supersededCount, staleCount, gain), "MEMORY");
+
+            // 3. 向量检索 (Vector Retrieval)
+            List<RetrievedFact> graphRetrievedFacts = buildGraphRetrievedFacts(graphFacts);
+            List<RetrievedFact> vectorRetrievedFacts = new ArrayList<>();
+            if (runVector) {
+                vectorRetrievedFacts = performVectorRetrievalV2(userId, message, eventBuilder);
+            }
+
+            // 4. 合并与去重 (Merge and Deduplicate) - Task 3.1 & 3.2
+            RetrievalMergeResult mergeResult = mergeAndDeduplicate(graphRetrievedFacts, vectorRetrievedFacts);
+            List<RetrievedFact> selectedFacts = mergeResult.selectedFacts();
+            List<RetrievalFactCandidate> finalContextFacts = buildContextSnapshotFacts(selectedFacts);
+            List<String> finalFacts = finalContextFacts.stream()
+                    .map(RetrievalFactCandidate::getContent)
+                    .collect(Collectors.toList());
+
+            // 5. 组装上下文与记录事件
+            StringBuilder contextBuilder = new StringBuilder();
+            if (!finalFacts.isEmpty()) {
+                contextBuilder.append("关于核心上下文的已知事实与记忆：\n");
+                finalFacts.forEach(fact -> contextBuilder.append("- ").append(fact).append("\n"));
+            }
+
+            List<Long> adoptedFactIds = finalContextFacts.stream()
+                    .map(RetrievalFactCandidate::getFactId)
+                    .filter(java.util.Objects::nonNull)
+                    .distinct()
+                    .collect(Collectors.toList());
+            eventBuilder.adoptedFactIds(adoptedFactIds);
+            eventBuilder.finalRankedContent(finalFacts);
+            eventBuilder.finalRankedIds(adoptedFactIds);
+            com.lingshu.ai.core.dto.MemoryRetrievalEvent event = eventBuilder.build();
+            recordRetrievalEvent(event);
+            if (turnId == null) {
+                updateRelationshipsFromRetrievalEvent(event);
+            }
+            storeRetrievalSnapshot(userId, sessionId, turnId, message, routingDecision, gain,
+                    graphRetrievedFacts, vectorRetrievedFacts, selectedFacts);
+
+            return contextBuilder.toString();
+        } finally {
+            stateBonusQueryVector.remove();
+            stateRecordCache.remove();
         }
-        eventBuilder.routingDecision(routingDecision);
-        systemLogService.info(String.format(
-                "Routing stats: multiHop=%d, supersededPenalty=%d, stalePenalty=%d, gain=%.2f",
-                multiHopCount, supersededCount, staleCount, gain), "MEMORY");
-
-        // 3. 向量检索 (Vector Retrieval)
-        List<RetrievedFact> graphRetrievedFacts = buildGraphRetrievedFacts(graphFacts);
-        List<RetrievedFact> vectorRetrievedFacts = new ArrayList<>();
-        if (runVector) {
-            vectorRetrievedFacts = performVectorRetrievalV2(userId, message, eventBuilder);
-        }
-
-        // 4. 合并与去重 (Merge and Deduplicate) - Task 3.1 & 3.2
-        RetrievalMergeResult mergeResult = mergeAndDeduplicate(graphRetrievedFacts, vectorRetrievedFacts);
-        List<RetrievedFact> selectedFacts = mergeResult.selectedFacts();
-        List<RetrievalFactCandidate> finalContextFacts = buildContextSnapshotFacts(selectedFacts);
-        List<String> finalFacts = finalContextFacts.stream()
-                .map(RetrievalFactCandidate::getContent)
-                .collect(Collectors.toList());
-
-        // 5. 组装上下文与记录事件
-        StringBuilder contextBuilder = new StringBuilder();
-        if (!finalFacts.isEmpty()) {
-            contextBuilder.append("关于核心上下文的已知事实与记忆：\n");
-            finalFacts.forEach(fact -> contextBuilder.append("- ").append(fact).append("\n"));
-        }
-
-        List<Long> adoptedFactIds = finalContextFacts.stream()
-                .map(RetrievalFactCandidate::getFactId)
-                .filter(java.util.Objects::nonNull)
-                .distinct()
-                .collect(Collectors.toList());
-        eventBuilder.adoptedFactIds(adoptedFactIds);
-        eventBuilder.finalRankedContent(finalFacts);
-        eventBuilder.finalRankedIds(adoptedFactIds);
-        com.lingshu.ai.core.dto.MemoryRetrievalEvent event = eventBuilder.build();
-        recordRetrievalEvent(event);
-        updateRelationshipsFromRetrievalEvent(event);
-        storeRetrievalSnapshot(userId, sessionId, turnId, message, routingDecision, gain,
-                graphRetrievedFacts, vectorRetrievedFacts, selectedFacts);
-
-        return contextBuilder.toString();
     }
 
     private void storeRetrievalSnapshot(String userId,
@@ -775,7 +823,9 @@ public class MemoryServiceImpl implements MemoryService {
                 List<FactNode> matched = user.getFacts().stream()
                         .filter(f -> f.getContent() != null && entities.stream()
                                 .anyMatch(e -> f.getContent().toLowerCase().contains(e.toLowerCase())))
-                        .sorted((f1, f2) -> Double.compare(f2.getImportance(), f1.getImportance()))
+                        .sorted((left, right) -> Double.compare(
+                                computeAdaptiveGraphScore(right, 1, 1.0),
+                                computeAdaptiveGraphScore(left, 1, 1.0)))
                         .limit(8)
                         .toList();
                 oneHop.addAll(matched.stream().map(fact -> new GraphRetrievalHit(fact, 1, 1.0)).collect(Collectors.toList()));
@@ -786,7 +836,9 @@ public class MemoryServiceImpl implements MemoryService {
             if (directHits.size() < 3 || isIdentity) {
                 List<FactNode> coreFacts = user.getFacts().stream()
                         .filter(f -> oneHop.stream().noneMatch(hit -> java.util.Objects.equals(hit.fact.getId(), f.getId())))
-                        .sorted((f1, f2) -> Double.compare(f2.getImportance(), f1.getImportance()))
+                        .sorted((left, right) -> Double.compare(
+                                computeAdaptiveGraphScore(right, 1, 1.0),
+                                computeAdaptiveGraphScore(left, 1, 1.0)))
                         .limit(isIdentity ? 5 : 2)
                         .toList();
                 oneHop.addAll(coreFacts.stream().map(fact -> new GraphRetrievalHit(fact, 1, 1.0)).collect(Collectors.toList()));
@@ -798,7 +850,7 @@ public class MemoryServiceImpl implements MemoryService {
                 expanded.addAll(loadSecondHopFacts(user, directHits));
             }
 
-            List<GraphRetrievalHit> deduplicated = deduplicateGraphHits(expanded);
+            List<GraphRetrievalHit> deduplicated = sortGraphHitsByAdaptiveScore(deduplicateGraphHits(expanded));
             result.addAll(deduplicated);
             eventBuilder.graphMatchedContent(deduplicated.stream().map(hit -> hit.fact.getContent()).collect(Collectors.toList()));
             eventBuilder.graphMatchedIds(deduplicated.stream()
@@ -911,6 +963,131 @@ public class MemoryServiceImpl implements MemoryService {
         return new ArrayList<>(deduped.values());
     }
 
+    protected List<GraphRetrievalHit> sortGraphHitsByAdaptiveScore(List<GraphRetrievalHit> hits) {
+        return hits.stream()
+                .sorted((left, right) -> Double.compare(
+                        computeAdaptiveGraphScore(right.fact, right.hop, right.relationWeight),
+                        computeAdaptiveGraphScore(left.fact, left.hop, left.relationWeight)))
+                .toList();
+    }
+
+    protected double computeAdaptiveGraphScore(FactNode fact, int hop, double relationWeight) {
+        double score = fact.getImportance() * 0.55
+                + effectiveConfidenceForAdaptiveRanking(fact) * 0.30
+                + Math.max(0.0, relationWeight) * 0.15;
+        score += computeMemoryStateBonus(fact);
+        LocalDateTime now = LocalDateTime.now();
+        if (fact.getStatus() != null && "superseded".equalsIgnoreCase(fact.getStatus())) {
+            score *= 0.35;
+        }
+        if (fact.getObservedAt() != null && Duration.between(fact.getObservedAt(), now).toDays() > 90) {
+            score *= 0.7;
+        }
+        if (hop >= 2) {
+            score *= 0.75;
+        }
+        return score;
+    }
+
+    private double computeMemoryStateBonus(FactNode fact) {
+        if (!memoryStateReadEnabled || fact == null || fact.getId() == null
+                || memoryStateRecordRepository == null || memoryStateProjector == null) {
+            incrementMetric(METRIC_STATE_BONUS_SKIPPED);
+            return 0.0d;
+        }
+        double[] queryVector = stateBonusQueryVector.get();
+        if (queryVector == null || queryVector.length == 0) {
+            incrementMetric(METRIC_STATE_BONUS_SKIPPED);
+            return 0.0d;
+        }
+        incrementMetric(METRIC_STATE_BONUS_EVALUATED);
+        Map<Long, java.util.Optional<MemoryStateRecord>> cache = stateRecordCache.get();
+        if (cache == null) {
+            cache = new HashMap<>();
+            stateRecordCache.set(cache);
+        }
+        java.util.Optional<MemoryStateRecord> recordOptional;
+        if (cache.containsKey(fact.getId())) {
+            recordOptional = cache.get(fact.getId());
+        } else {
+            recordOptional = memoryStateRecordRepository.findByFactId(fact.getId());
+            cache.put(fact.getId(), recordOptional);
+        }
+        if (recordOptional == null || recordOptional.isEmpty()) {
+            incrementMetric(METRIC_STATE_BONUS_SKIPPED);
+            return 0.0d;
+        }
+        MemoryStateRecord stateRecord = recordOptional.get();
+        double bonus = memoryStateProjector.computeStateBonus(
+                stateRecord.getTaskVector(),
+                stateRecord.getTaskUncertainty(),
+                queryVector,
+                MEMORY_STATE_BONUS_ALPHA
+        );
+        if (bonus > 0.0d) {
+            incrementMetric(METRIC_STATE_BONUS_APPLIED);
+            recordSummary(METRIC_STATE_BONUS_VALUE, bonus);
+        } else {
+            incrementMetric(METRIC_STATE_BONUS_SKIPPED);
+        }
+        return bonus;
+    }
+
+    private double[] buildStateBonusQueryVector(String query) {
+        if (!memoryStateReadEnabled || memoryStateProjector == null || memoryStateRecordRepository == null
+                || query == null || query.isBlank()) {
+            return null;
+        }
+        try {
+            dev.langchain4j.data.embedding.Embedding queryEmbedding = embeddingModel.embed(query).content();
+            if (queryEmbedding == null || queryEmbedding.vector() == null) {
+                return null;
+            }
+            float[] raw = queryEmbedding.vector();
+            double[] converted = new double[raw.length];
+            for (int i = 0; i < raw.length; i++) {
+                converted[i] = raw[i];
+            }
+            return converted;
+        } catch (Exception exception) {
+            log.warn("Memory state read embedding failed: {}", exception.getMessage());
+            incrementMetric(METRIC_STATE_BONUS_SKIPPED);
+            return null;
+        }
+    }
+
+    void setStateBonusContextForTest(double[] queryVector) {
+        stateBonusQueryVector.set(queryVector);
+        stateRecordCache.set(new HashMap<>());
+    }
+
+    void clearStateBonusContextForTest() {
+        stateBonusQueryVector.remove();
+        stateRecordCache.remove();
+    }
+
+    private void incrementMetric(String metricName) {
+        if (meterRegistry != null) {
+            meterRegistry.counter(metricName).increment();
+        }
+    }
+
+    private void recordSummary(String metricName, double value) {
+        if (meterRegistry != null) {
+            meterRegistry.summary(metricName).record(value);
+        }
+    }
+
+    private double effectiveConfidenceForAdaptiveRanking(FactNode fact) {
+        if (fact == null) {
+            return 0.84;
+        }
+        if (fact.getConfidence() > 0) {
+            return fact.getConfidence();
+        }
+        return Math.min(0.95, Math.max(0.55, fact.getImportance() + 0.08));
+    }
+
     protected double calculateGainV2(List<String> entities, List<GraphRetrievalHit> activatedFacts) {
         if (entities.isEmpty() || activatedFacts.isEmpty()) {
             return 0.0;
@@ -918,7 +1095,6 @@ public class MemoryServiceImpl implements MemoryService {
 
         Set<String> matchedEntities = new java.util.HashSet<>();
         double totalImportance = 0.0;
-        LocalDateTime now = LocalDateTime.now();
 
         for (GraphRetrievalHit hit : activatedFacts) {
             FactNode fact = hit.fact;
@@ -934,17 +1110,7 @@ public class MemoryServiceImpl implements MemoryService {
                 continue;
             }
 
-            double importance = fact.getImportance();
-            if (fact.getStatus() != null && "superseded".equalsIgnoreCase(fact.getStatus())) {
-                importance *= 0.3;
-            }
-            if (fact.getObservedAt() != null && Duration.between(fact.getObservedAt(), now).toDays() > 90) {
-                importance *= 0.7;
-            }
-            if (hit.hop >= 2) {
-                importance *= 0.7;
-            }
-            totalImportance += importance;
+            totalImportance += computeAdaptiveGraphScore(fact, hit.hop, hit.relationWeight);
         }
 
         double entityRatio = (double) matchedEntities.size() / entities.size();
@@ -1503,10 +1669,10 @@ public class MemoryServiceImpl implements MemoryService {
         }
 
         List<Map<String, Object>> inferred = buildInferredFactLinks(factContexts);
+        List<Map<String, Object>> persisted = loadPersistedFactLinks(factContexts);
         factRepository.deleteFactRelationsByFactIds(factIds);
 
-        List<Map<String, Object>> related = inferred.stream().filter(link -> "RELATED_TO".equals(link.get("type")))
-                .collect(Collectors.toList());
+        List<Map<String, Object>> related = mergeRelatedLinksWithPersistedWeights(inferred, persisted);
         List<Map<String, Object>> supersedes = inferred.stream().filter(link -> "SUPERSEDES".equals(link.get("type")))
                 .collect(Collectors.toList());
         List<Map<String, Object>> contradicts = inferred.stream().filter(link -> "CONTRADICTS".equals(link.get("type")))
@@ -1559,6 +1725,48 @@ public class MemoryServiceImpl implements MemoryService {
                 .collect(Collectors.toList());
     }
 
+    List<Map<String, Object>> mergeRelatedLinksWithPersistedWeights(List<Map<String, Object>> inferredLinks,
+                                                                    List<Map<String, Object>> persistedLinks) {
+        List<Map<String, Object>> inferredRelated = inferredLinks.stream()
+                .filter(link -> "RELATED_TO".equals(link.get("type")))
+                .toList();
+        Map<String, Map<String, Object>> persistedRelatedByPair = persistedLinks.stream()
+                .filter(link -> "RELATED_TO".equals(link.get("type")))
+                .collect(Collectors.toMap(
+                        this::relationPairKey,
+                        link -> new LinkedHashMap<>(link),
+                        (left, right) -> left,
+                        LinkedHashMap::new
+                ));
+        java.util.Set<String> inferredRelationPairs = inferredRelated.stream()
+                .map(this::relationPairKey)
+                .collect(Collectors.toCollection(java.util.LinkedHashSet::new));
+        java.util.Set<String> inferredNonRelatedPairs = inferredLinks.stream()
+                .filter(link -> !"RELATED_TO".equals(link.get("type")))
+                .map(this::relationPairKey)
+                .collect(Collectors.toCollection(java.util.LinkedHashSet::new));
+        List<Map<String, Object>> merged = inferredRelated.stream()
+                .map(link -> {
+                    Map<String, Object> persisted = persistedRelatedByPair.get(relationPairKey(link));
+                    if (persisted == null) {
+                        return new LinkedHashMap<>(link);
+                    }
+                    Map<String, Object> preserved = new LinkedHashMap<>(link);
+                    preserved.put("weight", persisted.get("weight"));
+                    preserved.put("lastActivatedAt", persisted.get("lastActivatedAt"));
+                    return preserved;
+                })
+                .collect(Collectors.toCollection(ArrayList::new));
+
+        persistedRelatedByPair.forEach((pairKey, link) -> {
+            if (!inferredRelationPairs.contains(pairKey) && !inferredNonRelatedPairs.contains(pairKey)) {
+                merged.add(new LinkedHashMap<>(link));
+            }
+        });
+
+        return merged;
+    }
+
     private List<Map<String, Object>> prepareRelationRows(List<Map<String, Object>> links) {
         return links.stream().map(link -> {
             Map<String, Object> row = new LinkedHashMap<>();
@@ -1584,6 +1792,14 @@ public class MemoryServiceImpl implements MemoryService {
             return number.longValue();
         }
         return Long.parseLong(String.valueOf(value));
+    }
+
+    private String relationPairKey(Map<String, Object> link) {
+        Long sourceId = castLong(String.valueOf(link.get("source")).replace("fact_", ""));
+        Long targetId = castLong(String.valueOf(link.get("target")).replace("fact_", ""));
+        long left = Math.min(sourceId, targetId);
+        long right = Math.max(sourceId, targetId);
+        return left + ":" + right;
     }
 
     private LocalDateTime castLocalDateTime(Object value) {
@@ -2210,6 +2426,18 @@ public class MemoryServiceImpl implements MemoryService {
             this.fact = fact;
             this.hop = hop;
             this.relationWeight = relationWeight;
+        }
+
+        protected FactNode getFact() {
+            return fact;
+        }
+
+        protected int getHop() {
+            return hop;
+        }
+
+        protected double getRelationWeight() {
+            return relationWeight;
         }
     }
 

@@ -61,3 +61,12 @@ logging:
     MCP: ERROR
   file:
     encoding: UTF-8
+
+feature:
+  memory:
+    state:
+      enabled: false
+      write:
+        enabled: false
+      read:
+        enabled: false

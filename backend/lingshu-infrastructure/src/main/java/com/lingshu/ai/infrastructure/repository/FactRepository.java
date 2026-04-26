@@ -7,6 +7,7 @@ import org.springframework.data.neo4j.repository.Neo4jRepository;
 import org.springframework.data.neo4j.repository.query.Query;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -35,6 +36,14 @@ public interface FactRepository extends Neo4jRepository<FactNode, Long> {
     @Query("MATCH (f:Fact) WHERE id(f) = $id DETACH DELETE f")
     void detachDeleteById(Long id);
 
+    @Query("""
+            MATCH (f:Fact)
+            WHERE id(f) = $factId
+            SET f.importance = $importance,
+                f.confidence = $confidence
+            """)
+    void updateFactAdaptiveScores(Long factId, double importance, double confidence, LocalDateTime updatedAt);
+
     @Query("UNWIND $relations AS rel " +
            "MATCH (a:Fact) WHERE id(a) = rel.sourceId " +
            "MATCH (b:Fact) WHERE id(b) = rel.targetId " +
@@ -46,6 +55,19 @@ public interface FactRepository extends Neo4jRepository<FactNode, Long> {
            "WHERE id(a) = $sourceId AND id(b) = $targetId " +
            "RETURN r.weight AS weight LIMIT 1")
     Double findRelatedRelationWeight(Long sourceId, Long targetId);
+
+    @Query("""
+            MATCH (a:Fact)
+            WHERE id(a) = $sourceId
+            MATCH (b:Fact)
+            WHERE id(b) = $targetId
+            WITH CASE WHEN id(a) < id(b) THEN a ELSE b END AS leftFact,
+                 CASE WHEN id(a) < id(b) THEN b ELSE a END AS rightFact
+            MERGE (leftFact)-[r:RELATED_TO]->(rightFact)
+            SET r.weight = $weight,
+                r.lastActivatedAt = $updatedAt
+            """)
+    void updateRelatedRelationWeight(Long sourceId, Long targetId, double weight, LocalDateTime updatedAt);
 
     @Query("UNWIND $relations AS rel " +
            "MATCH (a:Fact) WHERE id(a) = rel.sourceId " +

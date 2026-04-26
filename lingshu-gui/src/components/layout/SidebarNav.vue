@@ -2,28 +2,15 @@
 import { useRouter, useRoute } from 'vue-router';
 import { computed } from 'vue';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import IconMessage from '@arco-design/web-vue/es/icon/icon-message';
-import IconUser from '@arco-design/web-vue/es/icon/icon-user';
-import IconApps from '@arco-design/web-vue/es/icon/icon-apps';
-import IconCompass from '@arco-design/web-vue/es/icon/icon-compass';
-import IconMobile from '@arco-design/web-vue/es/icon/icon-mobile';
-import IconMenu from '@arco-design/web-vue/es/icon/icon-menu';
-import IconStar from '@arco-design/web-vue/es/icon/icon-star';
-
 const router = useRouter();
 const route = useRoute();
 
 const mainNavItems = [
-  { id: 'chat', icon: IconMessage, label: '对话', path: '/' },
-  { id: 'contacts', icon: IconUser, label: '通讯录', path: '/contacts' },
-  { id: 'folder', icon: IconApps, label: '文件夹', path: '/folder' },
-  { id: 'starred', icon: IconStar, label: '收藏', path: '/starred' },
-  { id: 'discover', icon: IconCompass, label: '发现', path: '/discover' },
+  { id: 'chat', icon: 'mode_comment', label: '对话', path: '/' },
 ];
 
 const bottomNavItems = [
-  { id: 'mobile', icon: IconMobile, label: '手机', path: '/mobile' },
-  { id: 'settings', icon: IconMenu, label: '设置', path: '/settings' },
+  { id: 'settings', icon: 'settings', label: '设置', path: '/settings' },
 ];
 
 const activeNavId = computed(() => {
@@ -46,13 +33,13 @@ function handleSelect(item: any) {
       @mousedown="() => getCurrentWindow().startDragging()"
     >
       <div class="user-avatar" title="个人设置">
-        <img src="/bot.png" alt="avatar" />
+        <img src="/linger.png" alt="avatar" />
       </div>
     </div>
 
     <!-- Middle: Main Navigation -->
     <nav class="nav-list main-nav">
-      <button
+      <div
         v-for="item in mainNavItems"
         :key="item.id"
         class="nav-item"
@@ -60,13 +47,13 @@ function handleSelect(item: any) {
         :title="item.label"
         @click="handleSelect(item)"
       >
-        <component :is="item.icon" :size="22" style="width: 22px; height: 22px;" />
-      </button>
+        <span class="material-symbols-outlined">{{ item.icon }}</span>
+      </div>
     </nav>
 
     <!-- Bottom: Secondary Navigation -->
     <nav class="nav-list bottom-nav">
-      <button
+      <div
         v-for="item in bottomNavItems"
         :key="item.id"
         class="nav-item"
@@ -74,8 +61,8 @@ function handleSelect(item: any) {
         :title="item.label"
         @click="handleSelect(item)"
       >
-        <component :is="item.icon" :size="22" style="width: 22px; height: 22px;" />
-      </button>
+        <span class="material-symbols-outlined">{{ item.icon }}</span>
+      </div>
     </nav>
   </aside>
 </template>
@@ -84,25 +71,37 @@ function handleSelect(item: any) {
 .sidebar-nav {
   width: var(--sidebar-width);
   height: 100%;
-  background-color: #f2f2f2;
-  border-right: 1px solid #e5e5e5;
+  background-color: var(--bg-sidebar);
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 15px 0;
   flex-shrink: 0;
+  z-index: 1000;
 }
 
 .user-area {
-  margin-bottom: 20px;
+  margin-bottom: 18px;
+  display: flex;
+  justify-content: center;
+  width: 100%;
 }
 
 .user-avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 4px;
+  width: 38px;
+  height: 38px;
+  border-radius: 6px;
   overflow: hidden;
   cursor: pointer;
+  transition: transform var(--transition-fast);
+}
+
+.user-avatar:hover {
+  transform: scale(1.05);
+}
+
+.user-avatar:active {
+  transform: scale(0.95);
 }
 
 .user-avatar img {
@@ -123,30 +122,52 @@ function handleSelect(item: any) {
   flex: 1;
 }
 
-.bottom-nav {
-  margin-top: auto;
-  gap: 15px;
-}
-
 .nav-item {
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
-  transition: all 0.2s;
-  color: #515151;
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast);
+  color: var(--text-secondary);
+}
+
+.nav-item:active {
+  transform: scale(0.92);
+}
+
+.material-symbols-outlined {
+  font-size: 26px;
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 300,
+    'GRAD' 0,
+    'opsz' 24;
+  transition: font-variation-settings 0.2s;
 }
 
 .nav-item:hover {
-  background-color: rgba(0, 0, 0, 0.05);
+  color: var(--text-primary);
 }
 
 .nav-item.active {
-  color: #07c160;
+  color: var(--color-primary);
 }
 
-/* Specific style for active filled icons if needed, 
-   but Arco icons usually handle this via color */
+.nav-item.active .material-symbols-outlined {
+  font-variation-settings:
+    'FILL' 1,
+    'wght' 300,
+    'GRAD' 0,
+    'opsz' 24;
+}
+
+.bottom-nav {
+  margin-top: auto;
+  padding-bottom: 10px;
+}
 </style>
+
+

@@ -107,6 +107,19 @@ public class ChatSessionServiceImpl implements ChatSessionService {
 
     @Override
     @Transactional(transactionManager = "transactionManager")
+    public void bindAgent(Long sessionId, Long agentId) {
+        if (sessionId == null || agentId == null) {
+            return;
+        }
+        chatSessionRepository.findById(sessionId).ifPresent(session -> {
+            session.setAgentId(agentId);
+            session.setUpdatedAt(LocalDateTime.now());
+            chatSessionRepository.save(session);
+        });
+    }
+
+    @Override
+    @Transactional(transactionManager = "transactionManager")
     public void updateSessionTitle(Long sessionId, String title) {
         if (sessionId == null || title == null || title.isBlank()) {
             return;
@@ -156,10 +169,27 @@ public class ChatSessionServiceImpl implements ChatSessionService {
     }
 
     private ChatSessionView toView(ChatSession session) {
+        String lastMessage = "";
+        try {
+            List<TurnTimelineService.TurnView> history = turnTimelineService.getTurnHistory(session.getId(), null, 1);
+            if (history != null && !history.isEmpty()) {
+                TurnTimelineService.TurnView latest = history.get(0);
+                if (latest.assistantMessage() != null && !latest.assistantMessage().isBlank()) {
+                    lastMessage = latest.assistantMessage();
+                } else if (latest.userMessage() != null && !latest.userMessage().isBlank()) {
+                    lastMessage = latest.userMessage();
+                }
+            }
+        } catch (Exception e) {
+            // Log error if needed, but don't fail the session list
+        }
+
         return new ChatSessionView(
                 session.getId(),
                 session.getUserId(),
                 session.getTitle(),
+                session.getAgentId(),
+                lastMessage,
                 session.getCreatedAt(),
                 session.getUpdatedAt()
         );

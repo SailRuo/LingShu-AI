@@ -1,3 +1,14 @@
+<script setup lang="ts">
+import { onMounted } from 'vue';
+import { useUIStore } from './stores/ui';
+
+const uiStore = useUIStore();
+
+onMounted(() => {
+  uiStore.setTheme(uiStore.theme);
+});
+</script>
+
 <template>
   <router-view />
 </template>

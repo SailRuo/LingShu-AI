@@ -69,20 +69,15 @@ const close = () => appWindow.close();
 
 <style scoped>
 .custom-titlebar {
-  height: 32px;
-  background-color: var(--bg-sidebar); /* 恢复背景色，与左侧对齐或根据需要选择 */
+  height: 28px;
+  background-color: var(--bg-sidebar);
   display: flex;
   align-items: center;
   justify-content: flex-end;
   user-select: none;
   cursor: default;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.drag-spacer {
-  flex: 1;
-  height: 100%;
+  z-index: 100;
 }
 
 .window-controls {
@@ -91,29 +86,23 @@ const close = () => appWindow.close();
 }
 
 .win-btn {
-  width: 46px;
-  height: 100%;
+  width: 44px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #555;
-  transition: background-color 0.1s ease;
+  color: var(--text-secondary);
+  transition: all 0.2s;
 }
 
 .win-btn:hover {
-  background-color: rgba(0, 0, 0, 0.05);
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .close-btn:hover {
   background-color: #e81123 !important;
   color: white !important;
 }
-
-[data-theme="dark"] .custom-titlebar {
-  background-color: #1e1e1e;
-}
-
-[data-theme="dark"] .win-btn {
-  color: #ccc;
-}
 </style>
+

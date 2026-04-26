@@ -2,7 +2,7 @@
 
 > 版本：v2.0  
 > 日期：2026-04-26  
-> 状态：分析与演进设计  
+> 状态：阶段二已落地，阶段三待设计  
 > 适用范围：LingShu-AI 记忆模块后端
 
 ---
@@ -23,15 +23,15 @@
 
 ### 2.1 核心判断
 
-当前系统已经具备 **“图谱检索 + 向量兜底 + 基于静态特征的检索路由”** 的雏形，但**尚未实现真正意义上的增益自适应记忆更新**。
+当前系统已经具备 **“图谱检索 + 向量兜底 + 基于静态特征路由 + 最近一轮反馈驱动的标量自适应更新”** 的能力，但**尚未实现完整 GAM-RAG 所要求的不确定性调度与向量状态更新**。
 
 更准确地说，当前实现属于：
 
 - 已实现：**静态增益驱动的检索路由**
-- 已实现：**基于共现次数的关系增强**
-- 已实现：**被命中事实的标量活跃度刷新**
-- 未实现：**答案后反馈闭环**
-- 未实现：**基于反馈的自适应记忆更新**
+- 已实现：**最近一轮答案后反馈闭环**
+- 已实现：**基于 `supportedFacts` 的标量自适应更新**
+- 已实现：**基于高置信 `supportedFacts` 的关系权重增强**
+- 已实现：**自适应分数接入图谱排序与 gain 计算**
 - 未实现：**基于不确定性的增益调度**
 - 未实现：**记忆向量沿查询方向的在线调整**
 
@@ -81,10 +81,10 @@
 | 向量检索 | 已实现 | 图谱不足时执行语义召回 |
 | 检索路由 | 已实现 | 依据静态 gain 决定图谱优先、图谱直出或向量兜底 |
 | 检索事件记录 | 已实现 | 记录实体、命中事实、最终内容、路由结果等 |
-| 关系增强 | 已实现 | 基于共现计数写入 `RELATED_TO` 权重 |
-| 事实刷新 | 已实现 | 被命中事实提升 `importance/confidence/activityScore` |
-| 检索后反馈闭环 | 未实现 | 没有判断“事实是否真正帮助回答” |
-| 自适应状态更新 | 未实现 | 没有 uncertainty、gain scheduling、directional update |
+| 关系增强 | 已实现 | 主链路基于高置信 `supportedFacts` 更新 `RELATED_TO.weight`，旧入口保留共现 fallback |
+| 事实刷新 | 已实现 | 被命中事实刷新活跃度，阶段二另有基于反馈的标量更新 |
+| 检索后反馈闭环 | 已实现 | 最近一轮已能判断“事实是否真正帮助回答” |
+| 自适应状态更新 | 部分实现 | 已有标量与关系权重更新，尚无 uncertainty、gain scheduling、directional vector update |
 
 ### 3.2 检索主流程现状
 
@@ -163,16 +163,18 @@ gain = 实体匹配率 × 0.6 + 平均重要性 × 0.4
 
 - [MemoryServiceImpl.java](/E:/Project/LingShu-AI/backend/lingshu-core/src/main/java/com/lingshu/ai/core/service/impl/MemoryServiceImpl.java:863)
 
-当前逻辑是：
+当前主链路逻辑已经调整为：
 
-1. 读取一次检索事件中被纳入上下文的事实
-2. 统计这些事实对在历史事件中的共现次数
-3. 共现次数达到阈值后，建立或增强 `RELATED_TO`
+1. 回答后按 `turnId` 读取最近一轮 `contextFacts`
+2. 判断哪些事实属于高置信 `supportedFacts`
+3. 对高置信 `supportedFacts` 建立或增强 `RELATED_TO.weight`
+4. 对高置信 `unsupportedFacts` 仅在已有边上做保守降权（不创建新边）
+5. `turnId == null` 的旧入口仍保留 `adoptedFactIds` 共现增强 fallback
 
-这属于一种**轻量级共现强化机制**，而不是真正的增益自适应学习。它的问题主要有两个：
+这使主链路已经从“原始共现增强”升级为“反馈驱动关系增强”，但仍保留两个明确边界：
 
-- 它把“被放进上下文”近似为“对回答有帮助”
-- 它只会正向增强，不会因为噪声或无效命中而保守回退
+- 负反馈目前仍是保守降权策略，不做负向关系创建或强结构重排
+- legacy 入口仍依赖旧共现机制，因此全系统尚未完全统一到阶段二路径
 
 ### 3.6 当前事实刷新方式
 
@@ -180,7 +182,12 @@ gain = 实体匹配率 × 0.6 + 平均重要性 × 0.4
 
 - [MemoryServiceImpl.java](/E:/Project/LingShu-AI/backend/lingshu-core/src/main/java/com/lingshu/ai/core/service/impl/MemoryServiceImpl.java:1650)
 
-当前被命中的事实会：
+当前与事实分数相关的刷新已经分成两层：
+
+1. 检索命中时的活跃度刷新
+2. 回答后基于 `supportedFacts` 的 `importance/confidence` 小步更新
+
+其中检索命中层会：
 
 - 更新 `normalizedContent`
 - 更新 `lastActivatedAt`
@@ -189,9 +196,9 @@ gain = 实体匹配率 × 0.6 + 平均重要性 × 0.4
 - 将 `confidence` 抬升到至少 `0.88`
 - 将 `cool` 状态恢复为 `active`
 
-这套机制解决了“事实被反复命中时不应该持续冷却”的问题，但也带来一个明显副作用：
+这套机制解决了“事实被反复命中时不应该持续冷却”的问题。阶段二又额外补上了“只有真正支持回答的事实才会得到标量正反馈”的修正层，因此当前问题已从“命中即增强”收敛为：
 
-> **只要被检索到，就会被提升；至于它有没有真正帮助回答，系统并不关心。**
+> **检索命中会刷新活跃度，但只有 `supportedFacts` 会驱动下一轮排序可见的标量学习。**
 
 ### 3.7 现有数据结构边界
 
@@ -548,25 +555,68 @@ gain = 实体匹配率 × 0.6 + 平均重要性 × 0.4
 - 常见问题的无效图谱命中率下降
 - 关系增强不再只会单向累加
 
-### 6.3 阶段三：向量状态版
+#### 当前推荐实施边界
+
+结合当前代码状态，阶段二建议明确收敛为四项：
+
+1. 持久化最近一轮的事实级反馈记录
+2. 用 `supportedFacts` 对 `FactNode.importance/confidence` 做小步标量更新
+3. 将 `RELATED_TO` 的更新从“raw adoptedFacts 共现增强”改为“supportedFacts 驱动的正负向调节”
+4. 在图谱排序与 `gain` 计算中消费更新后的 `importance/confidence/relationWeight`
+
+对应实施计划见：
+
+- [2026-04-26-gam-rag-adaptive-ranking.md](/E:/Project/LingShu-AI/docs/superpowers/plans/2026-04-26-gam-rag-adaptive-ranking.md:1)
+
+这一阶段仍然**不引入**：
+
+- `MemoryState`
+- `taskVector`
+- `uncertainty`
+- Kalman 增益更新
+
+#### 当前已落地状态
+
+截至 2026-04-26，阶段二在当前代码中已经落地到以下范围：
+
+1. 已持久化最近一轮的事实级反馈记录
+2. 已将 `supportedFacts` 接入 `FactNode.importance/confidence` 的小步标量更新
+3. 已将 `supportedFacts` 接入 `RELATED_TO.weight` 的增强更新
+4. 已将更新后的 `importance/confidence/relationWeight` 接入图谱排序与 `gain` 计算
+5. 已补数据库级唯一约束（`turn_id + fact_id`）并在服务层落地并发冲突补偿，确保竞争写入可按幂等成功处理
+6. 已补 `unsupportedFacts -> RELATED_TO` 的保守负反馈策略：仅对已有边执行小步降权，不为负反馈创建新边
+
+同时保留两个明确边界：
+
+- `turnId != null` 的主聊天链路走阶段二反馈闭环
+- `turnId == null` 的旧入口保留兼容 fallback，仍使用旧的 `adoptedFactIds` 共现增强，避免 legacy 调用静默失去关系学习能力
+
+当前阶段二仍然**没有**做的内容：
+
+- 向量状态、`MemoryState`、Kalman 或 `uncertainty`
+
+### 6.3 阶段三：向量状态最小版（已启动设计）
 
 #### 目标
 
 在前两阶段反馈链路和收益已被验证的前提下，引入真正的增益自适应状态模型。
 
-#### 这一阶段才建议新增的核心状态
+#### 这一阶段已确定先新增的核心状态（最小版）
 
 ```text
 MemoryState
 - factId
 - taskVector
-- timeVector
 - taskUncertainty
-- timeUncertainty
 - updateCount
 - lastUpdate
 - stateVersion
 ```
+
+当前明确不进入第一版的字段：
+
+- `timeVector`
+- `timeUncertainty`
 
 #### 为什么要放到第三阶段
 
@@ -586,6 +636,21 @@ MemoryState
 - 已有明确的离线评估集
 - 已经知道哪些问题是当前排序逻辑的瓶颈
 - 已有回滚开关，可退回阶段二逻辑
+
+#### 当前已落地状态（2026-04-26）
+
+阶段三最小版目前已完成到 Task 1-4：
+
+1. `MemoryStateRecord` 与 `MemoryStateRecordRepository` 已落地
+2. `MemoryStateUpdater`（支持事实向量更新 + unsupported 不确定性回调）已落地
+3. `RetrievalFeedbackService` 已接入状态写回（`feature.memory.state.write.enabled` 控制）
+4. `MemoryServiceImpl` 已接入 `stateBonus` 排序附加项（`feature.memory.state.read.enabled` 控制）
+
+当前默认策略：
+
+- 读写开关默认关闭，线上行为默认仍是阶段二
+- 状态缺失或 embedding 异常时自动降级为阶段二评分
+- 阶段三仅在高置信 `supportedFacts` 上做正向向量更新
 
 ---
 
@@ -653,6 +718,21 @@ MemoryState
 - 根据反馈结果更新标量评分
 - 供后续图谱排序与关系更新使用
 
+#### `AdaptiveUpdateSummary`
+
+职责：
+
+- 汇总一轮阶段二自适应更新的核心计数
+- 记录 `supportedFacts`、事实分数更新数、关系更新数等观测信息
+- 作为阶段二可观测性的最小入口
+
+#### `RetrievalFeedbackRecord`
+
+职责：
+
+- 按回合、按事实持久化 `valid / confidence / reason`
+- 为阶段二离线复盘和排序收益验证提供可查询数据
+
 ### 7.4 阶段三的建议组件
 
 在阶段三再考虑新增：
@@ -691,21 +771,27 @@ MemoryState
 4. 状态存储放在哪里  
    是 Neo4j 节点属性、旁路存储，还是附属状态仓库。
 
-### 8.3 第三阶段的建议最小实现
+### 8.3 第三阶段当前执行基线
 
-如果未来进入该阶段，建议最小实现只包含：
+阶段三已经按“最小版优先”启动，当前基线只包含：
 
 - `taskVector`
 - `taskUncertainty`
 - `updateCount`
 - 正负反馈非对称噪声
 
-先不要同时引入：
+同时不引入：
 
 - `timeVector`
 - PCA 可视化
 - 复杂多头记忆
 - 额外 GPU 优化
+
+阶段三设计与实施计划：
+
+- [2026-04-26-gam-rag-stage3-vector-state-design.md](/E:/Project/LingShu-AI/docs/superpowers/specs/2026-04-26-gam-rag-stage3-vector-state-design.md:1)
+- [2026-04-26-gam-rag-stage3-vector-state.md](/E:/Project/LingShu-AI/docs/superpowers/plans/2026-04-26-gam-rag-stage3-vector-state.md:1)
+- [2026-04-26 阶段三指标面板（stateUpdates-stateBonus-uncertainty）.md](/E:/Project/LingShu-AI/doc/architecture/记忆模块/2026-04-26%20阶段三指标面板（stateUpdates-stateBonus-uncertainty）.md:1)
 
 ---
 

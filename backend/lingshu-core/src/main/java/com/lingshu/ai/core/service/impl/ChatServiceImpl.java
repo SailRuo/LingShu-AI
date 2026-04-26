@@ -38,11 +38,13 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map; // 添加此行
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.stream.Collectors; // 添加此行
+import java.util.stream.Collectors;
+
 
 import lombok.RequiredArgsConstructor;
 
@@ -85,10 +87,24 @@ public class ChatServiceImpl implements ChatService {
                 .orElseThrow(() -> new IllegalArgumentException("Session not found: " + resolvedSessionId));
     }
 
-    private AgentConfig getAgent(Long agentId) {
+    private AgentConfig getAgent(Long agentId, ChatSession session) {
+        // 1. 如果请求中明确传了 agentId，优先使用
         if (agentId != null) {
-            return agentConfigService.getAgentById(agentId).orElse(null);
+            Optional<AgentConfig> agent = agentConfigService.getAgentById(agentId);
+            if (agent.isPresent()) {
+                return agent.get();
+            }
         }
+        
+        // 2. 如果请求没传，尝试从当前会话关联的 agentId 获取
+        if (session != null && session.getAgentId() != null) {
+            Optional<AgentConfig> agent = agentConfigService.getAgentById(session.getAgentId());
+            if (agent.isPresent()) {
+                return agent.get();
+            }
+        }
+        
+        // 3. 最后使用系统默认智能体
         return agentConfigService.getDefaultAgent().orElse(null);
     }
 
@@ -252,7 +268,14 @@ public class ChatServiceImpl implements ChatService {
 
         ChatSession session = getOrCreateSession(userId, sessionId);
         chatSessionService.touchSession(session.getId());
-        AgentConfig agent = getAgent(agentId);
+        
+        // 获取智能体配置
+        AgentConfig agent = getAgent(agentId, session);
+        
+        // 如果请求携带了新的 agentId 且与当前会话记录的不同，则自动绑定
+        if (agentId != null && (session.getAgentId() == null || !session.getAgentId().equals(agentId))) {
+            chatSessionService.bindAgent(session.getId(), agentId);
+        }
 
         if (agent != null) {
             log.info("处理聊天消息: 智能体name={}, systemPrompt长度={}",

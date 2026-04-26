@@ -81,7 +81,7 @@ public class ChatController {
             @RequestParam(name = "beforeId", required = false) Long beforeId,
             @RequestParam(name = "size", defaultValue = "20") int size) {
 
-        Long effectiveSessionId = resolveSessionId(userId, sessionId);
+        Long effectiveSessionId = internalResolveSessionId(userId, sessionId);
         if (effectiveSessionId == null) {
             return List.of();
         }
@@ -95,14 +95,23 @@ public class ChatController {
         return chatSessionService.listSessions(userId);
     }
 
-    public record CreateSessionRequest(String userId, String title) {
+    public record CreateSessionRequest(String userId, String title, Long agentId) {
     }
 
     @PostMapping("/sessions")
     public ChatSessionService.ChatSessionView createSession(@RequestBody(required = false) CreateSessionRequest request) {
         String userId = request != null && request.userId() != null ? request.userId() : "User";
         String title = request != null ? request.title() : null;
-        return chatSessionService.createSession(userId, title);
+        ChatSessionService.ChatSessionView session = chatSessionService.createSession(userId, title);
+        if (request != null && request.agentId() != null) {
+            chatSessionService.bindAgent(session.id(), request.agentId());
+            return chatSessionService.listSessions(userId).stream()
+                    .filter(s -> s.id().equals(session.id()))
+                    .findFirst()
+                    .orElse(session);
+        }
+        return session;
+
     }
 
     @DeleteMapping("/sessions/{id}")
@@ -113,7 +122,7 @@ public class ChatController {
     @DeleteMapping("/turns")
     public void clearHistory(@RequestParam(name = "userId", defaultValue = "User") String userId,
                              @RequestParam(name = "sessionId", required = false) Long sessionId) {
-        Long effectiveSessionId = resolveSessionId(userId, sessionId);
+        Long effectiveSessionId = internalResolveSessionId(userId, sessionId);
         chatService.clearHistory(effectiveSessionId);
     }
 
@@ -131,7 +140,7 @@ public class ChatController {
         String finalApiKey = request.apiKey() != null ? request.apiKey() : apiKey;
         String finalModel = request.model() != null ? request.model() : model;
         String userId = request.userId() != null ? request.userId() : "User";
-        Long effectiveSessionId = resolveSessionId(userId, request.sessionId());
+        Long effectiveSessionId = internalResolveSessionId(userId, request.sessionId());
 
         return chatService.streamChat(ChatService.ChatStreamRequest.builder()
                 .message(request.message())
@@ -157,7 +166,7 @@ public class ChatController {
         String finalApiKey = request.apiKey() != null ? request.apiKey() : apiKey;
         String finalModel = request.model() != null ? request.model() : model;
         String userId = request.userId() != null ? request.userId() : "User";
-        Long effectiveSessionId = resolveSessionId(userId, request.sessionId());
+        Long effectiveSessionId = internalResolveSessionId(userId, request.sessionId());
 
         return chatService.streamChat(ChatService.ChatStreamRequest.builder()
                         .message(request.message())
@@ -178,7 +187,7 @@ public class ChatController {
                 });
     }
 
-    private Long resolveSessionId(String userId, Long sessionId) {
+    private Long internalResolveSessionId(String userId, Long sessionId) {
         return chatSessionService.resolveSessionId(userId, sessionId);
     }
 

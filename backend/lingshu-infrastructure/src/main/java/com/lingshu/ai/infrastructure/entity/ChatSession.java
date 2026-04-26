@@ -21,6 +21,9 @@ public class ChatSession {
 
     private String title;
 
+    @Column(name = "agent_id")
+    private Long agentId;
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;

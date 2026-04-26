@@ -19,6 +19,7 @@ export interface BaseMessage {
   timestamp: Date;
   status: MessageStatus;
   isSelf: boolean;
+  metadata?: any;
 }
 
 export interface TextMessage extends BaseMessage {

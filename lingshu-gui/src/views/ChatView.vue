@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import ConversationList from '../components/layout/ConversationList.vue';
-import ChatWindow from '../components/layout/ChatWindow.vue';
+import ConversationList from '../components/chat/ConversationList.vue';
+import ChatWindow from '../components/chat/ChatWindow.vue';
 </script>
 
 <template>
