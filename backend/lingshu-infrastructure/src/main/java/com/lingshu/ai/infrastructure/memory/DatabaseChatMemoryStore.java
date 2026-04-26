@@ -1,7 +1,9 @@
 package com.lingshu.ai.infrastructure.memory;
 
 import com.lingshu.ai.infrastructure.entity.ChatTurn;
+import com.lingshu.ai.infrastructure.entity.ChatTurnArtifact;
 import com.lingshu.ai.infrastructure.entity.ChatTurnEvent;
+import com.lingshu.ai.infrastructure.repository.ChatTurnArtifactRepository;
 import com.lingshu.ai.infrastructure.repository.ChatTurnEventRepository;
 import com.lingshu.ai.infrastructure.repository.ChatTurnRepository;
 import dev.langchain4j.data.message.ChatMessage;
@@ -37,13 +39,16 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
 
     private final ChatTurnRepository turnRepository;
     private final ChatTurnEventRepository eventRepository;
+    private final ChatTurnArtifactRepository artifactRepository;
     private final ConcurrentMap<Long, SystemMessage> sessionSystemMessages = new ConcurrentHashMap<>();
     private final ChatContextAssembler contextAssembler = new ChatContextAssembler();
 
     public DatabaseChatMemoryStore(ChatTurnRepository turnRepository,
-                                   ChatTurnEventRepository eventRepository) {
+                                   ChatTurnEventRepository eventRepository,
+                                   ChatTurnArtifactRepository artifactRepository) {
         this.turnRepository = turnRepository;
         this.eventRepository = eventRepository;
+        this.artifactRepository = artifactRepository;
     }
 
     @Override
@@ -73,12 +78,21 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
         List<ChatTurnEvent> events = eventRepository.findByTurnIdInOrderByTurnIdAscSequenceNoAsc(turnIds);
         Map<Long, List<ChatTurnEvent>> eventsByTurnId = events.stream()
                 .collect(Collectors.groupingBy(e -> e.getTurn().getId(), LinkedHashMap::new, Collectors.toList()));
+        List<Long> eventIds = events.stream().map(ChatTurnEvent::getId).toList();
+        Map<Long, List<ChatTurnArtifact>> artifactsByEventId = eventIds.isEmpty()
+                ? Map.of()
+                : artifactRepository.findByEventIdInOrderByIdAsc(eventIds).stream()
+                .collect(Collectors.groupingBy(a -> a.getEvent().getId(), LinkedHashMap::new, Collectors.toList()));
 
         List<ChatTurn> replayableTurns = turns.stream()
                 .filter(turn -> shouldReplayTurn(turn, eventsByTurnId.getOrDefault(turn.getId(), List.of())))
                 .toList();
 
-        ChatContextAssembler.AssemblyResult assemblyResult = contextAssembler.assemble(replayableTurns, eventsByTurnId);
+        ChatContextAssembler.AssemblyResult assemblyResult = contextAssembler.assemble(
+                replayableTurns,
+                eventsByTurnId,
+                artifactsByEventId
+        );
         messages.addAll(assemblyResult.messages());
 
         if (!assemblyResult.diagnostics().isEmpty()) {

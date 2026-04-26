@@ -1,6 +1,7 @@
 package com.lingshu.ai.infrastructure.memory;
 
 import com.lingshu.ai.infrastructure.entity.ChatTurn;
+import com.lingshu.ai.infrastructure.entity.ChatTurnArtifact;
 import com.lingshu.ai.infrastructure.entity.ChatTurnEvent;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
@@ -34,6 +35,12 @@ public class ChatContextAssembler {
 
     public AssemblyResult assemble(List<ChatTurn> turns,
                                    Map<Long, List<ChatTurnEvent>> eventsByTurnId) {
+        return assemble(turns, eventsByTurnId, Map.of());
+    }
+
+    public AssemblyResult assemble(List<ChatTurn> turns,
+                                   Map<Long, List<ChatTurnEvent>> eventsByTurnId,
+                                   Map<Long, List<ChatTurnArtifact>> artifactsByEventId) {
         List<ChatMessage> messages = new ArrayList<>();
         Map<String, Integer> diagnostics = new LinkedHashMap<>();
 
@@ -91,6 +98,10 @@ public class ChatContextAssembler {
                             safe(event.getToolName()),
                             safe(event.getContent())
                     ));
+                    UserMessage artifactMessage = toToolArtifactUserMessage(event, artifactsByEventId, diagnostics);
+                    if (artifactMessage != null) {
+                        messages.add(artifactMessage);
+                    }
                     continue;
                 }
 
@@ -209,6 +220,47 @@ public class ChatContextAssembler {
             log.debug("Skip invalid image payload in turn context: {}", e.getMessage());
             return false;
         }
+    }
+
+    private UserMessage toToolArtifactUserMessage(ChatTurnEvent event,
+                                                  Map<Long, List<ChatTurnArtifact>> artifactsByEventId,
+                                                  Map<String, Integer> diagnostics) {
+        if (event == null || event.getId() == null || event.getTurn() == null) {
+            return null;
+        }
+
+        List<ChatTurnArtifactView> images = artifactsByEventId.getOrDefault(event.getId(), List.of()).stream()
+                .filter(artifact -> "image".equalsIgnoreCase(safe(artifact.getArtifactType())))
+                .map(artifact -> new ChatTurnArtifactView(
+                        safe(artifact.getMimeType()),
+                        safe(artifact.getUrl()),
+                        safe(artifact.getBase64Data())
+                ))
+                .toList();
+        if (images.isEmpty()) {
+            return null;
+        }
+
+        List<Content> contents = new ArrayList<>();
+        contents.add(TextContent.from("[工具 " + safe(event.getToolName()) + " 返回了 "
+                + images.size() + " 张图片，请基于下面图片继续回答用户。]"));
+        for (ChatTurnArtifactView image : images) {
+            if (image.base64Data() != null && !image.base64Data().isBlank()) {
+                contents.add(ImageContent.from(image.base64Data(), image.mimeType().isBlank() ? "image/png" : image.mimeType()));
+            } else if (image.url() != null && !image.url().isBlank()) {
+                contents.add(ImageContent.from(image.url()));
+            } else {
+                increment(diagnostics, "drop_invalid_tool_image_artifact");
+            }
+        }
+
+        if (contents.size() <= 1) {
+            return null;
+        }
+        return UserMessage.from(contents);
+    }
+
+    private record ChatTurnArtifactView(String mimeType, String url, String base64Data) {
     }
 
     private String safe(String value) {

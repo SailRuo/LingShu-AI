@@ -218,27 +218,31 @@ public class AiConfig {
     @Bean
     public dev.langchain4j.memory.chat.ChatMemoryProvider chatMemoryProvider(
             dev.langchain4j.store.memory.chat.ChatMemoryStore chatMemoryStore) {
-        return sessionId -> new dev.langchain4j.memory.ChatMemory() {
-            private final dev.langchain4j.memory.ChatMemory delegate =
-                    dev.langchain4j.memory.chat.MessageWindowChatMemory.builder()
-                            .id(sessionId)
-                            .maxMessages(200)
-                            .chatMemoryStore(chatMemoryStore)
-                            .build();
+        java.util.concurrent.ConcurrentMap<Object, dev.langchain4j.memory.ChatMemory> activeMemories =
+                new java.util.concurrent.ConcurrentHashMap<>();
+        return sessionId -> activeMemories.computeIfAbsent(sessionId, memoryId -> new dev.langchain4j.memory.ChatMemory() {
+            private static final int MAX_MESSAGES = 200;
+            private final java.util.List<dev.langchain4j.data.message.ChatMessage> memoryMessages =
+                    new java.util.ArrayList<>(chatMemoryStore.getMessages(memoryId));
 
             @Override
             public Object id() {
-                return delegate.id();
+                return memoryId;
             }
 
             @Override
-            public void add(dev.langchain4j.data.message.ChatMessage message) {
-                delegate.add(message);
+            public synchronized void add(dev.langchain4j.data.message.ChatMessage message) {
+                if (message instanceof dev.langchain4j.data.message.ToolExecutionResultMessage toolResult
+                        && hasImageContent(toolResult.contents())) {
+                    addToolResultWithImages(toolResult);
+                    return;
+                }
+                addToMemory(message);
             }
 
             @Override
-            public java.util.List<dev.langchain4j.data.message.ChatMessage> messages() {
-                java.util.List<dev.langchain4j.data.message.ChatMessage> original = delegate.messages();
+            public synchronized java.util.List<dev.langchain4j.data.message.ChatMessage> messages() {
+                java.util.List<dev.langchain4j.data.message.ChatMessage> original = new java.util.ArrayList<>(memoryMessages);
                 if (original == null || original.isEmpty()) {
                     return original;
                 }
@@ -400,11 +404,73 @@ public class AiConfig {
                         && normalized.contains("张图片");
             }
 
-            @Override
-            public void clear() {
-                delegate.clear();
+            private boolean hasImageContent(java.util.List<dev.langchain4j.data.message.Content> contents) {
+                if (contents == null || contents.isEmpty()) {
+                    return false;
+                }
+                return contents.stream().anyMatch(dev.langchain4j.data.message.ImageContent.class::isInstance);
             }
-        };
+
+            private void addToolResultWithImages(dev.langchain4j.data.message.ToolExecutionResultMessage toolResult) {
+                java.util.List<dev.langchain4j.data.message.Content> contents = toolResult.contents();
+                java.util.List<dev.langchain4j.data.message.ImageContent> images = contents.stream()
+                        .filter(dev.langchain4j.data.message.ImageContent.class::isInstance)
+                        .map(dev.langchain4j.data.message.ImageContent.class::cast)
+                        .toList();
+
+                String text = contents.stream()
+                        .filter(dev.langchain4j.data.message.TextContent.class::isInstance)
+                        .map(dev.langchain4j.data.message.TextContent.class::cast)
+                        .map(dev.langchain4j.data.message.TextContent::text)
+                        .filter(t -> t != null && !t.isBlank())
+                        .collect(java.util.stream.Collectors.joining("\n"));
+                if (text.isBlank()) {
+                    text = "Tool returned " + images.size() + " image(s). The image content is attached in the following user message.";
+                }
+
+                java.util.List<dev.langchain4j.data.message.Content> injectedContents = new java.util.ArrayList<>();
+                injectedContents.add(dev.langchain4j.data.message.TextContent.from(
+                        "[工具 " + toolResult.toolName() + " 返回了 " + images.size() + " 张图片，请基于下面图片继续回答用户。]"
+                ));
+                injectedContents.addAll(images);
+                addToMemory(dev.langchain4j.data.message.ToolExecutionResultMessage.builder()
+                        .id(toolResult.id())
+                        .toolName(toolResult.toolName())
+                        .text(text)
+                        .isError(toolResult.isError())
+                        .attributes(toolResult.attributes())
+                        .build());
+                addToMemory(dev.langchain4j.data.message.UserMessage.from(injectedContents));
+            }
+
+            private void addToMemory(dev.langchain4j.data.message.ChatMessage message) {
+                if (message == null) {
+                    return;
+                }
+                memoryMessages.add(message);
+                trimWindow();
+                chatMemoryStore.updateMessages(memoryId, java.util.List.copyOf(memoryMessages));
+            }
+
+            private void trimWindow() {
+                while (memoryMessages.size() > MAX_MESSAGES) {
+                    int removeIndex = 0;
+                    for (int i = 0; i < memoryMessages.size(); i++) {
+                        if (!(memoryMessages.get(i) instanceof dev.langchain4j.data.message.SystemMessage)) {
+                            removeIndex = i;
+                            break;
+                        }
+                    }
+                    memoryMessages.remove(removeIndex);
+                }
+            }
+
+            @Override
+            public synchronized void clear() {
+                memoryMessages.clear();
+                chatMemoryStore.deleteMessages(memoryId);
+            }
+        });
     }
 
     @Bean

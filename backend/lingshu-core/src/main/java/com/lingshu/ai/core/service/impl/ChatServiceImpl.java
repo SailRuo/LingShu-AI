@@ -54,6 +54,8 @@ public class ChatServiceImpl implements ChatService {
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ChatServiceImpl.class);
 
+    private record ActiveToolCall(String toolName, String skillName, String arguments) {}
+
     private final MemoryService memoryService;
     private final AgentConfigService agentConfigService;
     private final ChatSessionService chatSessionService;
@@ -436,7 +438,7 @@ public class ChatServiceImpl implements ChatService {
         List<ToolProvider> toolProviders = new ArrayList<>();
         if (!mcpClients.isEmpty()) {
             toolProviders.add(new SafeMcpToolProvider(
-                    mcpClients, toolResultSummarizer, () -> userIntent, chatMemoryProvider, mcpToolArtifactRegistry));
+                    mcpClients, toolResultSummarizer, () -> userIntent));
         }
         if (loadedSkills != null) {
             toolProviders.add(loadedSkills.toolProvider());
@@ -451,10 +453,14 @@ public class ChatServiceImpl implements ChatService {
         // 官方推荐：把多个动态 ToolProvider 直接交给 AiServices 统一合并
         builder.toolProviders(toolProviders);
 
+        Map<String, ActiveToolCall> activeToolCalls = new java.util.concurrent.ConcurrentHashMap<>();
         ToolEventListener timelineToolListener = new ToolEventListener() {
             @Override
             public void onToolStart(String toolCallId, String toolName, String arguments) {
                 String skillName = SkillNameResolver.resolve(toolName, arguments, objectMapper);
+                if (toolCallId != null && !toolCallId.isBlank()) {
+                    activeToolCalls.put(toolCallId, new ActiveToolCall(toolName, skillName, arguments));
+                }
                 turnTimelineService.recordToolStart(turnId, toolCallId, toolName, skillName, arguments);
                 if (toolEventListener != null) {
                     toolEventListener.onToolStart(toolCallId, toolName, arguments);
@@ -463,18 +469,31 @@ public class ChatServiceImpl implements ChatService {
 
             @Override
             public void onToolEnd(String toolCallId, String toolName, String arguments, String result, boolean isError) {
+                onToolEnd(toolCallId, toolName, arguments, result, isError, List.of());
+            }
+
+            @Override
+            public void onToolEnd(String toolCallId, String toolName, String arguments, String result, boolean isError,
+                                  List<TurnTimelineService.ArtifactPayload> artifacts) {
+                if (toolCallId != null && !toolCallId.isBlank()) {
+                    activeToolCalls.remove(toolCallId);
+                }
                 String skillName = SkillNameResolver.resolve(toolName, arguments, objectMapper);
-                List<TurnTimelineService.ArtifactPayload> artifacts = mcpToolArtifactRegistry.pop(toolCallId).stream()
+                List<TurnTimelineService.ArtifactPayload> allArtifacts = new ArrayList<>();
+                if (artifacts != null && !artifacts.isEmpty()) {
+                    allArtifacts.addAll(artifacts);
+                }
+                allArtifacts.addAll(mcpToolArtifactRegistry.pop(toolCallId).stream()
                         .map(artifact -> new TurnTimelineService.ArtifactPayload(
                                 artifact.artifactType(),
                                 artifact.mimeType(),
                                 artifact.url(),
                                 artifact.base64Data()
                         ))
-                        .toList();
-                turnTimelineService.recordToolEnd(turnId, toolCallId, toolName, skillName, arguments, result, isError, artifacts);
+                        .toList());
+                turnTimelineService.recordToolEnd(turnId, toolCallId, toolName, skillName, arguments, result, isError, allArtifacts);
                 if (toolEventListener != null) {
-                    toolEventListener.onToolEnd(toolCallId, toolName, arguments, result, isError, artifacts);
+                    toolEventListener.onToolEnd(toolCallId, toolName, arguments, result, isError, allArtifacts);
                 }
             }
         };
@@ -500,12 +519,55 @@ public class ChatServiceImpl implements ChatService {
                 })
                 .onToolExecuted(toolExecution -> {
                     var request = toolExecution.request();
+                    
+                    // 1. 提取所有文本部分
+                    String resultText;
+                    List<Content> resultContents = toolExecution.resultContents();
+                    if (resultContents != null && !resultContents.isEmpty()) {
+                        resultText = resultContents.stream()
+                                .filter(c -> c instanceof TextContent)
+                                .map(c -> ((TextContent) c).text())
+                                .collect(java.util.stream.Collectors.joining("\n"));
+                    } else {
+                        try {
+                            resultText = toolExecution.result();
+                        } catch (Exception e) {
+                            resultText = "[Binary / Multi-modal content]";
+                        }
+                    }
+
+                    // 2. 从原生结果中提取图片 Artifact，不再单纯依赖 Registry
+                    List<TurnTimelineService.ArtifactPayload> artifacts = new ArrayList<>();
+                    if (resultContents != null) {
+                        for (Content content : resultContents) {
+                            if (content instanceof ImageContent image) {
+                                artifacts.add(new TurnTimelineService.ArtifactPayload(
+                                        "image",
+                                        image.image().mimeType(),
+                                        null,
+                                        image.image().base64Data()
+                                ));
+                            }
+                        }
+                    }
+                    
+                    // 3. 同时补充 Registry 中（可能由其他方式产生）的 Artifacts
+                    artifacts.addAll(mcpToolArtifactRegistry.pop(request.id()).stream()
+                            .map(artifact -> new TurnTimelineService.ArtifactPayload(
+                                    artifact.artifactType(),
+                                    artifact.mimeType(),
+                                    artifact.url(),
+                                    artifact.base64Data()
+                            ))
+                            .toList());
+
                     timelineToolListener.onToolEnd(
                             request.id(),
                             request.name(),
                             request.arguments(),
-                            toolExecution.result(),
-                            toolExecution.hasFailed()
+                            resultText,
+                            toolExecution.hasFailed(),
+                            artifacts
                     );
                 })
                 .onCompleteResponse(response -> {
@@ -513,6 +575,7 @@ public class ChatServiceImpl implements ChatService {
                     systemLogService.llmEnd(tokenCount, "LLM");
                     systemLogService.success("对话完成，回复长度: " + assistantResponseStore.length() + " 字符", "CHAT");
                     flushPendingAssistantText(turnId, pendingAssistantText);
+                    completeDanglingToolCalls(activeToolCalls, timelineToolListener, "工具调用已结束，但未收到工具完成回调");
                     turnTimelineService.completeTurn(turnId, assistantResponseStore.toString());
                     sink.tryEmitComplete();
                     postProcessAfterResponse(userId, session.getId(), turnId, safeMessage, assistantResponseStore.toString(), preAnalyzedEmotion);
@@ -521,6 +584,8 @@ public class ChatServiceImpl implements ChatService {
                     log.error("流式对话发生错误: {}", error.getMessage(), error);
                     systemLogService.error("LLM 调用失败: " + error.getMessage(), "LLM");
                     flushPendingAssistantText(turnId, pendingAssistantText);
+                    completeDanglingToolCalls(activeToolCalls, timelineToolListener,
+                            "工具调用被中断: " + (error.getMessage() != null ? error.getMessage() : "unknown error"));
                     turnTimelineService.failTurn(turnId, error.getMessage());
 
                     String errorMsg = error.getMessage() != null ? error.getMessage() : "";
@@ -536,6 +601,31 @@ public class ChatServiceImpl implements ChatService {
                 .start();
 
         return sink.asFlux();
+    }
+
+    private void completeDanglingToolCalls(Map<String, ActiveToolCall> activeToolCalls,
+                                           ToolEventListener timelineToolListener,
+                                           String result) {
+        if (activeToolCalls == null || activeToolCalls.isEmpty()) {
+            return;
+        }
+        List<Map.Entry<String, ActiveToolCall>> danglingCalls = new ArrayList<>(activeToolCalls.entrySet());
+        activeToolCalls.clear();
+        for (Map.Entry<String, ActiveToolCall> entry : danglingCalls) {
+            ActiveToolCall call = entry.getValue();
+            try {
+                timelineToolListener.onToolEnd(
+                        entry.getKey(),
+                        call != null ? call.toolName() : "unknown",
+                        call != null ? call.arguments() : "",
+                        result,
+                        true,
+                        List.of()
+                );
+            } catch (Exception e) {
+                log.warn("补全未结束工具调用失败: toolCallId={}, error={}", entry.getKey(), e.getMessage());
+            }
+        }
     }
 
     private Path resolveSkillsPath() {

@@ -531,12 +531,21 @@ export function useChat() {
       const currentReasoningSegments = (currentMessage.segments ?? []).filter(
         (segment) => segment.type === "reasoning",
       );
+      const currentToolSegments = (currentMessage.segments ?? []).filter(
+        (segment) => segment.type === "tool",
+      );
+      const latestNonReasoningSegments = (latestAssistant.segments ?? []).filter(
+        (segment) => segment.type !== "reasoning",
+      );
+      const latestHasToolSegments = latestNonReasoningSegments.some(
+        (segment) => segment.type === "tool",
+      );
 
       const mergedSegments = [
         ...currentReasoningSegments,
-        ...(latestAssistant.segments ?? []).filter(
-          (segment) => segment.type !== "reasoning",
-        ),
+        ...(latestHasToolSegments
+          ? latestNonReasoningSegments
+          : mergeSegments(currentToolSegments, latestNonReasoningSegments) ?? latestNonReasoningSegments),
       ];
 
       messages.value[lastAssistantIndex] = {
@@ -545,6 +554,10 @@ export function useChat() {
         isLoading: false,
         segments:
           mergedSegments.length > 0 ? mergedSegments : latestAssistant.segments,
+        toolSteps:
+          latestAssistant.toolSteps && latestAssistant.toolSteps.length > 0
+            ? latestAssistant.toolSteps
+            : currentMessage.toolSteps,
       };
 
       return messages.value[lastAssistantIndex];
