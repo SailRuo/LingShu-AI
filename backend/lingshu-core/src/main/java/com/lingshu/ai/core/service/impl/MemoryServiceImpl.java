@@ -1,11 +1,14 @@
 package com.lingshu.ai.core.service.impl;
 
 import com.lingshu.ai.core.dto.FactSemanticClassification;
+import com.lingshu.ai.core.dto.RetrievalContextSnapshot;
+import com.lingshu.ai.core.dto.RetrievalFactCandidate;
 import com.lingshu.ai.core.service.FactSemanticClassifier;
 import com.lingshu.ai.core.service.MemoryService;
 import com.lingshu.ai.core.service.EmotionAwareFactExtractor;
 import com.lingshu.ai.core.dto.ExtractionResult;
 import com.lingshu.ai.core.model.DynamicMemoryModel;
+import com.lingshu.ai.core.service.RetrievalContextSnapshotStore;
 import com.lingshu.ai.infrastructure.entity.FactNode;
 import com.lingshu.ai.infrastructure.entity.UserNode;
 import com.lingshu.ai.infrastructure.repository.FactRepository;
@@ -18,6 +21,7 @@ import dev.langchain4j.store.embedding.EmbeddingSearchResult;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import dev.langchain4j.data.segment.TextSegment;
 import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.neo4j.core.Neo4jClient;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -78,6 +82,7 @@ public class MemoryServiceImpl implements MemoryService {
     private final DynamicMemoryModel dynamicMemoryModel;
     private final com.lingshu.ai.core.service.SettingService settingService;
     private final Executor taskExecutor;
+    private final RetrievalContextSnapshotStore retrievalContextSnapshotStore;
     private FactSemanticClassifier factSemanticClassifier;
     private com.lingshu.ai.core.service.FactRelationshipEvaluator factRelationshipEvaluator;
     private EmotionAwareFactExtractor emotionAwareFactExtractor;
@@ -96,6 +101,23 @@ public class MemoryServiceImpl implements MemoryService {
                              ChatModel chatLanguageModel,
                              DynamicMemoryModel dynamicMemoryModel,
                              Executor taskExecutor) {
+        this(userRepository, embeddingModel, embeddingStore, factRepository, neo4jClient, systemLogService,
+                settingService, chatLanguageModel, dynamicMemoryModel, taskExecutor,
+                new InMemoryRetrievalContextSnapshotStore());
+    }
+
+    @Autowired
+    public MemoryServiceImpl(UserRepository userRepository,
+                             dev.langchain4j.model.embedding.EmbeddingModel embeddingModel,
+                             dev.langchain4j.store.embedding.EmbeddingStore<TextSegment> embeddingStore,
+                             FactRepository factRepository,
+                             Neo4jClient neo4jClient,
+                             com.lingshu.ai.core.service.SystemLogService systemLogService,
+                             com.lingshu.ai.core.service.SettingService settingService,
+                             ChatModel chatLanguageModel,
+                             DynamicMemoryModel dynamicMemoryModel,
+                             Executor taskExecutor,
+                             RetrievalContextSnapshotStore retrievalContextSnapshotStore) {
         this.userRepository = userRepository;
         this.embeddingModel = embeddingModel;
         this.embeddingStore = embeddingStore;
@@ -106,6 +128,7 @@ public class MemoryServiceImpl implements MemoryService {
         this.chatLanguageModel = chatLanguageModel;
         this.dynamicMemoryModel = dynamicMemoryModel;
         this.taskExecutor = taskExecutor;
+        this.retrievalContextSnapshotStore = retrievalContextSnapshotStore;
     }
 
     @PostConstruct
@@ -582,6 +605,11 @@ public class MemoryServiceImpl implements MemoryService {
 
     @Override
     public String retrieveContext(String userId, String message) {
+        return retrieveContext(userId, null, null, message);
+    }
+
+    @Override
+    public String retrieveContext(String userId, Long sessionId, Long turnId, String message) {
         com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder = com.lingshu.ai.core.dto.MemoryRetrievalEvent
                 .builder()
                 .userId(userId)
@@ -633,14 +661,19 @@ public class MemoryServiceImpl implements MemoryService {
                 multiHopCount, supersededCount, staleCount, gain), "MEMORY");
 
         // 3. 向量检索 (Vector Retrieval)
-        List<String> vectorTexts = new ArrayList<>();
-        List<Long> vectorFactIds = new ArrayList<>();
+        List<RetrievedFact> graphRetrievedFacts = buildGraphRetrievedFacts(graphFacts);
+        List<RetrievedFact> vectorRetrievedFacts = new ArrayList<>();
         if (runVector) {
-            vectorTexts = performVectorRetrievalV2(userId, message, eventBuilder, vectorFactIds);
+            vectorRetrievedFacts = performVectorRetrievalV2(userId, message, eventBuilder);
         }
 
         // 4. 合并与去重 (Merge and Deduplicate) - Task 3.1 & 3.2
-        List<String> finalFacts = mergeAndDeduplicate(graphFacts.stream().map(hit -> hit.fact).collect(Collectors.toList()), vectorTexts);
+        RetrievalMergeResult mergeResult = mergeAndDeduplicate(graphRetrievedFacts, vectorRetrievedFacts);
+        List<RetrievedFact> selectedFacts = mergeResult.selectedFacts();
+        List<RetrievalFactCandidate> finalContextFacts = buildContextSnapshotFacts(selectedFacts);
+        List<String> finalFacts = finalContextFacts.stream()
+                .map(RetrievalFactCandidate::getContent)
+                .collect(Collectors.toList());
 
         // 5. 组装上下文与记录事件
         StringBuilder contextBuilder = new StringBuilder();
@@ -649,26 +682,88 @@ public class MemoryServiceImpl implements MemoryService {
             finalFacts.forEach(fact -> contextBuilder.append("- ").append(fact).append("\n"));
         }
 
-        List<Long> adoptedFactIds = new ArrayList<>();
-        graphFacts.stream()
-                .map(hit -> hit.fact.getId())
+        List<Long> adoptedFactIds = finalContextFacts.stream()
+                .map(RetrievalFactCandidate::getFactId)
                 .filter(java.util.Objects::nonNull)
-                .forEach(adoptedFactIds::add);
-        vectorFactIds.stream()
-                .filter(java.util.Objects::nonNull)
-                .forEach(adoptedFactIds::add);
-        eventBuilder.adoptedFactIds(adoptedFactIds.stream().distinct().collect(Collectors.toList()));
+                .distinct()
+                .collect(Collectors.toList());
+        eventBuilder.adoptedFactIds(adoptedFactIds);
         eventBuilder.finalRankedContent(finalFacts);
+        eventBuilder.finalRankedIds(adoptedFactIds);
         com.lingshu.ai.core.dto.MemoryRetrievalEvent event = eventBuilder.build();
         recordRetrievalEvent(event);
         updateRelationshipsFromRetrievalEvent(event);
+        storeRetrievalSnapshot(userId, sessionId, turnId, message, routingDecision, gain,
+                graphRetrievedFacts, vectorRetrievedFacts, selectedFacts);
 
         return contextBuilder.toString();
     }
 
+    private void storeRetrievalSnapshot(String userId,
+                                        Long sessionId,
+                                        Long turnId,
+                                        String message,
+                                        String routingDecision,
+                                        double gain,
+                                        List<RetrievedFact> graphRetrievedFacts,
+                                        List<RetrievedFact> vectorRetrievedFacts,
+                                        List<RetrievedFact> selectedFacts) {
+        if (turnId == null) {
+            return;
+        }
+        List<RetrievalFactCandidate> retrievedFacts = buildRetrievedSnapshotFacts(graphRetrievedFacts, vectorRetrievedFacts);
+        RetrievalContextSnapshot snapshot = RetrievalContextSnapshot.builder()
+                .userId(userId)
+                .sessionId(sessionId)
+                .turnId(turnId)
+                .query(message)
+                .routingDecision(routingDecision)
+                .gain(gain)
+                .retrievedFacts(retrievedFacts)
+                .contextFacts(buildContextSnapshotFacts(selectedFacts))
+                .createdAt(LocalDateTime.now())
+                .build();
+        retrievalContextSnapshotStore.save(snapshot);
+    }
 
-    private List<GraphRetrievalHit> performGraphRetrievalV2(String userId, String message, List<String> entities,
-                                                            com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder) {
+    private List<RetrievalFactCandidate> buildRetrievedSnapshotFacts(List<RetrievedFact> graphRetrievedFacts,
+                                                                     List<RetrievedFact> vectorRetrievedFacts) {
+        List<RetrievalFactCandidate> retrievedFacts = new ArrayList<>(graphRetrievedFacts.size() + vectorRetrievedFacts.size());
+        graphRetrievedFacts.stream()
+                .map(RetrievedFact::toSnapshotCandidate)
+                .forEach(retrievedFacts::add);
+        vectorRetrievedFacts.stream()
+                .map(RetrievedFact::toSnapshotCandidate)
+                .forEach(retrievedFacts::add);
+        return retrievedFacts;
+    }
+
+    private List<RetrievalFactCandidate> buildContextSnapshotFacts(List<RetrievedFact> selectedFacts) {
+        List<RetrievalFactCandidate> contextFacts = new ArrayList<>(selectedFacts.size());
+        for (RetrievedFact selectedFact : selectedFacts) {
+            contextFacts.add(selectedFact.toSnapshotCandidate(contextFacts.size() + 1, formatRetrievedFactForContext(selectedFact)));
+        }
+        return contextFacts;
+    }
+
+    private List<RetrievedFact> buildGraphRetrievedFacts(List<GraphRetrievalHit> graphFacts) {
+        List<RetrievedFact> candidates = new ArrayList<>();
+        int rank = 1;
+        for (GraphRetrievalHit graphHit : graphFacts) {
+            FactNode fact = graphHit.fact;
+            candidates.add(new RetrievedFact(
+                    fact != null ? fact.getId() : null,
+                    fact != null ? fact.getContent() : null,
+                    "graph",
+                    rank++,
+                    fact));
+        }
+        return candidates;
+    }
+
+
+    protected List<GraphRetrievalHit> performGraphRetrievalV2(String userId, String message, List<String> entities,
+                                                              com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder) {
         List<GraphRetrievalHit> result = new ArrayList<>();
         userRepository.findByName(userId).ifPresent(user -> {
             if (user.getFacts() == null || user.getFacts().isEmpty()) {
@@ -714,10 +809,9 @@ public class MemoryServiceImpl implements MemoryService {
         return result;
     }
 
-    private List<String> performVectorRetrievalV2(String userId, String message,
-                                                  com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder,
-                                                  List<Long> rankedIdsOut) {
-        List<String> result = new ArrayList<>();
+    protected List<RetrievedFact> performVectorRetrievalV2(String userId, String message,
+                                                           com.lingshu.ai.core.dto.MemoryRetrievalEvent.MemoryRetrievalEventBuilder eventBuilder) {
+        List<RetrievedFact> result = new ArrayList<>();
         try {
             dev.langchain4j.data.embedding.Embedding queryEmbedding = embeddingModel.embed(message).content();
             EmbeddingSearchRequest searchRequest = EmbeddingSearchRequest.builder()
@@ -738,17 +832,15 @@ public class MemoryServiceImpl implements MemoryService {
                 if (displayText == null || displayText.isBlank()) {
                     displayText = embedded.text();
                 }
-                result.add(displayText);
-
                 Long factId = null;
                 if (embedded.metadata() != null && embedded.metadata().getString("fact_id") != null) {
                     try {
                         factId = Long.parseLong(embedded.metadata().getString("fact_id"));
                         rankedIds.add(factId);
-                        rankedIdsOut.add(factId);
                     } catch (Exception ignored) {
                     }
                 }
+                result.add(new RetrievedFact(factId, displayText, "vector", result.size() + 1, null));
                 semanticMatches.add(new com.lingshu.ai.core.dto.MemoryRetrievalEvent.SemanticMatch(factId, match.score(), displayText));
             }
             eventBuilder.semanticMatches(semanticMatches);
@@ -819,7 +911,7 @@ public class MemoryServiceImpl implements MemoryService {
         return new ArrayList<>(deduped.values());
     }
 
-    private double calculateGainV2(List<String> entities, List<GraphRetrievalHit> activatedFacts) {
+    protected double calculateGainV2(List<String> entities, List<GraphRetrievalHit> activatedFacts) {
         if (entities.isEmpty() || activatedFacts.isEmpty()) {
             return 0.0;
         }
@@ -933,40 +1025,54 @@ public class MemoryServiceImpl implements MemoryService {
         }
     }
 
-    private List<String> mergeAndDeduplicate(List<FactNode> graphFacts, List<String> vectorTexts) {
-        List<String> finalFacts = new ArrayList<>();
+    private RetrievalMergeResult mergeAndDeduplicate(List<RetrievedFact> graphFacts, List<RetrievedFact> vectorFacts) {
+        List<RetrievedFact> selectedFacts = new ArrayList<>();
         Set<String> normalizedSet = new java.util.HashSet<>();
+        List<String> selectedNormalizedContents = new ArrayList<>();
 
         // 图谱结果优先
-        for (FactNode fact : graphFacts) {
-            String content = fact.getContent();
+        for (RetrievedFact fact : graphFacts) {
+            String content = fact.content;
             String normalized = normalizeSemanticText(content);
             if (!normalizedSet.contains(normalized)) {
-                finalFacts.add(formatFactWithTime(content, fact));
+                selectedFacts.add(fact);
                 normalizedSet.add(normalized);
+                selectedNormalizedContents.add(normalized);
             }
         }
 
         // 向量结果补充
-        for (String text : vectorTexts) {
+        for (RetrievedFact fact : vectorFacts) {
+            String text = fact.content;
             String normalized = normalizeSemanticText(text);
             if (!normalizedSet.contains(normalized)) {
                 // 执行更深度的语义去重检查
                 boolean isDuplicate = false;
-                for (String existing : finalFacts) {
-                    if (lexicalSimilarity(normalized, normalizeSemanticText(existing)) > 0.85) {
+                for (String existingNormalized : selectedNormalizedContents) {
+                    if (lexicalSimilarity(normalized, existingNormalized) > 0.85) {
                         isDuplicate = true;
                         break;
                     }
                 }
                 if (!isDuplicate) {
-                    finalFacts.add(text);
+                    selectedFacts.add(fact);
                     normalizedSet.add(normalized);
+                    selectedNormalizedContents.add(normalized);
                 }
             }
         }
 
-        return finalFacts;
+        return new RetrievalMergeResult(selectedFacts);
+    }
+
+    private String formatRetrievedFactForContext(RetrievedFact fact) {
+        if (fact == null) {
+            return "";
+        }
+        if ("graph".equals(fact.source) && fact.graphFact != null) {
+            return formatFactWithTime(fact.content, fact.graphFact);
+        }
+        return fact.content;
     }
 
     private String formatFactWithTime(String content, FactNode fact) {
@@ -1049,7 +1155,7 @@ public class MemoryServiceImpl implements MemoryService {
 
 
 
-    private List<String> extractEntities(String message) {
+    protected List<String> extractEntities(String message) {
         if (message == null || message.trim().isEmpty()) {
             return new java.util.ArrayList<>();
         }
@@ -2095,15 +2201,56 @@ public class MemoryServiceImpl implements MemoryService {
         }
     }
 
-    private static final class GraphRetrievalHit {
+    protected static final class GraphRetrievalHit {
         private final FactNode fact;
         private final int hop;
         private final double relationWeight;
 
-        private GraphRetrievalHit(FactNode fact, int hop, double relationWeight) {
+        protected GraphRetrievalHit(FactNode fact, int hop, double relationWeight) {
             this.fact = fact;
             this.hop = hop;
             this.relationWeight = relationWeight;
+        }
+    }
+
+    protected static final class RetrievedFact {
+        private final Long factId;
+        private final String content;
+        private final String source;
+        private final int rank;
+        private final FactNode graphFact;
+
+        private RetrievedFact(Long factId, String content, String source, int rank, FactNode graphFact) {
+            this.factId = factId;
+            this.content = content;
+            this.source = source;
+            this.rank = rank;
+            this.graphFact = graphFact;
+        }
+
+        private RetrievalFactCandidate toSnapshotCandidate() {
+            return toSnapshotCandidate(rank, content);
+        }
+
+        private RetrievalFactCandidate toSnapshotCandidate(int rank, String content) {
+            return RetrievalFactCandidate.builder()
+                    .factId(factId)
+                    .content(content)
+                    .source(source)
+                    .rank(rank)
+                    .build();
+        }
+    }
+
+    private static final class RetrievalMergeResult {
+        private final List<RetrievedFact> selectedFacts;
+
+        private RetrievalMergeResult(List<RetrievedFact> selectedFacts) {
+            this.selectedFacts = List.copyOf(selectedFacts);
+        }
+
+        private List<RetrievedFact> selectedFacts() {
+            return selectedFacts;
         }
     }
 

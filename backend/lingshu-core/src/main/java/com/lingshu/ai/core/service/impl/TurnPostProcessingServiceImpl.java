@@ -37,6 +37,7 @@ public class TurnPostProcessingServiceImpl {
     private final ConversationTitleSummarizer titleSummarizer;
     private final TurnTimelineService turnTimelineService;
     private final ApplicationEventPublisher eventPublisher;
+    private final RetrievalFeedbackService retrievalFeedbackService;
 
     private static final Pattern DEFAULT_TITLE_PATTERN = Pattern.compile("^新对话 \\d+$");
 
@@ -50,7 +51,8 @@ public class TurnPostProcessingServiceImpl {
                                          ChatSessionRepository chatSessionRepository,
                                          ConversationTitleSummarizer titleSummarizer,
                                          TurnTimelineService turnTimelineService,
-                                         ApplicationEventPublisher eventPublisher) {
+                                         ApplicationEventPublisher eventPublisher,
+                                         RetrievalFeedbackService retrievalFeedbackService) {
         this.emotionAnalyzer = emotionAnalyzer;
         this.memoryService = memoryService;
         this.affinityService = affinityService;
@@ -62,11 +64,14 @@ public class TurnPostProcessingServiceImpl {
         this.titleSummarizer = titleSummarizer;
         this.turnTimelineService = turnTimelineService;
         this.eventPublisher = eventPublisher;
+        this.retrievalFeedbackService = retrievalFeedbackService;
     }
 
     @Async("taskExecutor")
-    public void processCompletedTurn(String userId, Long sessionId, String userMessage, String assistantResponse,
+    public void processCompletedTurn(String userId, Long sessionId, Long turnId, String userMessage, String assistantResponse,
                                      EmotionAnalysis preAnalyzedEmotion) {
+        analyzeRetrievalFeedback(turnId, assistantResponse);
+
         if (userId == null || userId.isBlank() || userMessage == null || userMessage.isBlank()) {
             return;
         }
@@ -127,6 +132,14 @@ public class TurnPostProcessingServiceImpl {
             } catch (Exception ex) {
                 log.warn("记录互动失败: {}", ex.getMessage(), ex);
             }
+        }
+    }
+
+    private void analyzeRetrievalFeedback(Long turnId, String assistantResponse) {
+        try {
+            retrievalFeedbackService.analyzeTurn(turnId, assistantResponse);
+        } catch (Exception e) {
+            log.warn("检索反馈后处理失败: {}", e.getMessage(), e);
         }
     }
 

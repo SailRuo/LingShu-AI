@@ -16,6 +16,8 @@ public interface MemoryService {
      */
     String retrieveContext(String userId, String message);
 
+    String retrieveContext(String userId, Long sessionId, Long turnId, String message);
+
     void updateRelationshipsFromRetrievalEvent(com.lingshu.ai.core.dto.MemoryRetrievalEvent event);
 
     /**

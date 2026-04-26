@@ -43,6 +43,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors; // 添加此行
+
 import lombok.RequiredArgsConstructor;
 
 @Service
@@ -68,6 +69,7 @@ public class ChatServiceImpl implements ChatService {
     private final ToolResultSummarizer toolResultSummarizer;
     private final TurnTimelineService turnTimelineService;
     private final McpToolArtifactRegistry mcpToolArtifactRegistry;
+    private final RetrievalContextSnapshotStore retrievalContextSnapshotStore;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Value("${lingshu.ollama.base-url:http://localhost:11434}")
@@ -75,7 +77,6 @@ public class ChatServiceImpl implements ChatService {
     private final ExecutorService customModelHttpExecutor = Executors.newFixedThreadPool(
             Math.max(4, Runtime.getRuntime().availableProcessors())
     );
-
 
 
     private ChatSession getOrCreateSession(String userId, Long sessionId) {
@@ -91,12 +92,13 @@ public class ChatServiceImpl implements ChatService {
         return agentConfigService.getDefaultAgent().orElse(null);
     }
 
-    private void postProcessAfterResponse(String userId, Long sessionId, String userMessage, String assistantResponse,
+    private void postProcessAfterResponse(String userId, Long sessionId, Long turnId, String userMessage, String assistantResponse,
                                           com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion) {
         try {
             turnPostProcessingService.processCompletedTurn(
                     userId,
                     sessionId,
+                    turnId,
                     userMessage,
                     assistantResponse != null ? assistantResponse : "",
                     preAnalyzedEmotion
@@ -274,9 +276,9 @@ public class ChatServiceImpl implements ChatService {
         // com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion = emotionResult != null ? emotionResult.toEmotionAnalysis() : null;
         com.lingshu.ai.core.dto.EmotionAnalysis preAnalyzedEmotion = null;
         String emotionPrompt = "";
-        String longTermContext = memoryService.retrieveContext(userId, safeMessage);
+        String longTermContext = memoryService.retrieveContext(userId, session.getId(), turnId, safeMessage);
         String relationshipPrompt = affinityService.getRelationshipPrompt(userId);
-        
+
         String systemPrompt = promptBuilderService.buildMergedSystemPrompt(agent, relationshipPrompt, longTermContext);
 
         if (!emotionPrompt.isEmpty()) {
@@ -490,7 +492,7 @@ public class ChatServiceImpl implements ChatService {
                     flushPendingAssistantText(turnId, pendingAssistantText);
                     turnTimelineService.completeTurn(turnId, assistantResponseStore.toString());
                     sink.tryEmitComplete();
-                    postProcessAfterResponse(userId, session.getId(), safeMessage, assistantResponseStore.toString(), preAnalyzedEmotion);
+                    postProcessAfterResponse(userId, session.getId(), turnId, safeMessage, assistantResponseStore.toString(), preAnalyzedEmotion);
                 })
                 .onError(error -> {
                     log.error("流式对话发生错误: {}", error.getMessage(), error);
@@ -612,7 +614,7 @@ public class ChatServiceImpl implements ChatService {
         turnTimelineService.recordAssistantText(turnId, assistantResponseStore.toString());
         turnTimelineService.completeTurn(turnId, assistantResponseStore.toString());
         sink.tryEmitComplete();
-        postProcessAfterResponse(userId, sessionId, safeMessage, assistantResponseStore.toString(), preAnalyzedEmotion);
+        postProcessAfterResponse(userId, sessionId, turnId, safeMessage, assistantResponseStore.toString(), preAnalyzedEmotion);
     }
 
     private void handleStreamingError(Throwable error, Sinks.Many<String> sink, Long turnId) {
@@ -741,9 +743,8 @@ public class ChatServiceImpl implements ChatService {
                             .collect(java.util.stream.Collectors.toList());
                     return models;
                 }
+                throw new RuntimeException("模型列表解析失败");
 
-                systemLogService.warn("模型列表解析失败，使用默认模型", "SYSTEM");
-                return List.of("gpt-3.5-turbo");
             } else {
                 String url = effectiveUrl + "/api/tags";
                 systemLogService.debug("请求Ollama模型列表: " + url, "SYSTEM");
@@ -764,7 +765,7 @@ public class ChatServiceImpl implements ChatService {
             }
         } catch (Exception e) {
             systemLogService.error("获取模型列表失败: " + e.getMessage(), "SYSTEM");
-            return "openai".equalsIgnoreCase(source) ? List.of("gpt-3.5-turbo") : List.of("qwen3.5:4b");
+            throw e;
         }
     }
 
@@ -780,6 +781,9 @@ public class ChatServiceImpl implements ChatService {
 
         // 2. 清除 LangChain4j 的 ChatMemory 缓存
         chatMemoryProvider.get(sessionId).clear();
+
+        // 3. 清除该会话关联的检索上下文快照
+        retrievalContextSnapshotStore.removeBySessionId(sessionId);
 
         systemLogService.info("已清空会话记录 sessionId=" + sessionId, "CHAT");
     }

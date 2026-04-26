@@ -1,0 +1,112 @@
+:root {
+  /* ====== 布局尺寸 ====== */
+  --sidebar-width: 60px;
+  --conversation-list-width: 320px;
+  --conversation-list-min-width: 280px;
+  --conversation-list-max-width: 400px;
+  --chat-header-height: 56px;
+  --input-area-min-height: 120px;
+  --input-area-max-height: 200px;
+
+  /* ====== 主色调（微信绿） ====== */
+  --color-primary: #07C160;
+  --color-primary-hover: #06AD56;
+  --color-primary-active: #069A4D;
+  --color-primary-light: #E8F8EE;
+
+  /* ====== 背景色 ====== */
+  --bg-sidebar: #EDEDED;
+  --bg-conversation-list: #F7F7F7;
+  --bg-chat-window: #F5F5F5;
+  --bg-input-area: #F7F7F7;
+  --bg-chat-header: #F7F7F7;
+  --bg-message-self: #95EC69;
+  --bg-message-other: #FFFFFF;
+  --bg-hover: #F0F0F0;
+  --bg-selected: #EBEBEB;
+  --bg-input: #FFFFFF;
+
+  /* ====== 文字色 ====== */
+  --text-primary: #191919;
+  --text-secondary: #666666;
+  --text-tertiary: #999999;
+  --text-placeholder: #B2B2B2;
+  --text-link: #576B95;
+  --text-on-primary: #FFFFFF;
+
+  /* ====== 边框色 ====== */
+  --border-color: #E0E0E0;
+  --border-color-dark: #D9D9D9;
+  --border-input: #E0E0E0;
+  --border-input-focus: #07C160;
+
+  /* ====== 状态色 ====== */
+  --color-success: #07C160;
+  --color-warning: #FFA940;
+  --color-error: #FA5151;
+  --color-info: #1890FF;
+  --color-unread-bg: #FA5151;
+  --color-online: #07C160;
+  --color-offline: #B2B2B2;
+
+  /* ====== 阴影 ====== */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-message: 0 1px 2px rgba(0, 0, 0, 0.05);
+
+  /* ====== 圆角 ====== */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 50%;
+
+  /* ====== 过渡动画 ====== */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s ease;
+  --transition-slow: 0.35s ease;
+
+  /* ====== 字体 ====== */
+  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 15px;
+  --font-size-xl: 17px;
+  --font-size-xxl: 20px;
+  --line-height-tight: 18px;
+  --line-height-normal: 22px;
+  --line-height-relaxed: 26px;
+}
+
+/* ====== 暗黑模式 ====== */
+[data-theme="dark"] {
+  --bg-sidebar: #2E2E2E;
+  --bg-conversation-list: #222222;
+  --bg-chat-window: #171717;
+  --bg-input-area: #222222;
+  --bg-chat-header: #222222;
+  --bg-message-self: #3D8C41;
+  --bg-message-other: #2E2E2E;
+  --bg-hover: #333333;
+  --bg-selected: #3A3A3A;
+  --bg-input: #2A2A2A;
+
+  --text-primary: #E5E5E5;
+  --text-secondary: #A6A6A6;
+  --text-tertiary: #737373;
+  --text-placeholder: #555555;
+
+  --border-color: #404040;
+  --border-color-dark: #4A4A4A;
+  --border-input: #444444;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-message: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
