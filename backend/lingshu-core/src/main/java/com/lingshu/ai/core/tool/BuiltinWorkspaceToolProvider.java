@@ -11,7 +11,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.LinkOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -21,12 +23,16 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 public class BuiltinWorkspaceToolProvider implements ToolProvider {
 
     private static final Logger log = LoggerFactory.getLogger(BuiltinWorkspaceToolProvider.class);
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final Set<String> BUILTIN_TOOLS = Set.of("execute_command", "read_file", "write_file");
+    private static final long COMMAND_TIMEOUT_MILLIS = 2_000L;
+    private static final int COMMAND_OUTPUT_LIMIT = 4_000;
 
     private final Path workspaceRoot;
     private final Set<String> enabledTools;
@@ -64,6 +70,7 @@ public class BuiltinWorkspaceToolProvider implements ToolProvider {
         Map<String, Object> args = parseArguments(request.arguments());
         String command = stringArg(args, "command");
         String workdirValue = stringArg(args, "workdir");
+        String requestedCommandCategory = stringArg(args, "commandCategory");
 
         if (command.isBlank()) {
             return errorJson("command is required");
@@ -85,24 +92,41 @@ public class BuiltinWorkspaceToolProvider implements ToolProvider {
         String shell = detectShell();
         List<String> processCommand = shell.contains("pwsh")
                 ? List.of("pwsh", "-NoProfile", "-Command", command)
-                : List.of("powershell", "-NoProfile", "-Command", command);
+                : shell.contains("powershell")
+                ? List.of("powershell", "-NoProfile", "-Command", command)
+                : List.of("sh", "-lc", command);
 
         try {
             ProcessBuilder builder = new ProcessBuilder(processCommand);
             builder.directory(workingDir.toFile());
-            builder.redirectErrorStream(true);
             Process process = builder.start();
-            byte[] outputBytes = process.getInputStream().readAllBytes();
-            int exitCode = process.waitFor();
-            
-            String output = decodeProcessOutput(outputBytes).replace("\u0000", "");
+            CompletableFuture<String> stdoutFuture = readStream(process.getInputStream());
+            CompletableFuture<String> stderrFuture = readStream(process.getErrorStream());
+            boolean timedOut = !process.waitFor(COMMAND_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
+            if (timedOut) {
+                process.destroyForcibly();
+                process.waitFor();
+            }
+            int exitCode = process.exitValue();
+
+            String stdout = stdoutFuture.join().replace("\u0000", "");
+            String stderr = stderrFuture.join().replace("\u0000", "");
+            OutputSlice stdoutSlice = truncateOutput(stdout);
+            OutputSlice stderrSlice = truncateOutput(stderr);
+            boolean truncated = stdoutSlice.truncated() || stderrSlice.truncated();
+            String combinedOutput = stdoutSlice.value() + stderrSlice.value();
 
             Map<String, Object> response = new HashMap<>();
-            response.put("success", exitCode == 0);
+            response.put("success", exitCode == 0 && !timedOut);
             response.put("exitCode", exitCode);
+            response.put("timedOut", timedOut);
+            response.put("truncated", truncated);
             response.put("workingDir", workingDir.toString());
             response.put("command", command);
-            response.put("output", output);
+            response.put("commandCategory", detectCommandCategory(command, requestedCommandCategory));
+            response.put("stdout", stdoutSlice.value());
+            response.put("stderr", stderrSlice.value());
+            response.put("output", combinedOutput);
             return toJson(response);
         } catch (Exception e) {
             log.error("execute_command failed: {}", e.getMessage(), e);
@@ -139,7 +163,7 @@ public class BuiltinWorkspaceToolProvider implements ToolProvider {
     private String writeFile(dev.langchain4j.agent.tool.ToolExecutionRequest request, Object memoryId) {
         Map<String, Object> args = parseArguments(request.arguments());
         String pathValue = stringArg(args, "path");
-        String content = stringArg(args, "content");
+        String content = rawStringArg(args, "content");
         if (pathValue.isBlank()) {
             return errorJson("path is required");
         }
@@ -171,10 +195,11 @@ public class BuiltinWorkspaceToolProvider implements ToolProvider {
         return ToolSpecification.builder()
                 .name("execute_command")
                 .description("Execute local shell commands inside the workspace. This tool can perform any local command operation that is allowed by the built-in security whitelist (dangerous keywords are blocked). Returns exit code and combined output as JSON.")
-                .parameters(JsonObjectSchema.builder()
+                        .parameters(JsonObjectSchema.builder()
                         .description("Local command execution request (whitelisted and workspace-scoped).")
                         .addStringProperty("command", "The command to run. Prefer direct local commands for file/system operations within whitelist restrictions. For reading UTF-8 files on Windows, prefer: Get-Content -Raw -Encoding UTF8 <path>.")
                         .addStringProperty("workdir", "Optional working directory inside the workspace.")
+                        .addStringProperty("commandCategory", "Optional normalized command category such as npm, mvn, git, python, powershell, or shell.")
                         .required(List.of("command"))
                         .additionalProperties(false)
                         .build())
@@ -221,13 +246,21 @@ public class BuiltinWorkspaceToolProvider implements ToolProvider {
     }
 
     private String stringArg(Map<String, Object> args, String name) {
+        return rawStringArg(args, name).trim();
+    }
+
+    private String rawStringArg(Map<String, Object> args, String name) {
         Object value = args.get(name);
-        return value == null ? "" : String.valueOf(value).trim();
+        return value == null ? "" : String.valueOf(value);
     }
 
     private Path resolveWorkspaceRoot(Path configuredRoot) {
-        if (configuredRoot != null && Files.exists(configuredRoot.resolve(".lingshu").resolve("skills"))) {
-            return configuredRoot;
+        if (configuredRoot != null) {
+            try {
+                return configuredRoot.toAbsolutePath().normalize();
+            } catch (Exception ignored) {
+                // Fall through to discovery only when the explicit root is invalid.
+            }
         }
         Path current = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
         if (Files.exists(current.resolve(".lingshu").resolve("skills"))) {
@@ -264,13 +297,15 @@ public class BuiltinWorkspaceToolProvider implements ToolProvider {
                 candidate = workspaceRoot.resolve(candidate);
             }
             candidate = candidate.normalize().toAbsolutePath();
-            if (!candidate.startsWith(workspaceRoot.normalize().toAbsolutePath())) {
+            Path rootBoundary = resolveBoundaryPath(workspaceRoot, true);
+            Path candidateBoundary = resolveBoundaryPath(candidate, false);
+            if (rootBoundary == null || candidateBoundary == null || !candidateBoundary.startsWith(rootBoundary)) {
                 return null;
             }
             if (!directoryAllowed && Files.isDirectory(candidate)) {
                 return null;
             }
-            return candidate;
+            return candidateBoundary;
         } catch (Exception e) {
             return null;
         }
@@ -289,7 +324,75 @@ public class BuiltinWorkspaceToolProvider implements ToolProvider {
         if (os.contains("windows")) {
             return Files.exists(Paths.get("C:\\Program Files\\PowerShell\\7\\pwsh.exe")) ? "pwsh" : "powershell";
         }
-        return "pwsh";
+        return canExecute("pwsh", "-NoProfile", "-Command", "echo ok") ? "pwsh" : "sh";
+    }
+
+    private String detectCommandCategory(String command, String requestedCommandCategory) {
+        if (!requestedCommandCategory.isBlank()) {
+            return requestedCommandCategory;
+        }
+        String trimmed = command == null ? "" : command.trim();
+        if (trimmed.isEmpty()) {
+            return "";
+        }
+        int firstSpace = trimmed.indexOf(' ');
+        return (firstSpace >= 0 ? trimmed.substring(0, firstSpace) : trimmed).toLowerCase(Locale.ROOT);
+    }
+
+    private CompletableFuture<String> readStream(InputStream inputStream) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return decodeProcessOutput(inputStream.readAllBytes());
+            } catch (IOException e) {
+                throw new IllegalStateException("Failed to read process stream", e);
+            }
+        });
+    }
+
+    private OutputSlice truncateOutput(String output) {
+        if (output == null || output.length() <= COMMAND_OUTPUT_LIMIT) {
+            return new OutputSlice(output == null ? "" : output, false);
+        }
+        return new OutputSlice(output.substring(0, COMMAND_OUTPUT_LIMIT), true);
+    }
+
+    private Path resolveBoundaryPath(Path path, boolean directoryAllowed) throws IOException {
+        if (path == null) {
+            return null;
+        }
+        Path absolute = path.toAbsolutePath().normalize();
+        if (Files.exists(absolute)) {
+            Path realPath = absolute.toRealPath();
+            if (!directoryAllowed && Files.isDirectory(realPath)) {
+                return null;
+            }
+            return realPath;
+        }
+        Path existingAncestor = nearestExistingAncestor(absolute);
+        if (existingAncestor == null) {
+            return null;
+        }
+        Path realAncestor = existingAncestor.toRealPath();
+        Path relativeSuffix = realAncestor.relativize(realAncestor);
+        Path unresolvedSuffix = existingAncestor.relativize(absolute);
+        return realAncestor.resolve(relativeSuffix).resolve(unresolvedSuffix).normalize();
+    }
+
+    private Path nearestExistingAncestor(Path path) {
+        Path current = path;
+        while (current != null && !Files.exists(current)) {
+            current = current.getParent();
+        }
+        return current;
+    }
+
+    private boolean canExecute(String... command) {
+        try {
+            Process process = new ProcessBuilder(command).start();
+            return process.waitFor(2, TimeUnit.SECONDS) && process.exitValue() == 0;
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private String decodeProcessOutput(byte[] outputBytes) {
@@ -352,5 +455,8 @@ public class BuiltinWorkspaceToolProvider implements ToolProvider {
             return "";
         }
         return value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private record OutputSlice(String value, boolean truncated) {
     }
 }

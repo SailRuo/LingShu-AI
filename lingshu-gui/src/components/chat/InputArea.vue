@@ -193,7 +193,7 @@ onUnmounted(() => {
           ref="textareaRef"
           v-model="inputText"
           class="text-input"
-          placeholder=""
+          placeholder="输入消息；使用 #task 开头可进入任务执行态（示例：#task 帮我在 D:\work\demo 里修复测试）"
           @keydown="handleKeydown"
           @paste="handlePaste"
         />
@@ -478,5 +478,4 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 </style>
-
 

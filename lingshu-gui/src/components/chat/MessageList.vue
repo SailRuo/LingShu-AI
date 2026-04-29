@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, nextTick, watch } from 'vue';
-import type { AnyMessage } from '../../types/message';
+import type { AnyMessage, TaskMessage } from '../../types/message';
 import { useTts } from '../../composables/useTts';
+import { useChatStore } from '../../stores/chat';
+import TaskExecutionCard from './TaskExecutionCard.vue';
 
 const props = defineProps<{
   messages: AnyMessage[];
@@ -10,6 +12,7 @@ const props = defineProps<{
 const listRef = ref<HTMLElement | null>(null);
 let resizeObserver: ResizeObserver | null = null;
 const { speak } = useTts();
+const chatStore = useChatStore();
 
 watch(
   () => props.messages,
@@ -66,6 +69,11 @@ function handleBubbleDoubleClick(msg: AnyMessage) {
     }
   }
 }
+
+function handleTaskAction(action: 'approve' | 'reject' | 'pause' | 'resume' | 'stop', messageId: string) {
+  if (!chatStore.currentConversationId) return;
+  chatStore.handleTaskAction(chatStore.currentConversationId, messageId, action);
+}
 </script>
 
 <template>
@@ -102,6 +110,11 @@ function handleBubbleDoubleClick(msg: AnyMessage) {
               @dblclick="handleBubbleDoubleClick(msg)"
             >
               <span v-if="msg.type === 'text'" class="text-content">{{ (msg as any).content }}</span>
+              <TaskExecutionCard
+                v-else-if="msg.type === 'task'"
+                :message="msg as TaskMessage"
+                @action="handleTaskAction"
+              />
               <span v-else class="unsupported">[{{ msg.type }} 消息]</span>
             </div>
           </div>
@@ -235,6 +248,12 @@ function handleBubbleDoubleClick(msg: AnyMessage) {
   position: relative;
 }
 
+.bubble:has(.task-card) {
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
 .bubble.other {
   background-color: var(--bg-message-other);
   color: var(--text-primary);
@@ -255,11 +274,20 @@ function handleBubbleDoubleClick(msg: AnyMessage) {
   border-bottom: 6px solid transparent;
 }
 
+.bubble.other:has(.task-card)::after,
+.bubble.self:has(.task-card)::after {
+  display: none;
+}
+
 .bubble.self {
   background-color: var(--bg-message-self);
   color: var(--text-message-self);
   margin-right: 12px;
   border-radius: 8px;
+}
+
+.bubble.self:has(.task-card) {
+  margin-right: 0;
 }
 
 .bubble.self::after {
@@ -292,4 +320,3 @@ function handleBubbleDoubleClick(msg: AnyMessage) {
   font-size: var(--font-size-md);
 }
 </style>
-

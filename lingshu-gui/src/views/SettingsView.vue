@@ -8,7 +8,9 @@ import IconNotification from '@arco-design/web-vue/es/icon/icon-notification';
 import IconApps from '@arco-design/web-vue/es/icon/icon-apps';
 import IconInfoCircle from '@arco-design/web-vue/es/icon/icon-info-circle';
 import IconRobot from '@arco-design/web-vue/es/icon/icon-robot';
+import IconCode from '@arco-design/web-vue/es/icon/icon-code';
 import AgentManager from '../components/settings/AgentManager.vue';
+import ModelConfig from '../components/settings/ModelConfig.vue';
 
 const uiStore = useUIStore();
 const activeKey = ref('general');
@@ -17,6 +19,7 @@ const menuItems = [
   { key: 'account', title: '账号与存储', icon: IconUser },
   { key: 'general', title: '通用', icon: IconSettings },
   { key: 'agents', title: '智能体管理', icon: IconRobot },
+  { key: 'models', title: '模型配置', icon: IconCode },
   { key: 'shortcuts', title: '快捷键', icon: IconThunderbolt },
   { key: 'notifications', title: '通知', icon: IconNotification },
   { key: 'plugins', title: '插件', icon: IconApps },
@@ -176,6 +179,9 @@ const languageOptions = [
         <AgentManager />
       </div>
 
+      <div v-show="activeKey === 'models'" class="settings-scroll-area">
+        <ModelConfig />
+      </div>
 
       <div v-show="activeKey === 'about'" class="settings-scroll-area">
         <div class="about-content-inner">
@@ -265,7 +271,7 @@ const languageOptions = [
       </div>
 
 
-      <div v-show="!['general', 'agents', 'about'].includes(activeKey)" class="empty-detail">
+      <div v-show="!['general', 'agents', 'models', 'about'].includes(activeKey)" class="empty-detail">
         <p>该功能正在开发中...</p>
       </div>
     </div>

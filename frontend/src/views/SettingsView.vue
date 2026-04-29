@@ -22,7 +22,6 @@ const message = useMessage()
 const activeTab = ref('basic')
 const showThemeModal = ref(false)
 const themeStore = useThemeStore()
-const animationEffect = useLocalStorage('lingshu-animation-effect', 'off')
 
 const settings = ref({
   source: '',
@@ -762,40 +761,40 @@ async function setDefaultAgent(id: number) {
                   <span class="label-text">背景特效</span>
                   <span class="item-hint">为界面增加动态氛围感</span>
                 </div>
-                <n-radio-group v-model:value="animationEffect" size="medium">
+                <n-radio-group v-model:value="themeStore.animationEffect" size="medium">
                   <n-radio-button value="off">
                     <div class="flex items-center gap-1">
-                      <n-icon :component="Rocket" :size="14" v-if="animationEffect === 'off'" />
+                      <n-icon :component="Rocket" :size="14" v-if="themeStore.animationEffect === 'off'" />
                       <span>关闭</span>
                     </div>
                   </n-radio-button>
                   <n-radio-button value="starfield">
                     <div class="flex items-center gap-1">
-                      <n-icon :component="Sparkles" :size="14" v-if="animationEffect === 'starfield'" />
+                      <n-icon :component="Sparkles" :size="14" v-if="themeStore.animationEffect === 'starfield'" />
                       <span>星辰</span>
                     </div>
                   </n-radio-button>
                   <n-radio-button value="rain">
                     <div class="flex items-center gap-1">
-                      <n-icon :component="Zap" :size="14" v-if="animationEffect === 'rain'" />
+                      <n-icon :component="Zap" :size="14" v-if="themeStore.animationEffect === 'rain'" />
                       <span>下雨</span>
                     </div>
                   </n-radio-button>
                   <n-radio-button value="aurora">
                     <div class="flex items-center gap-1">
-                      <n-icon :component="Wind" :size="14" v-if="animationEffect === 'aurora'" />
+                      <n-icon :component="Wind" :size="14" v-if="themeStore.animationEffect === 'aurora'" />
                       <span>极光</span>
                     </div>
                   </n-radio-button>
                   <n-radio-button value="firefly">
                     <div class="flex items-center gap-1">
-                      <n-icon :component="Flame" :size="14" v-if="animationEffect === 'firefly'" />
+                      <n-icon :component="Flame" :size="14" v-if="themeStore.animationEffect === 'firefly'" />
                       <span>萤火</span>
                     </div>
                   </n-radio-button>
                   <n-radio-button value="mist">
                     <div class="flex items-center gap-1">
-                      <n-icon :component="Cloud" :size="14" v-if="animationEffect === 'mist'" />
+                      <n-icon :component="Cloud" :size="14" v-if="themeStore.animationEffect === 'mist'" />
                       <span>云海</span>
                     </div>
                   </n-radio-button>

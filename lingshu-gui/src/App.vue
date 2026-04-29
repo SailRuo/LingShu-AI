@@ -6,6 +6,7 @@ const uiStore = useUIStore();
 
 onMounted(() => {
   uiStore.setTheme(uiStore.theme);
+  uiStore.setFontSize(uiStore.fontSize);
 });
 </script>
 

@@ -412,6 +412,12 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 });
     }
 
+    public void broadcastTaskEvent(String userId, Map<String, Object> message) {
+        Map<String, Object> normalizedMessage = new HashMap<>(message);
+        normalizedMessage.put("type", "taskEvent");
+        broadcastToUser(userId, normalizedMessage);
+    }
+
     public void broadcastProactiveGreeting(String userId, String greeting) {
         broadcastToUser(userId, Map.of(
             "type", "proactiveGreeting",

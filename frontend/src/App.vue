@@ -19,15 +19,12 @@ import SecurityView from '@/views/SecurityView.vue'
 
 const themeStore = useThemeStore()
 
-// 渚ц竟鏍忕姸鎬佺鐞?
+// 侧边栏状态管理
 const sidebarCollapsed = ref(false)
 const mobileSidebarVisible = ref(false)
 const isMobile = ref(false)
 
-// 鍔ㄧ敾鐗规晥锛屼娇鐢?LocalStorage 鎸佷箙鍖?
-const animationEffect = useLocalStorage('lingshu-animation-effect', 'off')
-
-// 鐩戝惉绐楀彛澶у皬鍙樺寲
+// 监听窗口大小变化
 function checkMobile() {
   isMobile.value = window.innerWidth < 768
   if (!isMobile.value) {
@@ -38,7 +35,6 @@ function checkMobile() {
 
 
 onMounted(() => {
-  themeStore.initTheme()
   checkMobile()
   window.addEventListener('resize', checkMobile)
 })
@@ -120,19 +116,19 @@ const GlobalMessage = defineComponent({
         <n-notification-provider>
           <n-loading-bar-provider>
             <div class="app-container">
-              <!-- Mesh Background (鏍规嵁寮€鍏虫帶鍒? -->
-              <div class="mesh-bg" v-if="animationEffect !== 'off'">
+              <!-- Mesh Background (根据开关控制) -->
+              <div class="mesh-bg" v-if="themeStore.animationEffect !== 'off'">
                 <div class="mesh-blob mesh-1"></div>
                 <div class="mesh-blob mesh-2"></div>
                 <div class="mesh-blob mesh-3"></div>
               </div>
               
               <!-- Background Effects -->
-              <StarField v-if="animationEffect === 'starfield' || animationEffect === 'aurora'" />
-              <RainEffect v-if="animationEffect === 'rain'" />
-              <AuroraEffect v-if="animationEffect === 'aurora'" />
-              <FireflyEffect v-if="animationEffect === 'firefly'" />
-              <MistEffect v-if="animationEffect === 'mist'" />
+              <StarField v-if="themeStore.animationEffect === 'starfield' || themeStore.animationEffect === 'aurora'" />
+              <RainEffect v-if="themeStore.animationEffect === 'rain'" />
+              <AuroraEffect v-if="themeStore.animationEffect === 'aurora'" />
+              <FireflyEffect v-if="themeStore.animationEffect === 'firefly'" />
+              <MistEffect v-if="themeStore.animationEffect === 'mist'" />
 
               <!-- Main Layout -->
               <div class="main-layout" :class="{ 'sidebar-collapsed': sidebarCollapsed && !isMobile }">

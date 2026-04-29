@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LingShu 任务态交互原型</title>
+  <style>
+    :root {
+      --bg: #f2f3f5;
+      --panel: #ffffff;
+      --line: #e5e7eb;
+      --text: #111827;
+      --muted: #6b7280;
+      --green: #17c964;
+      --green-soft: #e8f9ef;
+      --blue: #2f6fed;
+      --orange: #f59e0b;
+      --red: #ef4444;
+      --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at 15% 10%, #dde8ff 0%, transparent 28%),
+        radial-gradient(circle at 85% 90%, #d9f5e7 0%, transparent 25%),
+        var(--bg);
+      color: var(--text);
+    }
+
+    .app {
+      width: min(1280px, 96vw);
+      height: min(860px, 94vh);
+      margin: 3vh auto;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      background: var(--panel);
+      border: 1px solid #dbe1ea;
+    }
+
+    .sidebar {
+      border-right: 1px solid var(--line);
+      background: linear-gradient(180deg, #f9fafb 0%, #f3f4f6 100%);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .side-head {
+      padding: 14px;
+      border-bottom: 1px solid var(--line);
+      font-weight: 700;
+      color: #0f172a;
+    }
+
+    .chat-item {
+      margin: 10px 12px 0;
+      border-radius: 10px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .chat-item.active {
+      border-color: #9cc5ff;
+      background: #eef5ff;
+    }
+
+    .chat-item h4 {
+      margin: 0;
+      font-size: 14px;
+    }
+
+    .chat-item p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .main {
+      display: grid;
+      grid-template-rows: 56px 1fr 110px;
+      background: #f7f8fa;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .topbar h3 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .top-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    button {
+      border: 1px solid #d1d5db;
+      background: #fff;
+      color: #111827;
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    button:hover { border-color: #94a3b8; }
+    button.primary {
+      background: var(--green);
+      color: #fff;
+      border-color: var(--green);
+    }
+    button.warn {
+      background: #fff7ed;
+      color: #9a3412;
+      border-color: #fdba74;
+    }
+    button.danger {
+      background: #fff1f2;
+      color: #9f1239;
+      border-color: #fda4af;
+    }
+
+    .timeline {
+      overflow: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .msg {
+      max-width: 76%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      line-height: 1.5;
+      font-size: 14px;
+      border: 1px solid transparent;
+      white-space: pre-wrap;
+    }
+
+    .msg.user {
+      align-self: flex-end;
+      background: var(--green);
+      color: #fff;
+    }
+
+    .msg.bot {
+      align-self: flex-start;
+      background: #fff;
+      border-color: var(--line);
+    }
+
+    .task-card {
+      align-self: stretch;
+      border: 1px solid #cfe0ff;
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 8px 24px rgba(47, 111, 237, 0.08);
+      overflow: hidden;
+    }
+
+    .task-head {
+      padding: 14px 16px;
+      background: linear-gradient(90deg, #eff6ff 0%, #f0fdf4 100%);
+      border-bottom: 1px solid #dbeafe;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .task-title {
+      font-size: 14px;
+      font-weight: 700;
+      margin: 0;
+    }
+
+    .state {
+      font-size: 12px;
+      font-weight: 700;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid;
+    }
+
+    .state.running { color: #166534; background: var(--green-soft); border-color: #86efac; }
+    .state.waiting { color: #92400e; background: #fef3c7; border-color: #fcd34d; }
+    .state.paused { color: #1e3a8a; background: #dbeafe; border-color: #93c5fd; }
+    .state.done { color: #065f46; background: #d1fae5; border-color: #6ee7b7; }
+    .state.stopped { color: #7f1d1d; background: #fee2e2; border-color: #fca5a5; }
+
+    .task-meta {
+      padding: 12px 16px;
+      display: grid;
+      gap: 8px;
+      border-bottom: 1px solid var(--line);
+      font-size: 12px;
+      color: #374151;
+    }
+
+    .task-meta code {
+      background: #f3f4f6;
+      border-radius: 6px;
+      padding: 2px 6px;
+    }
+
+    .task-steps {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .task-steps h5, .task-logs h5, .task-approval h5 {
+      margin: 0 0 8px;
+      font-size: 13px;
+    }
+
+    .task-steps ul {
+      margin: 0;
+      padding-left: 16px;
+      display: grid;
+      gap: 6px;
+      font-size: 13px;
+      color: #334155;
+    }
+
+    .task-logs {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .logs-box {
+      background: #0f172a;
+      color: #d1d5db;
+      padding: 10px;
+      border-radius: 8px;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 12px;
+      max-height: 140px;
+      overflow: auto;
+      line-height: 1.4;
+    }
+
+    .task-approval {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+      background: #fffbeb;
+      display: none;
+    }
+
+    .task-approval.show {
+      display: block;
+    }
+
+    .approval-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+
+    .task-actions {
+      padding: 12px 16px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .composer {
+      border-top: 1px solid var(--line);
+      background: #fff;
+      padding: 12px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: end;
+    }
+
+    textarea {
+      width: 100%;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      padding: 10px;
+      resize: none;
+      min-height: 76px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+
+    .hint {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 960px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+      .msg { max-width: 90%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="side-head">LingShu 会话</div>
+      <div class="chat-item active">
+        <h4>子枫 · 当前会话</h4>
+        <p>你：帮我修这个项目里的测试并提交变更</p>
+      </div>
+      <div class="chat-item">
+        <h4>灵儿 · 日常聊天</h4>
+        <p>今天心情还好吗？</p>
+      </div>
+      <div class="chat-item">
+        <h4>灵枢 · 设置助手</h4>
+        <p>权限白名单已更新</p>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <h3>子枫（聊天内任务态 Demo）</h3>
+        <div class="top-actions">
+          <button id="btnReset">重置演示</button>
+        </div>
+      </header>
+
+      <section class="timeline" id="timeline">
+        <div class="msg bot">你可以直接在聊天里发任务指令，我会在当前会话里进入任务执行态，并支持审批、暂停、恢复。</div>
+      </section>
+
+      <footer class="composer">
+        <div>
+          <textarea id="input" placeholder="示例：帮我在 D:\work\demo 项目里修复单测并跑一遍 npm test"></textarea>
+          <div class="hint">输入任务描述后点击“发送并进入任务态”</div>
+        </div>
+        <button class="primary" id="btnSend">发送并进入任务态</button>
+      </footer>
+    </main>
+  </div>
+
+  <script>
+    const timeline = document.getElementById("timeline");
+    const input = document.getElementById("input");
+    const btnSend = document.getElementById("btnSend");
+    const btnReset = document.getElementById("btnReset");
+
+    const task = {
+      id: "task-" + Date.now(),
+      title: "复杂编程任务执行",
+      directory: "D:\\work\\demo",
+      commandCategory: "npm",
+      state: "idle",
+      paused: false,
+      permissionApproved: false,
+      finished: false,
+      stopped: false,
+      currentStep: 0,
+      steps: [
+        "解析任务并读取项目结构",
+        "检查目录权限与命令类别权限",
+        "等待用户审批（首次）",
+        "执行环境检查与测试命令",
+        "定位失败点并修改文件",
+        "复跑测试并生成变更摘要"
+      ],
+      logs: []
+    };
+
+    let taskCard;
+    let statePill;
+    let stepsEl;
+    let logsEl;
+    let approvalBox;
+    let metaEl;
+
+    function appendMessage(text, role = "bot") {
+      const node = document.createElement("div");
+      node.className = "msg " + role;
+      node.textContent = text;
+      timeline.appendChild(node);
+      timeline.scrollTop = timeline.scrollHeight;
+    }
+
+    function createTaskCard() {
+      taskCard = document.createElement("article");
+      taskCard.className = "task-card";
+      taskCard.innerHTML = `
+        <div class="task-head">
+          <p class="task-title" id="taskTitle"></p>
+          <span class="state running" id="statePill">执行中</span>
+        </div>
+        <div class="task-meta" id="taskMeta"></div>
+        <div class="task-steps">
+          <h5>执行步骤</h5>
+          <ul id="steps"></ul>
+        </div>
+        <div class="task-logs">
+          <h5>实时日志</h5>
+          <div class="logs-box" id="logs"></div>
+        </div>
+        <div class="task-approval" id="approvalBox">
+          <h5>审批请求</h5>
+          <div id="approvalText"></div>
+          <div class="approval-row">
+            <button class="primary" id="approveOnce">同意并长期授权</button>
+            <button class="danger" id="rejectOnce">拒绝</button>
+          </div>
+        </div>
+        <div class="task-actions">
+          <button id="pauseBtn">暂停</button>
+          <button id="resumeBtn">恢复</button>
+          <button class="warn" id="simulateWait">模拟下一次审批</button>
+          <button class="danger" id="stopBtn">终止任务</button>
+        </div>
+      `;
+      timeline.appendChild(taskCard);
+
+      document.getElementById("taskTitle").textContent = `${task.title} · ${task.id}`;
+      statePill = document.getElementById("statePill");
+      stepsEl = document.getElementById("steps");
+      logsEl = document.getElementById("logs");
+      approvalBox = document.getElementById("approvalBox");
+      metaEl = document.getElementById("taskMeta");
+
+      document.getElementById("approveOnce").addEventListener("click", approvePermission);
+      document.getElementById("rejectOnce").addEventListener("click", rejectPermission);
+      document.getElementById("pauseBtn").addEventListener("click", pauseTask);
+      document.getElementById("resumeBtn").addEventListener("click", resumeTask);
+      document.getElementById("stopBtn").addEventListener("click", stopTask);
+      document.getElementById("simulateWait").addEventListener("click", simulateApprovalAgain);
+
+      refreshTaskUI();
+    }
+
+    function setState(state) {
+      task.state = state;
+      const map = {
+        running: ["执行中", "state running"],
+        waiting: ["等待审批", "state waiting"],
+        paused: ["已暂停", "state paused"],
+        done: ["已完成", "state done"],
+        stopped: ["已终止", "state stopped"]
+      };
+      statePill.textContent = map[state][0];
+      statePill.className = map[state][1];
+    }
+
+    function log(line) {
+      const now = new Date().toLocaleTimeString();
+      task.logs.push(`[${now}] ${line}`);
+      logsEl.textContent = task.logs.join("\n");
+      logsEl.scrollTop = logsEl.scrollHeight;
+    }
+
+    function refreshTaskUI() {
+      const permissionText = task.permissionApproved
+        ? `已授权：目录读写 <code>${task.directory}</code>，命令类别 <code>${task.commandCategory}</code>`
+        : `未授权：目录读写 <code>${task.directory}</code>，命令类别 <code>${task.commandCategory}</code>`;
+
+      metaEl.innerHTML = `
+        <div><strong>目标目录：</strong><code>${task.directory}</code></div>
+        <div><strong>命令类别：</strong><code>${task.commandCategory}</code></div>
+        <div><strong>权限状态：</strong>${permissionText}</div>
+      `;
+
+      stepsEl.innerHTML = "";
+      task.steps.forEach((step, idx) => {
+        const li = document.createElement("li");
+        if (idx < task.currentStep) li.textContent = `✅ ${step}`;
+        else if (idx === task.currentStep) li.textContent = `👉 ${step}`;
+        else li.textContent = `⬜ ${step}`;
+        stepsEl.appendChild(li);
+      });
+    }
+
+    function showApproval(text) {
+      approvalBox.classList.add("show");
+      document.getElementById("approvalText").innerHTML = text;
+      setState("waiting");
+    }
+
+    function hideApproval() {
+      approvalBox.classList.remove("show");
+      if (!task.finished && !task.stopped && !task.paused) setState("running");
+    }
+
+    function approvePermission() {
+      task.permissionApproved = true;
+      hideApproval();
+      task.currentStep = Math.max(task.currentStep, 3);
+      refreshTaskUI();
+      log("用户已审批：保存长期授权（目录 + 命令类别）");
+      appendMessage("审批已通过。我会继续执行任务，你可以随时暂停或终止。");
+      continueExecution();
+    }
+
+    function rejectPermission() {
+      hideApproval();
+      task.stopped = true;
+      setState("stopped");
+      log("用户拒绝审批，任务停止");
+      appendMessage("你拒绝了本次权限请求，任务已停止。你可以调整授权策略后重试。");
+    }
+
+    function pauseTask() {
+      if (task.finished || task.stopped) return;
+      task.paused = true;
+      setState("paused");
+      log("任务已暂停");
+      appendMessage("任务已暂停。当前进度已保存，稍后可恢复。");
+    }
+
+    function resumeTask() {
+      if (task.finished || task.stopped) return;
+      task.paused = false;
+      setState("running");
+      log("任务恢复执行");
+      appendMessage("任务已恢复，我将从上一次断点继续。");
+      continueExecution();
+    }
+
+    function stopTask() {
+      if (task.finished || task.stopped) return;
+      task.stopped = true;
+      setState("stopped");
+      log("任务被用户终止");
+      appendMessage("任务已终止。任务状态和日志会保留在该会话卡片中。");
+    }
+
+    function simulateApprovalAgain() {
+      if (task.finished || task.stopped) return;
+      showApproval("模拟二次审批：检测到新的命令类别 <code>git</code>，是否授权长期执行？");
+      log("触发二次审批（新命令类别）");
+    }
+
+    function continueExecution() {
+      if (task.paused || task.stopped || task.finished) return;
+
+      if (!task.permissionApproved) {
+        task.currentStep = 2;
+        refreshTaskUI();
+        showApproval(`首次权限申请：允许访问目录 <code>${task.directory}</code> 并执行命令类别 <code>${task.commandCategory}</code>。批准后将保存长期授权。`);
+        log("等待首次权限审批");
+        return;
+      }
+
+      const ticks = [
+        () => { task.currentStep = 3; refreshTaskUI(); log("执行 npm test -- --watch=false"); },
+        () => { task.currentStep = 4; refreshTaskUI(); log("定位失败测试：src/services/taskRunner.spec.ts"); },
+        () => { task.currentStep = 5; refreshTaskUI(); log("修改完成，重新执行 npm test"); },
+        () => {
+          task.currentStep = 6;
+          task.finished = true;
+          refreshTaskUI();
+          setState("done");
+          log("任务完成，生成变更摘要并回写会话");
+          appendMessage("任务已完成：共修改 2 个文件，测试已通过。需要我继续帮你创建 commit 吗？");
+        }
+      ];
+
+      let index = 0;
+      const run = () => {
+        if (task.paused || task.stopped || task.finished) return;
+        if (index >= ticks.length) return;
+        ticks[index++]();
+        setTimeout(run, 850);
+      };
+      run();
+    }
+
+    function startTask() {
+      const text = input.value.trim() || "帮我修复当前项目中的失败测试并提交变更";
+      appendMessage(text, "user");
+      appendMessage("我会在当前会话内进入任务执行态，先做权限检查和项目分析。");
+
+      if (!taskCard) createTaskCard();
+      setState("running");
+      refreshTaskUI();
+      log("任务创建成功，准备执行");
+      log(`解析目标任务：${text}`);
+      task.currentStep = 1;
+      refreshTaskUI();
+      setTimeout(continueExecution, 700);
+      input.value = "";
+      timeline.scrollTop = timeline.scrollHeight;
+    }
+
+    function resetDemo() {
+      window.location.reload();
+    }
+
+    btnSend.addEventListener("click", startTask);
+    btnReset.addEventListener("click", resetDemo);
+  </script>
+</body>
+</html>

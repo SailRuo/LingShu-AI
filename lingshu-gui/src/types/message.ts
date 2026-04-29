@@ -6,7 +6,8 @@ export type MessageType =
   | 'video'
   | 'link'
   | 'quote'
-  | 'system';
+  | 'system'
+  | 'task';
 
 export type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
 
@@ -80,6 +81,39 @@ export interface SystemMessage extends BaseMessage {
   content: string;
 }
 
+export type TaskExecutionState = 'running' | 'waiting_approval' | 'paused' | 'done' | 'stopped' | 'failed';
+export type TaskStepState = 'pending' | 'active' | 'done' | 'failed';
+
+export interface TaskStep {
+  id: string;
+  label: string;
+  state: TaskStepState;
+}
+
+export interface TaskApprovalRequest {
+  id: string;
+  scope: 'directory' | 'command_category';
+  target: string;
+  reason: string;
+}
+
+export interface TaskExecutionSnapshot {
+  title: string;
+  state: TaskExecutionState;
+  workspace: string;
+  commandCategory: string;
+  permissionApproved: boolean;
+  steps: TaskStep[];
+  logs: string[];
+  approvalRequest?: TaskApprovalRequest | null;
+  summary?: string;
+}
+
+export interface TaskMessage extends BaseMessage {
+  type: 'task';
+  content: TaskExecutionSnapshot;
+}
+
 export type AnyMessage =
   | TextMessage
   | ImageMessage
@@ -88,7 +122,8 @@ export type AnyMessage =
   | VideoMessage
   | LinkMessage
   | QuoteMessage
-  | SystemMessage;
+  | SystemMessage
+  | TaskMessage;
 
 export function isTextMessage(msg: BaseMessage): msg is TextMessage {
   return msg.type === 'text';

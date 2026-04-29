@@ -4,6 +4,7 @@ import com.lingshu.ai.core.service.ChatService;
 import com.lingshu.ai.core.service.ChatSessionService;
 import com.lingshu.ai.core.service.ProactiveService;
 import com.lingshu.ai.core.service.TurnTimelineService;
+import com.lingshu.ai.core.service.impl.TaskSessionRouterService;
 import com.lingshu.ai.infrastructure.entity.UserState;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
@@ -20,15 +21,18 @@ public class ChatController {
     private final ChatSessionService chatSessionService;
     private final ProactiveService proactiveService;
     private final TurnTimelineService turnTimelineService;
+    private final TaskSessionRouterService taskSessionRouterService;
 
     public ChatController(ChatService chatService,
                           ChatSessionService chatSessionService,
                           ProactiveService proactiveService,
-                          TurnTimelineService turnTimelineService) {
+                          TurnTimelineService turnTimelineService,
+                          TaskSessionRouterService taskSessionRouterService) {
         this.chatService = chatService;
         this.chatSessionService = chatSessionService;
         this.proactiveService = proactiveService;
         this.turnTimelineService = turnTimelineService;
+        this.taskSessionRouterService = taskSessionRouterService;
     }
 
     @GetMapping(value = "/welcome", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -127,6 +131,20 @@ public class ChatController {
     }
 
     public record ChatRequest(String message, List<String> images, Long sessionId, Long agentId, String model, String apiKey, String baseUrl, String userId) {
+    }
+
+    public record TaskIntentRequest(String message) {
+    }
+
+    public record TaskIntentResponse(boolean taskRequest, String reason) {
+    }
+
+    @PostMapping(value = "/task-intent", produces = MediaType.APPLICATION_JSON_VALUE)
+    public TaskIntentResponse taskIntent(@RequestBody(required = false) TaskIntentRequest request) {
+        TaskSessionRouterService.TaskRouteDecision decision = taskSessionRouterService.decide(
+                request != null ? request.message() : null
+        );
+        return new TaskIntentResponse(decision.taskRequest(), decision.reason());
     }
 
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

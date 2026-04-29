@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { LogicalPosition } from '@tauri-apps/api/dpi';
 import { ref, onMounted } from 'vue';
 
 const appWindow = getCurrentWindow();
@@ -14,10 +15,33 @@ onMounted(async () => {
   await appWindow.onResized(() => checkMaximized());
 });
 
-const handleMouseDown = (e: MouseEvent) => {
-  if (e.buttons === 1) {
+const handleMouseDown = async (e: MouseEvent) => {
+  if (e.buttons !== 1) return;
+
+  if (!isMaximized.value) {
     appWindow.startDragging();
+    return;
   }
+
+  const ratioX = e.clientX / window.innerWidth;
+  const cursorScreenX = e.screenX;
+  const cursorScreenY = e.screenY;
+
+  await appWindow.unmaximize();
+  isMaximized.value = false;
+
+  await new Promise(r => setTimeout(r, 50));
+
+  const scaleFactor = await appWindow.scaleFactor();
+  const outerSize = await appWindow.outerSize();
+  const logicalSize = outerSize.toLogical(scaleFactor);
+
+  const newX = cursorScreenX - ratioX * logicalSize.width;
+  const newY = cursorScreenY - 10;
+
+  await appWindow.setPosition(new LogicalPosition(Math.round(newX), Math.round(Math.max(0, newY))));
+
+  appWindow.startDragging();
 };
 
 const handleDoubleClick = () => {

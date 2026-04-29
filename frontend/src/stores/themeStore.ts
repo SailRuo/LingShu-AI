@@ -2,12 +2,20 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { THEMES, cyberPurple, buildNaiveOverrides } from '@/theme/themes'
 import type { ThemeConfig, ThemeKey } from '@/types'
+import { useLocalStorage } from '@vueuse/core'
 
 const STORAGE_KEY = 'lingshu-theme'
+const ANIMATION_KEY = 'lingshu-animation-effect'
 
 export const useThemeStore = defineStore('theme', () => {
-  const current = ref<ThemeConfig>(cyberPurple)
+  // 主题持久化
+  const themeKey = useLocalStorage<ThemeKey>(STORAGE_KEY, 'cyberPurple')
+  
+  const current = ref<ThemeConfig>(THEMES[themeKey.value] || cyberPurple)
   const availableThemes = Object.values(THEMES)
+
+  // 动画特效持久化
+  const animationEffect = useLocalStorage(ANIMATION_KEY, 'off')
 
   const naiveOverrides = computed(() => buildNaiveOverrides(current.value))
 
@@ -15,6 +23,7 @@ export const useThemeStore = defineStore('theme', () => {
     const theme = THEMES[key]
     if (theme) {
       current.value = theme
+      themeKey.value = key
     }
   }
 
@@ -35,24 +44,16 @@ export const useThemeStore = defineStore('theme', () => {
     }
   }
 
-  function initTheme() {
-    const saved = localStorage.getItem(STORAGE_KEY) as ThemeKey | null
-    if (saved && THEMES[saved]) {
-      current.value = THEMES[saved]
-    }
-    applyCSS(current.value)
-  }
-
+  // 监听主题变化并应用
   watch(current, (theme) => {
-    localStorage.setItem(STORAGE_KEY, theme.key)
     applyCSS(theme)
-  }, { immediate: false })
+  }, { immediate: true })
 
   return {
     current,
     availableThemes,
     naiveOverrides,
-    setTheme,
-    initTheme
+    animationEffect,
+    setTheme
   }
 })

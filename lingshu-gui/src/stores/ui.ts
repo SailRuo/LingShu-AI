@@ -4,11 +4,14 @@ import { ref, watch } from 'vue';
 export type ThemeMode = 'light' | 'dark' | 'system';
 
 export const useUIStore = defineStore('ui', () => {
-  const theme = ref<ThemeMode>('light');
-  const fontSize = ref(2); // 1: 小, 2: 标准, 3: 中, 4: 大, 5: 特大
-  const conversationListWidth = ref(280);
+  const theme = ref<ThemeMode>((localStorage.getItem('lingshu-theme') as ThemeMode) || 'light');
+  const fontSize = ref(Number(localStorage.getItem('lingshu-font-size')) || 2); // 1: 小, 2: 标准, 3: 中, 4: 大, 5: 特大
+  const conversationListWidth = ref(Number(localStorage.getItem('lingshu-sidebar-width')) || 280);
 
-  // 初始化时从本地存储或系统偏好加载（可选，此处暂简实现）
+  // 监听变化并持久化
+  watch(theme, (val) => localStorage.setItem('lingshu-theme', val));
+  watch(fontSize, (val) => localStorage.setItem('lingshu-font-size', val.toString()));
+  watch(conversationListWidth, (val) => localStorage.setItem('lingshu-sidebar-width', val.toString()));
   
   function toggleTheme() {
     const newMode = theme.value === 'light' ? 'dark' : 'light';

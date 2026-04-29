@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed, onMounted } from 'vue';
 import type { Conversation } from '../types/conversation';
-import type { AnyMessage, TextMessage } from '../types/message';
+import type { AnyMessage, TaskExecutionSnapshot, TaskMessage, TaskStep, TextMessage } from '../types/message';
 import { useWebSocket } from '../composables/useWebSocket';
 import { useAgentsStore } from './agents';
 import { Message } from '@arco-design/web-vue';
@@ -52,6 +52,7 @@ export const useChatStore = defineStore('chat', () => {
   const activeNav = ref('message');
   const userId = ref(getClientUserId());
   const currentAgentId = ref<number | null>(null); // 当前会话绑定的智能体 ID
+  const taskTimers = new Map<string, number[]>();
 
   const { connect, on, register } = useWebSocket();
 
@@ -294,6 +295,12 @@ export const useChatStore = defineStore('chat', () => {
     }
     messagesMap.value[currentConversationId.value].push(userMsg);
 
+    // 本地任务态原型：输入 #task 开头时直接进入任务执行卡片
+    if (content.trim().startsWith('#task')) {
+      enqueueTaskPrototype(content.trim(), agent);
+      return;
+    }
+
     // 更新会话列表最后一条消息
     const conv = conversations.value.find(c => c.id === currentConversationId.value);
     if (conv) {
@@ -414,6 +421,267 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function enqueueTaskPrototype(raw: string, agent: any) {
+    if (!currentConversationId.value) return;
+    const text = raw.replace(/^#task\s*/i, '').trim();
+    const workspace = extractWorkspacePath(text) || 'D:\\work\\demo';
+    const commandCategory = inferCommandCategory(text);
+    const taskTitle = text || '复杂编程任务执行';
+    const taskMessageId = `task-${Date.now()}`;
+
+    const steps: TaskStep[] = [
+      { id: 'step-1', label: '解析任务并扫描项目结构', state: 'active' },
+      { id: 'step-2', label: '检查目录权限与命令类别权限', state: 'pending' },
+      { id: 'step-3', label: '等待首次审批', state: 'pending' },
+      { id: 'step-4', label: '执行测试与环境检查', state: 'pending' },
+      { id: 'step-5', label: '定位问题并修改代码', state: 'pending' },
+      { id: 'step-6', label: '复跑测试并输出摘要', state: 'pending' }
+    ];
+
+    const snapshot: TaskExecutionSnapshot = {
+      title: taskTitle,
+      state: 'running',
+      workspace,
+      commandCategory,
+      permissionApproved: false,
+      steps,
+      logs: [`[${new Date().toLocaleTimeString()}] 任务已创建，准备进入执行态`],
+      approvalRequest: null
+    };
+
+    const taskMsg: TaskMessage = {
+      id: taskMessageId,
+      type: 'task',
+      senderId: 'bot',
+      senderName: agent?.displayName || '灵枢 AI',
+      senderAvatar: agent?.avatar || '/linger.png',
+      timestamp: new Date(),
+      status: 'sent',
+      isSelf: false,
+      content: snapshot
+    };
+
+    messagesMap.value[currentConversationId.value].push(taskMsg);
+    const conv = conversations.value.find(c => c.id === currentConversationId.value);
+    if (conv) {
+      conv.lastMessage = `[任务] ${taskTitle}`;
+      conv.timestamp = new Date();
+    }
+
+    updateTaskMessage(currentConversationId.value, taskMessageId, draft => {
+      draft.content.steps[0].state = 'done';
+      draft.content.steps[1].state = 'active';
+      draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 已解析任务并识别工作目录：${workspace}`);
+    });
+
+    const timer1 = window.setTimeout(() => {
+      updateTaskMessage(currentConversationId.value!, taskMessageId, draft => {
+        draft.content.steps[1].state = 'done';
+        draft.content.steps[2].state = 'active';
+        draft.content.state = 'waiting_approval';
+        draft.content.approvalRequest = {
+          id: `approval-${Date.now()}`,
+          scope: 'directory',
+          target: workspace,
+          reason: `首次访问目录 ${workspace} 并执行 ${commandCategory} 命令，需要你审批并长期授权。`
+        };
+        draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 权限校验完成，等待用户审批`);
+      });
+    }, 800);
+    trackTaskTimer(taskMessageId, timer1);
+  }
+
+  function handleTaskAction(conversationId: string, messageId: string, action: 'approve' | 'reject' | 'pause' | 'resume' | 'stop') {
+    const msg = findTaskMessage(conversationId, messageId);
+    if (!msg) return;
+
+    if (action === 'approve') {
+      clearTaskTimers(messageId);
+      updateTaskMessage(conversationId, messageId, draft => {
+        draft.content.permissionApproved = true;
+        draft.content.state = 'running';
+        draft.content.approvalRequest = null;
+        draft.content.steps[2].state = 'done';
+        draft.content.steps[3].state = 'active';
+        draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 用户已审批：目录 + 命令类别长期授权`);
+      });
+      runTaskAfterApproval(conversationId, messageId);
+      return;
+    }
+
+    if (action === 'reject') {
+      clearTaskTimers(messageId);
+      updateTaskMessage(conversationId, messageId, draft => {
+        draft.content.state = 'stopped';
+        draft.content.approvalRequest = null;
+        draft.content.steps[2].state = 'failed';
+        draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 用户拒绝审批，任务终止`);
+      });
+      return;
+    }
+
+    if (action === 'pause') {
+      clearTaskTimers(messageId);
+      updateTaskMessage(conversationId, messageId, draft => {
+        if (draft.content.state === 'running') {
+          draft.content.state = 'paused';
+          draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 用户暂停任务`);
+        }
+      });
+      return;
+    }
+
+    if (action === 'resume') {
+      const latest = findTaskMessage(conversationId, messageId);
+      if (!latest || latest.content.state !== 'paused') return;
+      updateTaskMessage(conversationId, messageId, draft => {
+        draft.content.state = 'running';
+        draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 用户恢复任务，继续执行`);
+      });
+      resumeTaskFromCurrentStep(conversationId, messageId);
+      return;
+    }
+
+    if (action === 'stop') {
+      clearTaskTimers(messageId);
+      updateTaskMessage(conversationId, messageId, draft => {
+        draft.content.state = 'stopped';
+        draft.content.approvalRequest = null;
+        draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 用户终止任务`);
+      });
+    }
+  }
+
+  function runTaskAfterApproval(conversationId: string, messageId: string) {
+    const timer2 = window.setTimeout(() => {
+      updateTaskMessage(conversationId, messageId, draft => {
+        if (draft.content.state !== 'running') return;
+        draft.content.steps[3].state = 'done';
+        draft.content.steps[4].state = 'active';
+        draft.content.logs.push(`[${new Date().toLocaleTimeString()}] npm test 执行完成，已定位失败测试文件`);
+      });
+    }, 900);
+
+    const timer3 = window.setTimeout(() => {
+      updateTaskMessage(conversationId, messageId, draft => {
+        if (draft.content.state !== 'running') return;
+        draft.content.steps[4].state = 'done';
+        draft.content.steps[5].state = 'active';
+        draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 已完成代码修复，开始复跑测试`);
+      });
+    }, 1800);
+
+    const timer4 = window.setTimeout(() => {
+      updateTaskMessage(conversationId, messageId, draft => {
+        if (draft.content.state !== 'running') return;
+        draft.content.steps[5].state = 'done';
+        draft.content.state = 'done';
+        draft.content.summary = '任务完成：修改 2 个文件，测试通过。';
+        draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 任务完成，输出变更摘要`);
+      });
+    }, 2800);
+
+    trackTaskTimer(messageId, timer2);
+    trackTaskTimer(messageId, timer3);
+    trackTaskTimer(messageId, timer4);
+  }
+
+  function resumeTaskFromCurrentStep(conversationId: string, messageId: string) {
+    const current = findTaskMessage(conversationId, messageId);
+    if (!current || current.content.state !== 'running') return;
+
+    const steps = current.content.steps;
+    if (steps[5].state === 'done') {
+      updateTaskMessage(conversationId, messageId, draft => {
+        draft.content.state = 'done';
+      });
+      return;
+    }
+
+    if (steps[3].state === 'active' || steps[3].state === 'pending') {
+      runTaskAfterApproval(conversationId, messageId);
+      return;
+    }
+
+    if (steps[4].state === 'active') {
+      const timer = window.setTimeout(() => {
+        updateTaskMessage(conversationId, messageId, draft => {
+          if (draft.content.state !== 'running') return;
+          draft.content.steps[4].state = 'done';
+          draft.content.steps[5].state = 'active';
+          draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 继续执行：进入测试复跑阶段`);
+        });
+      }, 800);
+      trackTaskTimer(messageId, timer);
+      return;
+    }
+
+    if (steps[5].state === 'active') {
+      const timer = window.setTimeout(() => {
+        updateTaskMessage(conversationId, messageId, draft => {
+          if (draft.content.state !== 'running') return;
+          draft.content.steps[5].state = 'done';
+          draft.content.state = 'done';
+          draft.content.summary = '任务完成：修改 2 个文件，测试通过。';
+          draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 恢复后完成任务`);
+        });
+      }, 700);
+      trackTaskTimer(messageId, timer);
+    }
+  }
+
+  function trackTaskTimer(messageId: string, timerId: number) {
+    const existing = taskTimers.get(messageId) || [];
+    existing.push(timerId);
+    taskTimers.set(messageId, existing);
+  }
+
+  function clearTaskTimers(messageId: string) {
+    const timers = taskTimers.get(messageId) || [];
+    timers.forEach(t => clearTimeout(t));
+    taskTimers.delete(messageId);
+  }
+
+  function findTaskMessage(conversationId: string, messageId: string): TaskMessage | null {
+    const messages = messagesMap.value[conversationId] || [];
+    const match = messages.find(m => m.id === messageId && m.type === 'task');
+    return (match as TaskMessage) || null;
+  }
+
+  function updateTaskMessage(conversationId: string, messageId: string, updater: (draft: TaskMessage) => void) {
+    const messages = messagesMap.value[conversationId];
+    if (!messages) return;
+    const idx = messages.findIndex(m => m.id === messageId && m.type === 'task');
+    if (idx === -1) return;
+    const msg = messages[idx] as TaskMessage;
+    const draft: TaskMessage = {
+      ...msg,
+      content: {
+        ...msg.content,
+        steps: msg.content.steps.map(s => ({ ...s })),
+        logs: [...msg.content.logs],
+        approvalRequest: msg.content.approvalRequest ? { ...msg.content.approvalRequest } : null
+      }
+    };
+    updater(draft);
+    messages[idx] = draft;
+  }
+
+  function inferCommandCategory(text: string): string {
+    const normalized = text.toLowerCase();
+    if (normalized.includes('npm') || normalized.includes('pnpm') || normalized.includes('yarn')) return 'npm';
+    if (normalized.includes('python') || normalized.includes('pytest')) return 'python';
+    if (normalized.includes('mvn') || normalized.includes('gradle') || normalized.includes('java')) return 'java';
+    if (normalized.includes('git')) return 'git';
+    return 'npm';
+  }
+
+  function extractWorkspacePath(text: string): string | null {
+    const winPath = text.match(/[A-Za-z]:\\[^\s"'，。；;]+/);
+    if (winPath) return winPath[0];
+    return null;
+  }
+
   function retrySendMessage(_messageId: string) {
     // TODO: 重发失败消息
   }
@@ -454,6 +722,7 @@ export const useChatStore = defineStore('chat', () => {
     sendMessage,
     deleteConversation,
     retrySendMessage,
+    handleTaskAction,
     setSearchQuery,
     setActiveNav,
     currentAgentId,
@@ -461,4 +730,3 @@ export const useChatStore = defineStore('chat', () => {
     createNewConversation
   };
 });
-
