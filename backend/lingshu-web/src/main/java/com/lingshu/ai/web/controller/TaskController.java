@@ -36,6 +36,12 @@ public class TaskController {
         return taskRuntimeService.get(id, userId);
     }
 
+    @GetMapping
+    public List<TaskRunView> listBySession(@RequestParam("sessionId") Long sessionId,
+                                           @RequestParam("userId") String userId) {
+        return taskRuntimeService.listBySession(sessionId, userId);
+    }
+
     @GetMapping("/{id}/events")
     public List<TaskEventView> getEvents(@PathVariable("id") Long id,
                                          @RequestParam("userId") String userId) {

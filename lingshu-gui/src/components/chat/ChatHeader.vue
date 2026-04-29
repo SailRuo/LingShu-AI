@@ -10,7 +10,7 @@ import { useAgentsStore } from '../../stores/agents';
 import { useTts } from '../../composables/useTts';
 import { computed, onMounted } from 'vue';
 
-const props = defineProps<{
+defineProps<{
   conversation: Conversation | null;
 }>();
 

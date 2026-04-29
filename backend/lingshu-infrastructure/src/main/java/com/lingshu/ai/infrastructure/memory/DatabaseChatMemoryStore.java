@@ -8,7 +8,6 @@ import com.lingshu.ai.infrastructure.repository.ChatTurnEventRepository;
 import com.lingshu.ai.infrastructure.repository.ChatTurnRepository;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ChatMessageType;
-import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
@@ -20,9 +19,6 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
 
 /**
@@ -40,7 +36,6 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
     private final ChatTurnRepository turnRepository;
     private final ChatTurnEventRepository eventRepository;
     private final ChatTurnArtifactRepository artifactRepository;
-    private final ConcurrentMap<Long, SystemMessage> sessionSystemMessages = new ConcurrentHashMap<>();
     private final ChatContextAssembler contextAssembler = new ChatContextAssembler();
 
     public DatabaseChatMemoryStore(ChatTurnRepository turnRepository,
@@ -55,11 +50,6 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
     public List<dev.langchain4j.data.message.ChatMessage> getMessages(Object memoryId) {
         Long sessionId = parseId(memoryId);
         List<dev.langchain4j.data.message.ChatMessage> messages = new ArrayList<>();
-
-        SystemMessage systemMessage = sessionSystemMessages.get(sessionId);
-        if (systemMessage != null) {
-            messages.add(systemMessage);
-        }
 
         PageRequest pageable = PageRequest.of(0, MAX_CONTEXT_TURNS, Sort.by("id").descending());
         List<ChatTurn> turnsDesc = turnRepository.findBySessionIdAndStatusInOrderByIdDesc(
@@ -113,26 +103,15 @@ public class DatabaseChatMemoryStore implements ChatMemoryStore {
             return;
         }
 
-        Long sessionId = parseId(memoryId);
-        Optional<SystemMessage> systemMessage = messages.stream()
-                .filter(SystemMessage.class::isInstance)
-                .map(SystemMessage.class::cast)
-                .reduce((first, second) -> second);
-
-        if (systemMessage.isPresent()) {
-            sessionSystemMessages.put(sessionId, systemMessage.get());
-        } else {
-            sessionSystemMessages.remove(sessionId);
-        }
-
         // Persistence migrated to chat_turns/chat_turn_events by TurnTimelineService.
-        // Keep this method side-effect free for non-system messages to avoid duplicate writes.
+        // Keep this method side-effect free to avoid replaying transient SystemMessage
+        // prompts from in-memory cache on the next turn.
     }
 
     @Override
     public void deleteMessages(Object memoryId) {
-        Long sessionId = parseId(memoryId);
-        sessionSystemMessages.remove(sessionId);
+        // No-op. Turn/event history is cleared elsewhere and we do not cache
+        // session-scoped SystemMessage prompts in ChatMemory anymore.
     }
 
     private Long parseId(Object memoryId) {

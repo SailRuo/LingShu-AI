@@ -25,6 +25,42 @@ function getClientUserId(): string {
   return generated;
 }
 
+type BackendTaskRunState =
+  | 'PENDING'
+  | 'RUNNING'
+  | 'WAITING_APPROVAL'
+  | 'PAUSED'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'STOPPED';
+
+interface BackendTaskEventView {
+  id: number;
+  sequenceNo: number;
+  eventType: string;
+  payloadJson: string;
+  timestamp: number;
+}
+
+interface BackendTaskRunView {
+  id: number;
+  userId: string;
+  chatSessionId: number | null;
+  title: string;
+  workspacePath: string;
+  commandCategory: string;
+  state: BackendTaskRunState;
+  runtimeSnapshotJson: string | null;
+  events: BackendTaskEventView[];
+}
+
+interface WebSocketTaskEventMessage {
+  type: 'taskEvent';
+  taskRunId: number;
+  eventType: string;
+  payload: Record<string, any>;
+}
+
 // 文件转 Base64
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -52,8 +88,7 @@ export const useChatStore = defineStore('chat', () => {
   const activeNav = ref('message');
   const userId = ref(getClientUserId());
   const currentAgentId = ref<number | null>(null); // 当前会话绑定的智能体 ID
-  const taskTimers = new Map<string, number[]>();
-
+  const taskModeByConversation = ref<Record<string, boolean>>({});
   const { connect, on, register } = useWebSocket();
 
   const currentConversation = computed(() =>
@@ -63,6 +98,11 @@ export const useChatStore = defineStore('chat', () => {
   const currentMessages = computed<AnyMessage[]>(
     () => (currentConversationId.value ? messagesMap.value[currentConversationId.value] || [] : [])
   );
+
+  const currentTaskModeEnabled = computed<boolean>(() => {
+    if (!currentConversationId.value) return false;
+    return Boolean(taskModeByConversation.value[currentConversationId.value]);
+  });
 
   const filteredConversations = computed<Conversation[]>(() => {
     if (!searchQuery.value) return conversations.value;
@@ -83,6 +123,9 @@ export const useChatStore = defineStore('chat', () => {
     connect();
     on('connected', () => {
       register(userId.value, 1);
+    });
+    on('taskEvent', async (message) => {
+      await handleTaskEvent(message as WebSocketTaskEventMessage);
     });
   });
 
@@ -206,50 +249,71 @@ export const useChatStore = defineStore('chat', () => {
       
       await agentsStore.fetchAgents();
 
-      const res = await fetch(getFullUrl(`/api/chat/turns?${params}`));
-      if (!res.ok) throw new Error('History fetch failed');
-      
-      const turns: any[] = await res.json();
+      const [turnsResponse, tasksResponse] = await Promise.all([
+        fetch(getFullUrl(`/api/chat/turns?${params}`)),
+        fetch(getFullUrl(`/api/tasks?sessionId=${encodeURIComponent(conversationId)}&userId=${encodeURIComponent(userId.value)}`))
+      ]);
+      if (!turnsResponse.ok) throw new Error('History fetch failed');
+      if (!tasksResponse.ok) throw new Error('Task history fetch failed');
+
+      const turns: any[] = await turnsResponse.json();
+      const taskRuns: BackendTaskRunView[] = await tasksResponse.json();
       const convo = conversations.value.find(c => String(c.id) === String(conversationId));
       const agentId = convo?.metadata?.agentId;
       const agent = agentsStore.agents.find(a => String(a.id) === String(agentId));
-      
-      if (turns.length > 0) {
-        const formattedMessages: AnyMessage[] = [];
-        const chronologicalTurns = [...turns].reverse();
-        
-        chronologicalTurns.forEach((turn) => {
-          if (turn.userMessage) {
-            formattedMessages.push({
-              id: `u-${turn.id}`,
-              type: 'text',
-              senderId: 'user',
-              senderName: '我',
-              senderAvatar: '',
-              timestamp: new Date(turn.timestamp),
-              status: 'sent',
-              isSelf: true,
-              content: turn.userMessage,
-            });
-          }
-          
-          if (turn.assistantMessage || turn.status === 'failed') {
-            formattedMessages.push({
-              id: `a-${turn.id}`,
-              type: 'text',
-              senderId: 'bot',
-              senderName: agent?.displayName || '灵枢 AI',
-              senderAvatar: agent?.avatar || '/linger.png',
-              timestamp: new Date(turn.timestamp),
-              status: 'sent',
-              isSelf: false,
-              content: turn.status === 'failed' ? `⚠️ ${turn.errorMessage || '请求失败'}` : (turn.assistantMessage || ''),
-            });
-          }
-        });
-        
-        messagesMap.value[conversationId] = formattedMessages;
-      }
+
+      const formattedMessages: AnyMessage[] = [];
+      const chronologicalTurns = [...turns].reverse();
+
+      chronologicalTurns.forEach((turn) => {
+        if (turn.userMessage) {
+          formattedMessages.push({
+            id: `u-${turn.id}`,
+            type: 'text',
+            senderId: 'user',
+            senderName: '我',
+            senderAvatar: '',
+            timestamp: new Date(turn.timestamp),
+            status: 'sent',
+            isSelf: true,
+            content: turn.userMessage,
+          });
+        }
+
+        if (turn.assistantMessage || turn.status === 'failed') {
+          formattedMessages.push({
+            id: `a-${turn.id}`,
+            type: 'text',
+            senderId: 'bot',
+            senderName: agent?.displayName || '灵枢 AI',
+            senderAvatar: agent?.avatar || '/linger.png',
+            timestamp: new Date(turn.timestamp),
+            status: 'sent',
+            isSelf: false,
+            content: turn.status === 'failed' ? `⚠️ ${turn.errorMessage || '请求失败'}` : (turn.assistantMessage || ''),
+          });
+        }
+      });
+
+      const taskMessages = taskRuns.map((run) => taskRunToMessage(run, {
+        id: `task-run-${run.id}`,
+        type: 'task',
+        senderId: 'bot',
+        senderName: agent?.displayName || '灵枢 AI',
+        senderAvatar: agent?.avatar || '/linger.png',
+        timestamp: taskCreatedTimestamp(run),
+        status: 'sent',
+        isSelf: false,
+        content: createEmptyTaskSnapshot(run.title, run.workspacePath, run.commandCategory),
+        metadata: {
+          taskRunId: run.id,
+          conversationId,
+          chatSessionId: run.chatSessionId
+        }
+      }));
+
+      messagesMap.value[conversationId] = [...formattedMessages, ...taskMessages]
+        .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
     } catch (err) {
       console.error('Load messages error:', err);
     } finally {
@@ -257,8 +321,13 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function sendMessage(content: string, attachments: any[] = []) {
+  async function sendMessage(content: string, attachments: any[] = [], taskModeEnabled = false) {
     if (!currentConversationId.value || (!content.trim() && attachments.length === 0)) return;
+
+    if (taskModeEnabled && attachments.length > 0) {
+      Message.warning('任务模式暂不支持附件，请先移除附件后再执行任务');
+      return;
+    }
 
     // 处理图片附件为 Base64
     const images: string[] = [];
@@ -290,19 +359,14 @@ export const useChatStore = defineStore('chat', () => {
       }
     };
 
-    if (!messagesMap.value[currentConversationId.value]) {
-      messagesMap.value[currentConversationId.value] = [];
+    const conversationId = currentConversationId.value;
+    if (!messagesMap.value[conversationId]) {
+      messagesMap.value[conversationId] = [];
     }
-    messagesMap.value[currentConversationId.value].push(userMsg);
-
-    // 本地任务态原型：输入 #task 开头时直接进入任务执行卡片
-    if (content.trim().startsWith('#task')) {
-      enqueueTaskPrototype(content.trim(), agent);
-      return;
-    }
+    messagesMap.value[conversationId].push(userMsg);
 
     // 更新会话列表最后一条消息
-    const conv = conversations.value.find(c => c.id === currentConversationId.value);
+    const conv = conversations.value.find(c => c.id === conversationId);
     if (conv) {
       conv.lastMessage = content;
       conv.timestamp = new Date();
@@ -315,6 +379,19 @@ export const useChatStore = defineStore('chat', () => {
 
     // 获取当前智能体信息
     const agent = agentsStore.agents.find(a => a.id === agentId);
+
+    if (taskModeEnabled) {
+      const tempTaskMessage = createPendingTaskMessage(content, conversationId, agent);
+      messagesMap.value[conversationId].push(tempTaskMessage);
+      await startTaskRun({
+        tempMessageId: tempTaskMessage.id,
+        conversationId,
+        agent,
+        sessionId: sessionId ? Number(sessionId) : null,
+        requestText: content
+      });
+      return;
+    }
 
     // 添加一个空的 AI 消息用于流式更新
     const aiMsg: TextMessage = {
@@ -329,11 +406,11 @@ export const useChatStore = defineStore('chat', () => {
       content: ''
     };
     
-    if (currentConversationId.value) {
-      if (!messagesMap.value[currentConversationId.value]) {
-        messagesMap.value[currentConversationId.value] = [];
+    if (conversationId) {
+      if (!messagesMap.value[conversationId]) {
+        messagesMap.value[conversationId] = [];
       }
-      messagesMap.value[currentConversationId.value].push(aiMsg);
+      messagesMap.value[conversationId].push(aiMsg);
     }
 
     // 使用流式 API
@@ -380,7 +457,7 @@ export const useChatStore = defineStore('chat', () => {
               const chunk = line.slice(prefixLen).replace(/\r$/, '');
 
               // 更新最后一条 AI 消息
-              const messages = messagesMap.value[currentConversationId.value!] as TextMessage[];
+              const messages = messagesMap.value[conversationId] as TextMessage[];
               if (messages && messages.length > 0) {
                 const lastIdx = messages.length - 1;
                 const lastMsg = messages[lastIdx];
@@ -390,7 +467,7 @@ export const useChatStore = defineStore('chat', () => {
                     content: lastMsg.content + chunk
                   };
                   // 更新会话列表的最后一条消息
-                  const conv = conversations.value.find(c => c.id === currentConversationId.value);
+                  const conv = conversations.value.find(c => c.id === conversationId);
                   if (conv) conv.lastMessage = messages[lastIdx].content;
                 }
               }
@@ -400,7 +477,7 @@ export const useChatStore = defineStore('chat', () => {
       }
 
       // 流式传输完成，更新状态
-      const messages = messagesMap.value[currentConversationId.value!] as TextMessage[];
+      const messages = messagesMap.value[conversationId] as TextMessage[];
       if (messages && messages.length > 0) {
         const lastMsg = messages[messages.length - 1];
         if (lastMsg && lastMsg.type === 'text' && !lastMsg.isSelf) {
@@ -410,7 +487,7 @@ export const useChatStore = defineStore('chat', () => {
     } catch (err) {
       console.error('Stream error:', err);
       // 更新错误状态
-      const messages = messagesMap.value[currentConversationId.value!] as TextMessage[];
+      const messages = messagesMap.value[conversationId] as TextMessage[];
       if (messages && messages.length > 0) {
         const lastMsg = messages[messages.length - 1];
         if (lastMsg && lastMsg.type === 'text' && !lastMsg.isSelf) {
@@ -421,225 +498,43 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function enqueueTaskPrototype(raw: string, agent: any) {
-    if (!currentConversationId.value) return;
-    const text = raw.replace(/^#task\s*/i, '').trim();
-    const workspace = extractWorkspacePath(text) || 'D:\\work\\demo';
-    const commandCategory = inferCommandCategory(text);
-    const taskTitle = text || '复杂编程任务执行';
-    const taskMessageId = `task-${Date.now()}`;
-
-    const steps: TaskStep[] = [
-      { id: 'step-1', label: '解析任务并扫描项目结构', state: 'active' },
-      { id: 'step-2', label: '检查目录权限与命令类别权限', state: 'pending' },
-      { id: 'step-3', label: '等待首次审批', state: 'pending' },
-      { id: 'step-4', label: '执行测试与环境检查', state: 'pending' },
-      { id: 'step-5', label: '定位问题并修改代码', state: 'pending' },
-      { id: 'step-6', label: '复跑测试并输出摘要', state: 'pending' }
-    ];
-
-    const snapshot: TaskExecutionSnapshot = {
-      title: taskTitle,
-      state: 'running',
-      workspace,
-      commandCategory,
-      permissionApproved: false,
-      steps,
-      logs: [`[${new Date().toLocaleTimeString()}] 任务已创建，准备进入执行态`],
-      approvalRequest: null
-    };
-
-    const taskMsg: TaskMessage = {
-      id: taskMessageId,
-      type: 'task',
-      senderId: 'bot',
-      senderName: agent?.displayName || '灵枢 AI',
-      senderAvatar: agent?.avatar || '/linger.png',
-      timestamp: new Date(),
-      status: 'sent',
-      isSelf: false,
-      content: snapshot
-    };
-
-    messagesMap.value[currentConversationId.value].push(taskMsg);
-    const conv = conversations.value.find(c => c.id === currentConversationId.value);
-    if (conv) {
-      conv.lastMessage = `[任务] ${taskTitle}`;
-      conv.timestamp = new Date();
-    }
-
-    updateTaskMessage(currentConversationId.value, taskMessageId, draft => {
-      draft.content.steps[0].state = 'done';
-      draft.content.steps[1].state = 'active';
-      draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 已解析任务并识别工作目录：${workspace}`);
-    });
-
-    const timer1 = window.setTimeout(() => {
-      updateTaskMessage(currentConversationId.value!, taskMessageId, draft => {
-        draft.content.steps[1].state = 'done';
-        draft.content.steps[2].state = 'active';
-        draft.content.state = 'waiting_approval';
-        draft.content.approvalRequest = {
-          id: `approval-${Date.now()}`,
-          scope: 'directory',
-          target: workspace,
-          reason: `首次访问目录 ${workspace} 并执行 ${commandCategory} 命令，需要你审批并长期授权。`
-        };
-        draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 权限校验完成，等待用户审批`);
-      });
-    }, 800);
-    trackTaskTimer(taskMessageId, timer1);
-  }
-
-  function handleTaskAction(conversationId: string, messageId: string, action: 'approve' | 'reject' | 'pause' | 'resume' | 'stop') {
+  async function handleTaskAction(
+    conversationId: string,
+    messageId: string,
+    action: 'approve' | 'reject' | 'pause' | 'resume' | 'stop'
+  ) {
     const msg = findTaskMessage(conversationId, messageId);
     if (!msg) return;
+    const taskRunId = msg.metadata?.taskRunId;
+    if (!taskRunId) return;
 
-    if (action === 'approve') {
-      clearTaskTimers(messageId);
+    try {
+      let updatedRun: BackendTaskRunView;
+      if (action === 'approve' || action === 'reject') {
+        updatedRun = await mutateTaskRun<BackendTaskRunView>(
+          `/api/tasks/${taskRunId}/approve?userId=${encodeURIComponent(userId.value)}`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              grantWorkspace: action === 'approve',
+              grantCommandCategory: action === 'approve'
+            })
+          }
+        );
+      } else {
+        updatedRun = await mutateTaskRun<BackendTaskRunView>(
+          `/api/tasks/${taskRunId}/${action}?userId=${encodeURIComponent(userId.value)}`,
+          { method: 'POST' }
+        );
+      }
+      replaceTaskMessageFromRun(conversationId, messageId, updatedRun, msg.senderName, msg.senderAvatar);
+    } catch (error) {
+      console.error(`Task action ${action} failed`, error);
+      Message.error(`任务${actionLabel(action)}失败`);
       updateTaskMessage(conversationId, messageId, draft => {
-        draft.content.permissionApproved = true;
-        draft.content.state = 'running';
-        draft.content.approvalRequest = null;
-        draft.content.steps[2].state = 'done';
-        draft.content.steps[3].state = 'active';
-        draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 用户已审批：目录 + 命令类别长期授权`);
-      });
-      runTaskAfterApproval(conversationId, messageId);
-      return;
-    }
-
-    if (action === 'reject') {
-      clearTaskTimers(messageId);
-      updateTaskMessage(conversationId, messageId, draft => {
-        draft.content.state = 'stopped';
-        draft.content.approvalRequest = null;
-        draft.content.steps[2].state = 'failed';
-        draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 用户拒绝审批，任务终止`);
-      });
-      return;
-    }
-
-    if (action === 'pause') {
-      clearTaskTimers(messageId);
-      updateTaskMessage(conversationId, messageId, draft => {
-        if (draft.content.state === 'running') {
-          draft.content.state = 'paused';
-          draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 用户暂停任务`);
-        }
-      });
-      return;
-    }
-
-    if (action === 'resume') {
-      const latest = findTaskMessage(conversationId, messageId);
-      if (!latest || latest.content.state !== 'paused') return;
-      updateTaskMessage(conversationId, messageId, draft => {
-        draft.content.state = 'running';
-        draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 用户恢复任务，继续执行`);
-      });
-      resumeTaskFromCurrentStep(conversationId, messageId);
-      return;
-    }
-
-    if (action === 'stop') {
-      clearTaskTimers(messageId);
-      updateTaskMessage(conversationId, messageId, draft => {
-        draft.content.state = 'stopped';
-        draft.content.approvalRequest = null;
-        draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 用户终止任务`);
+        draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 操作失败：${(error as Error).message}`);
       });
     }
-  }
-
-  function runTaskAfterApproval(conversationId: string, messageId: string) {
-    const timer2 = window.setTimeout(() => {
-      updateTaskMessage(conversationId, messageId, draft => {
-        if (draft.content.state !== 'running') return;
-        draft.content.steps[3].state = 'done';
-        draft.content.steps[4].state = 'active';
-        draft.content.logs.push(`[${new Date().toLocaleTimeString()}] npm test 执行完成，已定位失败测试文件`);
-      });
-    }, 900);
-
-    const timer3 = window.setTimeout(() => {
-      updateTaskMessage(conversationId, messageId, draft => {
-        if (draft.content.state !== 'running') return;
-        draft.content.steps[4].state = 'done';
-        draft.content.steps[5].state = 'active';
-        draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 已完成代码修复，开始复跑测试`);
-      });
-    }, 1800);
-
-    const timer4 = window.setTimeout(() => {
-      updateTaskMessage(conversationId, messageId, draft => {
-        if (draft.content.state !== 'running') return;
-        draft.content.steps[5].state = 'done';
-        draft.content.state = 'done';
-        draft.content.summary = '任务完成：修改 2 个文件，测试通过。';
-        draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 任务完成，输出变更摘要`);
-      });
-    }, 2800);
-
-    trackTaskTimer(messageId, timer2);
-    trackTaskTimer(messageId, timer3);
-    trackTaskTimer(messageId, timer4);
-  }
-
-  function resumeTaskFromCurrentStep(conversationId: string, messageId: string) {
-    const current = findTaskMessage(conversationId, messageId);
-    if (!current || current.content.state !== 'running') return;
-
-    const steps = current.content.steps;
-    if (steps[5].state === 'done') {
-      updateTaskMessage(conversationId, messageId, draft => {
-        draft.content.state = 'done';
-      });
-      return;
-    }
-
-    if (steps[3].state === 'active' || steps[3].state === 'pending') {
-      runTaskAfterApproval(conversationId, messageId);
-      return;
-    }
-
-    if (steps[4].state === 'active') {
-      const timer = window.setTimeout(() => {
-        updateTaskMessage(conversationId, messageId, draft => {
-          if (draft.content.state !== 'running') return;
-          draft.content.steps[4].state = 'done';
-          draft.content.steps[5].state = 'active';
-          draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 继续执行：进入测试复跑阶段`);
-        });
-      }, 800);
-      trackTaskTimer(messageId, timer);
-      return;
-    }
-
-    if (steps[5].state === 'active') {
-      const timer = window.setTimeout(() => {
-        updateTaskMessage(conversationId, messageId, draft => {
-          if (draft.content.state !== 'running') return;
-          draft.content.steps[5].state = 'done';
-          draft.content.state = 'done';
-          draft.content.summary = '任务完成：修改 2 个文件，测试通过。';
-          draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 恢复后完成任务`);
-        });
-      }, 700);
-      trackTaskTimer(messageId, timer);
-    }
-  }
-
-  function trackTaskTimer(messageId: string, timerId: number) {
-    const existing = taskTimers.get(messageId) || [];
-    existing.push(timerId);
-    taskTimers.set(messageId, existing);
-  }
-
-  function clearTaskTimers(messageId: string) {
-    const timers = taskTimers.get(messageId) || [];
-    timers.forEach(t => clearTimeout(t));
-    taskTimers.delete(messageId);
   }
 
   function findTaskMessage(conversationId: string, messageId: string): TaskMessage | null {
@@ -665,6 +560,383 @@ export const useChatStore = defineStore('chat', () => {
     };
     updater(draft);
     messages[idx] = draft;
+  }
+
+  function upsertTaskMessageFromRun(
+    conversationId: string,
+    run: BackendTaskRunView,
+    senderName: string,
+    senderAvatar?: string,
+    messageId?: string
+  ) {
+    const existing = messageId
+      ? findTaskMessage(conversationId, messageId)
+      : findTaskMessageByRunId(conversationId, run.id);
+    const nextMessage = taskRunToMessage(run, existing ?? {
+      id: messageId ?? `task-run-${run.id}`,
+      type: 'task',
+      senderId: 'bot',
+      senderName,
+      senderAvatar,
+      timestamp: new Date(),
+      status: 'sent',
+      isSelf: false,
+      content: createEmptyTaskSnapshot(run.title, run.workspacePath, run.commandCategory),
+      metadata: { taskRunId: run.id, conversationId }
+    } as TaskMessage);
+
+    const messages = messagesMap.value[conversationId] || [];
+    const idx = existing ? messages.findIndex((message) => message.id === existing.id) : -1;
+    if (idx >= 0) {
+      messages[idx] = nextMessage;
+    } else {
+      messages.push(nextMessage);
+    }
+    messagesMap.value[conversationId] = [...messages].sort(
+      (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
+    );
+
+    const conv = conversations.value.find(c => c.id === conversationId);
+    if (conv) {
+      conv.lastMessage = `[任务] ${run.title}`;
+      conv.timestamp = new Date();
+    }
+  }
+
+  function replaceTaskMessageFromRun(
+    conversationId: string,
+    messageId: string,
+    run: BackendTaskRunView,
+    senderName: string,
+    senderAvatar?: string
+  ) {
+    upsertTaskMessageFromRun(conversationId, run, senderName, senderAvatar, messageId);
+  }
+
+  function findTaskMessageByRunId(conversationId: string, taskRunId: number): TaskMessage | null {
+    const messages = messagesMap.value[conversationId] || [];
+    const match = messages.find(
+      (message) => message.type === 'task' && message.metadata?.taskRunId === taskRunId
+    );
+    return (match as TaskMessage) || null;
+  }
+
+  async function handleTaskEvent(message: WebSocketTaskEventMessage) {
+    const taskLocation = findTaskLocation(message.taskRunId);
+    if (!taskLocation) return;
+    try {
+      const run = await fetchTaskRun(message.taskRunId);
+      replaceTaskMessageFromRun(
+        taskLocation.conversationId,
+        taskLocation.message.id,
+        run,
+        taskLocation.message.senderName,
+        taskLocation.message.senderAvatar
+      );
+    } catch (error) {
+      console.error('Failed to sync task run after taskEvent', error);
+    }
+  }
+
+  function findTaskLocation(taskRunId: number): { conversationId: string; message: TaskMessage } | null {
+    for (const [conversationId, messages] of Object.entries(messagesMap.value)) {
+      const taskMessage = messages.find(
+        (message) => message.type === 'task' && message.metadata?.taskRunId === taskRunId
+      ) as TaskMessage | undefined;
+      if (taskMessage) {
+        return { conversationId, message: taskMessage };
+      }
+    }
+    return null;
+  }
+
+  async function startTaskRun(params: {
+    tempMessageId: string;
+    conversationId: string;
+    agent: any;
+    sessionId: number | null;
+    requestText: string;
+  }) {
+    try {
+      const run = await mutateTaskRun<BackendTaskRunView>('/api/tasks/start', {
+        method: 'POST',
+        body: JSON.stringify({
+          userId: userId.value,
+          chatSessionId: params.sessionId,
+          requestText: params.requestText,
+          workspacePath: extractWorkspacePath(params.requestText) || 'E:\\Project\\LingShu-AI',
+          commandCategory: inferCommandCategory(params.requestText)
+        })
+      });
+      replaceTaskMessageFromRun(
+        params.conversationId,
+        params.tempMessageId,
+        run,
+        params.agent?.displayName || '灵枢 AI',
+        params.agent?.avatar || '/linger.png'
+      );
+    } catch (error) {
+      console.error('Failed to start task run', error);
+      updateTaskMessage(params.conversationId, params.tempMessageId, draft => {
+        draft.content.state = 'failed';
+        draft.content.logs.push(`[${new Date().toLocaleTimeString()}] 任务创建失败：${(error as Error).message}`);
+      });
+      Message.error('任务创建失败');
+    }
+  }
+
+  async function fetchTaskRun(taskRunId: number): Promise<BackendTaskRunView> {
+    const response = await fetch(getFullUrl(`/api/tasks/${taskRunId}?userId=${encodeURIComponent(userId.value)}`));
+    if (!response.ok) {
+      throw new Error(`Failed to fetch task run ${taskRunId}`);
+    }
+    return response.json();
+  }
+
+  async function mutateTaskRun<T>(path: string, init: RequestInit): Promise<T> {
+    const response = await fetch(getFullUrl(path), {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init.headers || {})
+      },
+      ...init
+    });
+    if (!response.ok) {
+      throw new Error(await response.text() || 'Request failed');
+    }
+    return response.json();
+  }
+
+  function createPendingTaskMessage(requestText: string, conversationId: string, agent: any): TaskMessage {
+    return {
+      id: `task-pending-${Date.now()}`,
+      type: 'task',
+      senderId: 'bot',
+      senderName: agent?.displayName || '灵枢 AI',
+      senderAvatar: agent?.avatar || '/linger.png',
+      timestamp: new Date(),
+      status: 'sent',
+      isSelf: false,
+      metadata: { conversationId },
+      content: {
+        title: requestText.trim() || '任务执行',
+        state: 'running',
+        workspace: extractWorkspacePath(requestText) || 'E:\\Project\\LingShu-AI',
+        commandCategory: inferCommandCategory(requestText),
+        permissionApproved: false,
+        steps: createBaseTaskSteps(),
+        logs: [`[${new Date().toLocaleTimeString()}] 正在创建任务...`],
+        approvalRequest: null
+      }
+    };
+  }
+
+  function taskRunToMessage(run: BackendTaskRunView, existing: TaskMessage): TaskMessage {
+    return {
+      ...existing,
+      timestamp: existing.timestamp || taskCreatedTimestamp(run),
+      content: buildTaskSnapshotFromRun(run),
+      metadata: {
+        ...(existing.metadata || {}),
+        taskRunId: run.id,
+        chatSessionId: run.chatSessionId
+      }
+    };
+  }
+
+  function buildTaskSnapshotFromRun(run: BackendTaskRunView): TaskExecutionSnapshot {
+    const snapshot = createEmptyTaskSnapshot(run.title, run.workspacePath, run.commandCategory);
+    snapshot.state = mapTaskState(run.state);
+    snapshot.permissionApproved = snapshot.state !== 'waiting_approval';
+
+    for (const event of run.events || []) {
+      const payload = parsePayload(event.payloadJson);
+      applyTaskEventToSnapshot(snapshot, event.eventType, payload, event.timestamp);
+    }
+
+    if (snapshot.state === 'running' && snapshot.steps.every(step => step.state === 'pending')) {
+      snapshot.steps[0].state = 'active';
+    }
+
+    return snapshot;
+  }
+
+  function createEmptyTaskSnapshot(title: string, workspace: string, commandCategory: string): TaskExecutionSnapshot {
+    return {
+      title,
+      state: 'running',
+      workspace,
+      commandCategory,
+      permissionApproved: false,
+      steps: createBaseTaskSteps(),
+      logs: [],
+      approvalRequest: null
+    };
+  }
+
+  function createBaseTaskSteps(): TaskStep[] {
+    return [
+      { id: 'task_created', label: '创建任务并绑定会话', state: 'pending' },
+      { id: 'approval', label: '检查并处理权限审批', state: 'pending' },
+      { id: 'analyze_workspace', label: '分析项目目录与执行上下文', state: 'pending' },
+      { id: 'followup', label: '等待后续执行与结果汇总', state: 'pending' }
+    ];
+  }
+
+  function applyTaskEventToSnapshot(
+    snapshot: TaskExecutionSnapshot,
+    eventType: string,
+    payload: Record<string, any>,
+    timestamp: number
+  ) {
+    const time = new Date(timestamp).toLocaleTimeString();
+    switch (eventType) {
+      case 'TASK_CREATED':
+        setStepState(snapshot.steps, 'task_created', 'done');
+        pushTaskLog(snapshot.logs, `[${time}] 任务已创建`);
+        break;
+      case 'APPROVAL_REQUIRED':
+        snapshot.state = 'waiting_approval';
+        snapshot.permissionApproved = false;
+        setStepState(snapshot.steps, 'approval', 'active');
+        snapshot.approvalRequest = {
+          id: `approval-${timestamp}`,
+          scope: 'directory',
+          target: payload.workspacePath || snapshot.workspace,
+          reason: buildApprovalReason(payload, snapshot.commandCategory)
+        };
+        pushTaskLog(snapshot.logs, `[${time}] 等待目录/命令权限审批`);
+        break;
+      case 'APPROVAL_GRANTED':
+        snapshot.permissionApproved = true;
+        snapshot.approvalRequest = null;
+        setStepState(snapshot.steps, 'approval', 'done');
+        pushTaskLog(snapshot.logs, `[${time}] 审批通过，已写入长期授权`);
+        break;
+      case 'APPROVAL_REJECTED':
+        snapshot.state = 'stopped';
+        snapshot.permissionApproved = false;
+        setStepState(snapshot.steps, 'approval', 'failed');
+        snapshot.approvalRequest = null;
+        pushTaskLog(snapshot.logs, `[${time}] 审批被拒绝，任务停止`);
+        break;
+      case 'TASK_RESUMED':
+        snapshot.state = 'running';
+        pushTaskLog(snapshot.logs, `[${time}] 任务恢复执行`);
+        break;
+      case 'TASK_PAUSED':
+        snapshot.state = 'paused';
+        pushTaskLog(snapshot.logs, `[${time}] 任务已暂停`);
+        break;
+      case 'TASK_STOPPED':
+        snapshot.state = 'stopped';
+        pushTaskLog(snapshot.logs, `[${time}] 任务已终止`);
+        break;
+      case 'TASK_COMPLETED':
+        snapshot.state = 'done';
+        setStepState(snapshot.steps, 'followup', 'done');
+        snapshot.summary = payload.summary || '任务已完成';
+        pushTaskLog(snapshot.logs, `[${time}] 任务完成`);
+        break;
+      case 'TASK_FAILED':
+        snapshot.state = 'failed';
+        setStepState(snapshot.steps, 'followup', 'failed');
+        pushTaskLog(snapshot.logs, `[${time}] 任务失败`);
+        break;
+      case 'STEP_STARTED':
+        if (payload.step === 'analyze_workspace') {
+          setStepState(snapshot.steps, 'analyze_workspace', 'active');
+          setStepState(snapshot.steps, 'followup', 'pending');
+        }
+        pushTaskLog(snapshot.logs, `[${time}] 开始步骤：${payload.step || 'unknown'}`);
+        break;
+      case 'LOG':
+        if (payload.message) {
+          pushTaskLog(snapshot.logs, `[${time}] ${payload.message}`);
+        }
+        if (snapshot.steps.find(step => step.id === 'analyze_workspace')?.state === 'active') {
+          setStepState(snapshot.steps, 'followup', 'active');
+        }
+        break;
+      default:
+        pushTaskLog(snapshot.logs, `[${time}] ${eventType}`);
+    }
+  }
+
+  function setStepState(steps: TaskStep[], stepId: string, state: TaskStep['state']) {
+    const step = steps.find(item => item.id === stepId);
+    if (step) {
+      step.state = state;
+    }
+  }
+
+  function pushTaskLog(logs: string[], message: string) {
+    if (!logs.includes(message)) {
+      logs.push(message);
+    }
+  }
+
+  function parsePayload(payloadJson: string): Record<string, any> {
+    try {
+      return payloadJson ? JSON.parse(payloadJson) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function taskCreatedTimestamp(run: BackendTaskRunView): Date {
+    const createdEvent = [...(run.events || [])].sort((a, b) => a.timestamp - b.timestamp)[0];
+    return new Date(createdEvent?.timestamp || Date.now());
+  }
+
+  function mapTaskState(state: BackendTaskRunState): TaskExecutionSnapshot['state'] {
+    switch (state) {
+      case 'WAITING_APPROVAL':
+        return 'waiting_approval';
+      case 'PAUSED':
+        return 'paused';
+      case 'COMPLETED':
+        return 'done';
+      case 'FAILED':
+        return 'failed';
+      case 'STOPPED':
+        return 'stopped';
+      case 'PENDING':
+      case 'RUNNING':
+      default:
+        return 'running';
+    }
+  }
+
+  function buildApprovalReason(payload: Record<string, any>, commandCategory: string): string {
+    const fragments: string[] = [];
+    if (payload.workspacePath && payload.requiresWorkspaceApproval) {
+      fragments.push(`访问目录 ${payload.workspacePath}`);
+    }
+    if (commandCategory && payload.requiresCommandApproval) {
+      fragments.push(`执行 ${commandCategory} 命令`);
+    }
+    if (fragments.length === 0) {
+      return '本次任务需要额外权限审批。';
+    }
+    return `首次需要${fragments.join('、')}，审批通过后会记为长期授权。`;
+  }
+
+  function actionLabel(action: 'approve' | 'reject' | 'pause' | 'resume' | 'stop'): string {
+    switch (action) {
+      case 'approve':
+        return '审批';
+      case 'reject':
+        return '拒绝';
+      case 'pause':
+        return '暂停';
+      case 'resume':
+        return '恢复';
+      case 'stop':
+        return '终止';
+      default:
+        return '操作';
+    }
   }
 
   function inferCommandCategory(text: string): string {
@@ -704,6 +976,14 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function setTaskModeEnabled(enabled: boolean) {
+    if (!currentConversationId.value) return;
+    taskModeByConversation.value = {
+      ...taskModeByConversation.value,
+      [currentConversationId.value]: enabled
+    };
+  }
+
   return {
     conversations,
     currentConversationId,
@@ -714,6 +994,7 @@ export const useChatStore = defineStore('chat', () => {
     userId,
     currentConversation,
     currentMessages,
+    currentTaskModeEnabled,
     filteredConversations,
     totalUnreadCount,
     loadConversations,
@@ -727,6 +1008,7 @@ export const useChatStore = defineStore('chat', () => {
     setActiveNav,
     currentAgentId,
     setAgentId,
+    setTaskModeEnabled,
     createNewConversation
   };
 });

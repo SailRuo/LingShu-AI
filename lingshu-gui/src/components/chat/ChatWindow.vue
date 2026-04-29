@@ -23,8 +23,8 @@ watch(
   }
 );
 
-async function handleSend(content: string, attachments: any[]) {
-  await chatStore.sendMessage(content, attachments);
+async function handleSend(content: string, attachments: any[], taskModeEnabled: boolean) {
+  await chatStore.sendMessage(content, attachments, taskModeEnabled);
 }
 
 // 监听消息变化，实现自动语音合成
@@ -82,7 +82,11 @@ watch(
     <template v-if="chatStore.currentConversation">
       <ChatHeader :conversation="chatStore.currentConversation" />
       <MessageList :messages="chatStore.currentMessages" />
-      <InputArea @send="handleSend" />
+      <InputArea
+        :task-mode-enabled="chatStore.currentTaskModeEnabled"
+        @send="handleSend"
+        @toggle-task-mode="chatStore.setTaskModeEnabled"
+      />
     </template>
     <div v-else class="empty-chat" id="chat-empty-state">
       <div class="empty-content">

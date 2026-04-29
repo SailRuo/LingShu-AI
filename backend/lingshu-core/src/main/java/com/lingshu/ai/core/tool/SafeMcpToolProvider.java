@@ -40,6 +40,9 @@ public class SafeMcpToolProvider implements ToolProvider {
     private final ToolResultSummarizer summarizer;
     private final Supplier<String> userIntentSupplier;
 
+    private record ExecutionOutcome(boolean error, Object payload) {
+    }
+
     public SafeMcpToolProvider(
             List<RawMcpClient> mcpClients,
             ToolResultSummarizer summarizer,
@@ -78,7 +81,8 @@ public class SafeMcpToolProvider implements ToolProvider {
             @Override
             public String execute(ToolExecutionRequest toolExecutionRequest, Object memoryId) {
                 // 兼容旧版，但 1.13.0 应该优先调用 executeWithContext
-                Object result = doExecute(client, toolSpec, toolExecutionRequest);
+                ExecutionOutcome outcome = doExecute(client, toolSpec, toolExecutionRequest);
+                Object result = outcome.payload();
                 if (result instanceof List<?>) {
                      // 如果是多模态内容且被迫转为 String，尝试提取文本部分
                      @SuppressWarnings("unchecked")
@@ -94,15 +98,18 @@ public class SafeMcpToolProvider implements ToolProvider {
 
             @Override
             public ToolExecutionResult executeWithContext(ToolExecutionRequest toolExecutionRequest, InvocationContext context) {
-                Object result = doExecute(client, toolSpec, toolExecutionRequest);
+                ExecutionOutcome outcome = doExecute(client, toolSpec, toolExecutionRequest);
+                Object result = outcome.payload();
                 if (result instanceof List<?>) {
                     @SuppressWarnings("unchecked")
                     List<Content> contents = (List<Content>) result;
                     return ToolExecutionResult.builder()
+                            .isError(outcome.error())
                             .resultContents(contents)
                             .build();
                 } else {
                     return ToolExecutionResult.builder()
+                            .isError(outcome.error())
                             .resultText(String.valueOf(result))
                             .build();
                 }
@@ -110,7 +117,7 @@ public class SafeMcpToolProvider implements ToolProvider {
         };
     }
 
-    private Object doExecute(RawMcpClient client, ToolSpecification toolSpec, ToolExecutionRequest toolExecutionRequest) {
+    private ExecutionOutcome doExecute(RawMcpClient client, ToolSpecification toolSpec, ToolExecutionRequest toolExecutionRequest) {
         log.debug("执行 MCP 工具: {}", toolSpec.name());
         try {
             JsonNode rawResult = client.callToolRaw(toolSpec.name(), toolExecutionRequest.arguments());
@@ -134,10 +141,13 @@ public class SafeMcpToolProvider implements ToolProvider {
                 }
             }
 
-            return buildMultimodalResult(toolSpec.name(), textParts.toString().trim(), images);
+            return new ExecutionOutcome(false, buildMultimodalResult(toolSpec.name(), textParts.toString().trim(), images));
         } catch (Exception e) {
-            log.error("MCP 工具执行失败: tool={}, error={}", toolSpec.name(), e.getMessage(), e);
-            return "[工具执行失败] " + toolSpec.name() + ": " + e.getMessage();
+            String errorMessage = e.getMessage() == null || e.getMessage().isBlank()
+                    ? "unknown error"
+                    : e.getMessage();
+            log.error("MCP 工具执行失败: tool={}, error={}", toolSpec.name(), errorMessage, e);
+            return new ExecutionOutcome(true, "[工具执行失败] " + toolSpec.name() + ": " + errorMessage);
         }
     }
 

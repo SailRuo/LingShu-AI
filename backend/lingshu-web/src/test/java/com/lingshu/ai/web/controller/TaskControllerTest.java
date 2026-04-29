@@ -113,6 +113,20 @@ class TaskControllerTest {
                 .andExpect(jsonPath("$[0].sequenceNo").value(1));
     }
 
+    @Test
+    void shouldListTaskRunsForChatSession() throws Exception {
+        when(taskRuntimeService.listBySession(12L, "web:test-user"))
+                .thenReturn(List.of(sampleView("WAITING_APPROVAL")));
+
+        mockMvc.perform(get("/api/tasks")
+                        .queryParam("sessionId", "12")
+                        .queryParam("userId", "web:test-user"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(101))
+                .andExpect(jsonPath("$[0].chatSessionId").value(12))
+                .andExpect(jsonPath("$[0].state").value("WAITING_APPROVAL"));
+    }
+
     private TaskRunView sampleView(String state) {
         return new TaskRunView(
                 101L,

@@ -93,11 +93,12 @@ public class ChatContextAssembler {
                             .arguments(safe(start.getArguments()))
                             .build();
                     messages.add(AiMessage.from(List.of(req)));
-                    messages.add(ToolExecutionResultMessage.from(
-                            safe(event.getToolCallId()),
-                            safe(event.getToolName()),
-                            safe(event.getContent())
-                    ));
+                    messages.add(ToolExecutionResultMessage.builder()
+                            .id(safe(event.getToolCallId()))
+                            .toolName(safe(event.getToolName()))
+                            .text(safe(event.getContent()))
+                            .isError(Boolean.TRUE.equals(event.getIsError()))
+                            .build());
                     UserMessage artifactMessage = toToolArtifactUserMessage(event, artifactsByEventId, diagnostics);
                     if (artifactMessage != null) {
                         messages.add(artifactMessage);

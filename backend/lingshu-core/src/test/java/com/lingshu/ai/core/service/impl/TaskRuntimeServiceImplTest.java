@@ -407,6 +407,56 @@ class TaskRuntimeServiceImplTest {
     }
 
     @Test
+    void listBySession_shouldReturnChronologicalRunsForOwnedSession() {
+        TaskRunRepository taskRunRepository = mock(TaskRunRepository.class);
+        TaskEventRepository taskEventRepository = mock(TaskEventRepository.class);
+        TaskPermissionService taskPermissionService = mock(TaskPermissionService.class);
+        TaskExecutionEngine taskExecutionEngine = mock(TaskExecutionEngine.class);
+        TaskRuntimeServiceImpl service = new TaskRuntimeServiceImpl(
+                taskRunRepository,
+                new TaskEventStreamServiceImpl(taskEventRepository, taskRunRepository, new ObjectMapper()),
+                taskPermissionService,
+                taskExecutionEngine
+        );
+
+        TaskRun firstRun = baseRun(301L, TaskRunState.RUNNING);
+        firstRun.setTitle("First task");
+        firstRun.setCreatedAt(LocalDateTime.of(2026, 4, 29, 21, 0));
+        TaskRun secondRun = baseRun(302L, TaskRunState.WAITING_APPROVAL);
+        secondRun.setTitle("Second task");
+        secondRun.setCreatedAt(LocalDateTime.of(2026, 4, 29, 21, 5));
+        when(taskRunRepository.findByUserIdAndChatSessionIdOrderByCreatedAtAscIdAsc("web:test-user", 12L))
+                .thenReturn(List.of(firstRun, secondRun));
+        when(taskEventRepository.findByTaskRunIdOrderBySequenceNoAsc(301L)).thenReturn(List.of(
+                TaskEvent.builder()
+                        .id(601L)
+                        .taskRun(firstRun)
+                        .sequenceNo(1)
+                        .eventType(TaskEventType.TASK_CREATED)
+                        .payloadJson("{\"requestText\":\"first\"}")
+                        .createdAt(LocalDateTime.of(2026, 4, 29, 21, 0, 30))
+                        .build()
+        ));
+        when(taskEventRepository.findByTaskRunIdOrderBySequenceNoAsc(302L)).thenReturn(List.of(
+                TaskEvent.builder()
+                        .id(602L)
+                        .taskRun(secondRun)
+                        .sequenceNo(1)
+                        .eventType(TaskEventType.TASK_CREATED)
+                        .payloadJson("{\"requestText\":\"second\"}")
+                        .createdAt(LocalDateTime.of(2026, 4, 29, 21, 5, 30))
+                        .build()
+        ));
+
+        List<TaskRunView> views = service.listBySession(12L, "web:test-user");
+
+        assertEquals(2, views.size());
+        assertEquals(301L, views.get(0).id());
+        assertEquals(302L, views.get(1).id());
+        assertEquals("TASK_CREATED", views.get(0).events().getFirst().eventType());
+    }
+
+    @Test
     void start_shouldTrimInputsAndTruncateLongTitle() {
         TaskRunRepository taskRunRepository = mock(TaskRunRepository.class);
         TaskEventRepository taskEventRepository = mock(TaskEventRepository.class);

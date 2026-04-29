@@ -4,6 +4,8 @@ import type { AnyMessage, TaskMessage } from '../../types/message';
 import { useTts } from '../../composables/useTts';
 import { useChatStore } from '../../stores/chat';
 import TaskExecutionCard from './TaskExecutionCard.vue';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 
 const props = defineProps<{
   messages: AnyMessage[];
@@ -74,6 +76,16 @@ function handleTaskAction(action: 'approve' | 'reject' | 'pause' | 'resume' | 's
   if (!chatStore.currentConversationId) return;
   chatStore.handleTaskAction(chatStore.currentConversationId, messageId, action);
 }
+
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+});
+
+function renderMarkdown(content: string) {
+  const rawHtml = marked.parse(content || '') as string;
+  return DOMPurify.sanitize(rawHtml);
+}
 </script>
 
 <template>
@@ -109,7 +121,11 @@ function handleTaskAction(action: 'approve' | 'reject' | 'pause' | 'resume' | 's
               :class="{ self: msg.isSelf, other: !msg.isSelf }"
               @dblclick="handleBubbleDoubleClick(msg)"
             >
-              <span v-if="msg.type === 'text'" class="text-content">{{ (msg as any).content }}</span>
+              <div
+                v-if="msg.type === 'text'"
+                class="text-content markdown-content"
+                v-html="renderMarkdown((msg as any).content)"
+              />
               <TaskExecutionCard
                 v-else-if="msg.type === 'task'"
                 :message="msg as TaskMessage"
@@ -185,6 +201,7 @@ function handleTaskAction(action: 'approve' | 'reject' | 'pause' | 'resume' | 's
   display: flex;
   width: 100%;
   margin: 8px 0;
+  align-items: flex-start;
 }
 
 .message-row.self {
@@ -206,11 +223,14 @@ function handleTaskAction(action: 'approve' | 'reject' | 'pause' | 'resume' | 's
 }
 
 .bubble-wrapper {
+  width: fit-content;
   max-width: 85%;
+  flex: 0 1 auto;
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  align-items: flex-start;
 }
 
 .sender-info {
@@ -240,12 +260,16 @@ function handleTaskAction(action: 'approve' | 'reject' | 'pause' | 'resume' | 's
 }
 
 .bubble {
+  display: inline-block;
+  width: auto;
+  max-width: 100%;
   padding: 12px 16px;
   border-radius: 4px;
   font-size: var(--font-size-md);
   line-height: 1.6;
   word-break: break-word;
   position: relative;
+  align-self: flex-start;
 }
 
 .bubble:has(.task-card) {
@@ -284,6 +308,7 @@ function handleTaskAction(action: 'approve' | 'reject' | 'pause' | 'resume' | 's
   color: var(--text-message-self);
   margin-right: 12px;
   border-radius: 8px;
+  align-self: flex-end;
 }
 
 .bubble.self:has(.task-card) {
@@ -304,6 +329,71 @@ function handleTaskAction(action: 'approve' | 'reject' | 'pause' | 'resume' | 's
 
 .text-content {
   white-space: pre-wrap;
+}
+
+.markdown-content {
+  display: block;
+  max-width: 100%;
+}
+
+.markdown-content :deep(p) {
+  display: inline;
+  margin: 0;
+}
+
+.markdown-content :deep(p + p)::before {
+  content: "";
+  display: block;
+  margin-top: 0.75em;
+}
+
+.markdown-content :deep(ul),
+.markdown-content :deep(ol) {
+  margin: 0.5em 0;
+  padding-left: 1.4em;
+}
+
+.markdown-content :deep(li + li) {
+  margin-top: 0.2em;
+}
+
+.markdown-content :deep(code) {
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 0.92em;
+  background: rgba(148, 163, 184, 0.18);
+  border-radius: 4px;
+  padding: 0.12em 0.35em;
+}
+
+.markdown-content :deep(pre) {
+  margin: 0.75em 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  overflow-x: auto;
+  background: rgba(15, 23, 42, 0.88);
+  color: #e2e8f0;
+}
+
+.markdown-content :deep(pre code) {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+.markdown-content :deep(blockquote) {
+  margin: 0.75em 0;
+  padding-left: 0.9em;
+  border-left: 3px solid rgba(148, 163, 184, 0.45);
+  color: var(--text-secondary);
+}
+
+.markdown-content :deep(a) {
+  color: #22c55e;
+  text-decoration: none;
+}
+
+.markdown-content :deep(a:hover) {
+  text-decoration: underline;
 }
 
 .unsupported {

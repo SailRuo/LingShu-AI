@@ -17,6 +17,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -88,6 +89,18 @@ public class TaskRuntimeServiceImpl implements TaskRuntimeService {
         TaskRun run = taskRunRepository.findByIdAndUserId(taskRunId, requireText(userId, "userId"))
                 .orElseThrow(() -> new IllegalArgumentException("Task run not found: " + taskRunId));
         return toView(run);
+    }
+
+    @Override
+    public List<TaskRunView> listBySession(Long chatSessionId, String userId) {
+        if (chatSessionId == null) {
+            throw new IllegalArgumentException("chatSessionId must not be null");
+        }
+        String normalizedUserId = requireText(userId, "userId");
+        return taskRunRepository.findByUserIdAndChatSessionIdOrderByCreatedAtAscIdAsc(normalizedUserId, chatSessionId)
+                .stream()
+                .map(this::toView)
+                .toList();
     }
 
     @Override

@@ -10,6 +10,8 @@ public interface TaskRuntimeService {
 
     TaskRunView get(Long taskRunId, String userId);
 
+    java.util.List<TaskRunView> listBySession(Long chatSessionId, String userId);
+
     TaskRunView approve(Long taskRunId, String userId, TaskApprovalDecisionRequest request);
 
     TaskRunView pause(Long taskRunId, String userId);

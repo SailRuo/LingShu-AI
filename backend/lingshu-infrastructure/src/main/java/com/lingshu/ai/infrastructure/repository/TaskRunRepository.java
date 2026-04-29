@@ -17,6 +17,8 @@ public interface TaskRunRepository extends JpaRepository<TaskRun, Long> {
 
     List<TaskRun> findByUserIdOrderByUpdatedAtDescIdDesc(String userId);
 
+    List<TaskRun> findByUserIdAndChatSessionIdOrderByCreatedAtAscIdAsc(String userId, Long chatSessionId);
+
     List<TaskRun> findByState(TaskRunState state);
 
     Optional<TaskRun> findByIdAndUserId(Long id, String userId);

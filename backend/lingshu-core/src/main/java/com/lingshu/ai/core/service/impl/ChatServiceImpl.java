@@ -310,7 +310,7 @@ public class ChatServiceImpl implements ChatService {
             systemPrompt = systemPrompt + emotionPrompt;
         }
 
-        log.debug("合并后的系统提示: \n{}...", systemPrompt);
+        log.debug("追加系统提示: \n关系提示 {} 长期背景 {}...", relationshipPrompt,longTermContext);
         systemLogService.debug("已添加Agent Prompt (长度: " + systemPrompt.length() + ")", "CHAT");
 
         com.lingshu.ai.infrastructure.entity.SystemSetting sysSetting = settingService.getSetting();
@@ -731,18 +731,31 @@ public class ChatServiceImpl implements ChatService {
     }
 
     private void handleStreamingError(Throwable error, Sinks.Many<String> sink, Long turnId) {
-        log.error("流式对话发生错误: {}", error.getMessage(), error);
-        systemLogService.error("LLM 调用失败: " + error.getMessage(), "LLM");
-        turnTimelineService.failTurn(turnId, error.getMessage());
+        String resolvedError = describeThrowable(error);
+        log.error("流式对话发生错误: {}", resolvedError, error);
+        systemLogService.error("LLM 调用失败: " + resolvedError, "LLM");
+        turnTimelineService.failTurn(turnId, resolvedError);
 
-        String errorMsg = error.getMessage() != null ? error.getMessage() : "";
+        String errorMsg = error != null && error.getMessage() != null ? error.getMessage() : "";
         if (errorMsg.contains("context length") || errorMsg.contains("n_ctx") || errorMsg.contains("n_keep")) {
             sink.tryEmitError(new RuntimeException("输入内容过长，超出模型上下文限制。请尝试：\n1. 减少图片数量或使用更小的图片\n2. 清除对话历史后重试\n3. 切换到支持更长上下文的模型"));
         } else if (errorMsg.contains("image") || errorMsg.contains("vision") || errorMsg.contains("multimodal")) {
             sink.tryEmitError(new RuntimeException("当前模型不支持图像识别，请切换到支持视觉的模型（如Qwen-VL等）或移除图片后重试"));
         } else {
-            sink.tryEmitError(error);
+            sink.tryEmitError(new RuntimeException("模型服务调用失败: " + resolvedError, error));
         }
+    }
+
+    static String describeThrowable(Throwable error) {
+        if (error == null) {
+            return "unknown error";
+        }
+        String simpleName = error.getClass().getSimpleName();
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) {
+            return simpleName + ": unknown error";
+        }
+        return simpleName + ": " + message;
     }
 
     private String extractBase64Data(String base64Image) {

@@ -9,8 +9,13 @@ import IconDown from '@arco-design/web-vue/es/icon/icon-down';
 import IconClose from '@arco-design/web-vue/es/icon/icon-close';
 import IconFile from '@arco-design/web-vue/es/icon/icon-file';
 
+const props = defineProps<{
+  taskModeEnabled: boolean;
+}>();
+
 const emit = defineEmits<{
-  send: [content: string, attachments: any[]];
+  send: [content: string, attachments: any[], taskModeEnabled: boolean];
+  toggleTaskMode: [enabled: boolean];
 }>();
 
 const inputText = ref('');
@@ -37,9 +42,14 @@ function handleSend() {
   if (!text && attachments.value.length === 0) return;
   
   // 发送文本和附件副本，并清空当前状态
-  emit('send', text, [...attachments.value]);
+  emit('send', text, [...attachments.value], props.taskModeEnabled);
   inputText.value = '';
   attachments.value = [];
+  nextTick(() => textareaRef.value?.focus());
+}
+
+function handleTaskModeToggle() {
+  emit('toggleTaskMode', !props.taskModeEnabled);
   nextTick(() => textareaRef.value?.focus());
 }
 
@@ -193,7 +203,9 @@ onUnmounted(() => {
           ref="textareaRef"
           v-model="inputText"
           class="text-input"
-          placeholder="输入消息；使用 #task 开头可进入任务执行态（示例：#task 帮我在 D:\work\demo 里修复测试）"
+          :placeholder="props.taskModeEnabled
+            ? '任务模式已开启：描述要执行的本地项目、目录或命令任务'
+            : '输入消息；关闭任务模式时会按普通对话发送'"
           @keydown="handleKeydown"
           @paste="handlePaste"
         />
@@ -201,6 +213,14 @@ onUnmounted(() => {
       
       <div class="input-footer">
         <div class="toolbar">
+          <button
+            class="mode-toggle"
+            :class="{ active: props.taskModeEnabled }"
+            type="button"
+            @click="handleTaskModeToggle"
+          >
+            {{ props.taskModeEnabled ? '任务模式中' : '任务模式' }}
+          </button>
           <button class="tool-btn" title="表情">
             <IconFaceSmileFill :size="18" />
           </button>
@@ -220,10 +240,11 @@ onUnmounted(() => {
         
         <button
           class="send-btn"
+          :class="{ task: props.taskModeEnabled }"
           :disabled="!inputText.trim() && attachments.length === 0"
           @click="handleSend"
         >
-          发送
+          {{ props.taskModeEnabled ? '执行任务' : '发送' }}
         </button>
       </div>
       
@@ -422,6 +443,29 @@ onUnmounted(() => {
   gap: 8px; /* 16px -> 8px，更紧凑 */
 }
 
+.mode-toggle {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.mode-toggle:hover {
+  border-color: var(--color-primary);
+  color: var(--text-primary);
+}
+
+.mode-toggle.active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
 .tool-btn {
   display: flex;
   align-items: center;
@@ -472,10 +516,18 @@ onUnmounted(() => {
   color: var(--color-primary);
 }
 
+.send-btn.task:not(:disabled) {
+  background-color: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.send-btn.task:hover:not(:disabled) {
+  background-color: var(--bg-selected);
+}
+
 .send-btn:disabled {
   color: var(--text-placeholder);
   opacity: 0.5;
   cursor: not-allowed;
 }
 </style>
-

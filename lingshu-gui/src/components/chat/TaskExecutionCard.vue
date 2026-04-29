@@ -73,6 +73,11 @@ const canStop = computed(() => ['running', 'paused', 'waiting_approval'].include
       <pre>{{ message.content.logs.join('\n') }}</pre>
     </section>
 
+    <section v-if="message.content.summary" class="task-summary">
+      <h5>结果摘要</h5>
+      <p>{{ message.content.summary }}</p>
+    </section>
+
     <footer class="task-actions">
       <button class="btn" :disabled="!canPause" @click="emit('action', 'pause', message.id)">暂停</button>
       <button class="btn" :disabled="!canResume" @click="emit('action', 'resume', message.id)">恢复</button>
@@ -84,11 +89,12 @@ const canStop = computed(() => ['running', 'paused', 'waiting_approval'].include
 <style scoped>
 .task-card {
   width: min(760px, 100%);
-  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
-  border: 1px solid #d6e4ff;
-  border-radius: 12px;
+  background: var(--bg-input-area);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
   overflow: hidden;
-  box-shadow: 0 8px 22px rgba(47, 111, 237, 0.12);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-primary);
 }
 
 .task-header {
@@ -97,7 +103,8 @@ const canStop = computed(() => ['running', 'paused', 'waiting_approval'].include
   justify-content: space-between;
   gap: 8px;
   align-items: center;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-chat-window);
 }
 
 .task-title {
@@ -110,36 +117,46 @@ const canStop = computed(() => ['running', 'paused', 'waiting_approval'].include
   font-weight: 700;
   padding: 4px 8px;
   border-radius: 999px;
-  border: 1px solid;
+  border: 1px solid var(--border-color-dark);
+  background: var(--bg-hover);
 }
 
-.state-running { color: #166534; background: #ecfdf3; border-color: #86efac; }
-.state-waiting_approval { color: #92400e; background: #fef3c7; border-color: #fcd34d; }
-.state-paused { color: #1e3a8a; background: #dbeafe; border-color: #93c5fd; }
-.state-done { color: #065f46; background: #d1fae5; border-color: #6ee7b7; }
-.state-stopped { color: #7f1d1d; background: #fee2e2; border-color: #fca5a5; }
-.state-failed { color: #7f1d1d; background: #ffe4e6; border-color: #fda4af; }
+.state-running { color: var(--color-primary); }
+.state-waiting_approval { color: var(--color-warning); }
+.state-paused { color: var(--color-info); }
+.state-done { color: var(--color-success); }
+.state-stopped { color: var(--color-error); }
+.state-failed { color: var(--color-error); }
 
-.task-meta, .task-steps, .task-approval, .task-logs, .task-actions {
+.task-meta, .task-steps, .task-approval, .task-logs, .task-summary, .task-actions {
   padding: 10px 14px;
-  border-bottom: 1px solid #eceff5;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .task-meta {
   display: grid;
   gap: 6px;
   font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .task-meta code {
-  background: #eef2f7;
+  background: var(--bg-hover);
   padding: 2px 6px;
   border-radius: 6px;
+  color: var(--text-primary);
 }
 
-.task-steps h5, .task-approval h5, .task-logs h5 {
+.task-steps h5, .task-approval h5, .task-logs h5, .task-summary h5 {
   margin: 0 0 8px;
   font-size: 13px;
+}
+
+.task-summary p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
 }
 
 .task-steps ul {
@@ -151,25 +168,26 @@ const canStop = computed(() => ['running', 'paused', 'waiting_approval'].include
   font-size: 13px;
 }
 
-.step-done { color: #047857; }
-.step-active { color: #1d4ed8; font-weight: 700; }
-.step-failed { color: #b91c1c; }
-.step-pending { color: #64748b; }
+.step-done { color: var(--color-success); }
+.step-active { color: var(--color-primary); font-weight: 700; }
+.step-failed { color: var(--color-error); }
+.step-pending { color: var(--text-tertiary); }
 
 .task-approval {
-  background: #fffbeb;
+  background: var(--bg-chat-window);
 }
 
 .task-approval p {
   margin: 0;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-secondary);
 }
 
 .task-logs pre {
   margin: 0;
-  background: #0f172a;
-  color: #d1d5db;
+  background: var(--bg-chat-window);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 10px;
   max-height: 130px;
@@ -193,12 +211,13 @@ const canStop = computed(() => ['running', 'paused', 'waiting_approval'].include
 }
 
 .btn {
-  border: 1px solid #d1d5db;
-  background: white;
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
   border-radius: 8px;
   padding: 6px 10px;
   font-size: 12px;
   cursor: pointer;
+  color: var(--text-primary);
 }
 
 .btn:disabled {
@@ -207,14 +226,14 @@ const canStop = computed(() => ['running', 'paused', 'waiting_approval'].include
 }
 
 .btn.primary {
-  background: #22c55e;
-  border-color: #22c55e;
-  color: #fff;
+  background: var(--color-primary-light);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 
 .btn.danger {
-  background: #fff1f2;
-  border-color: #fda4af;
-  color: #9f1239;
+  background: var(--bg-hover);
+  border-color: var(--border-color-dark);
+  color: var(--color-error);
 }
 </style>

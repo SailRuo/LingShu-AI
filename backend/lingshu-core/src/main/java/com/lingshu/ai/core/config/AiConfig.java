@@ -133,7 +133,12 @@ public class AiConfig {
 
             @Override
             public void onError(dev.langchain4j.model.chat.listener.ChatModelErrorContext errorContext) {
-                log.error("LLM Error Summary => {}", errorContext.error().getMessage());
+                Throwable error = errorContext.error();
+                String simpleName = error != null ? error.getClass().getSimpleName() : "UnknownError";
+                String message = error != null && error.getMessage() != null && !error.getMessage().isBlank()
+                        ? error.getMessage()
+                        : "unknown error";
+                log.error("LLM Error Summary => {}: {}", simpleName, message);
             }
 
             private String compact(String text) {
@@ -445,6 +450,11 @@ public class AiConfig {
 
             private void addToMemory(dev.langchain4j.data.message.ChatMessage message) {
                 if (message == null) {
+                    return;
+                }
+                if (message instanceof dev.langchain4j.data.message.SystemMessage) {
+                    memoryMessages.removeIf(dev.langchain4j.data.message.SystemMessage.class::isInstance);
+                    memoryMessages.add(0, message);
                     return;
                 }
                 memoryMessages.add(message);

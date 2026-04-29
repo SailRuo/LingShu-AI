@@ -1,5 +1,5 @@
 import type { Ref } from 'vue';
-import type { BaseMessage, AnyMessage } from './message';
+import type { AnyMessage } from './message';
 import type { Conversation } from './conversation';
 
 export interface ChatState {
