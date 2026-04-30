@@ -6,10 +6,12 @@ use tauri::{
 
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
-    DefWindowProcW, SetWindowLongPtrW, GWLP_WNDPROC, HTCAPTION, WM_NCHITTEST,
+    HTCAPTION, WM_NCHITTEST,
 };
 #[cfg(windows)]
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+#[cfg(windows)]
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, RECT};
 
 #[cfg(windows)]
 unsafe extern "system" fn wnd_proc(
@@ -17,30 +19,35 @@ unsafe extern "system" fn wnd_proc(
     msg: u32,
     wparam: WPARAM,
     lparam: LPARAM,
+    _uidsubclass: usize,
+    _dwrefdata: usize,
 ) -> LRESULT {
-    // 拦截 WM_NCHITTEST 消息
     if msg == WM_NCHITTEST {
-        // 获取鼠标坐标
         let x = (lparam.0 & 0xFFFF) as i16 as i32;
         let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
 
-        // 获取窗口矩形
-        let mut rect = windows::Win32::Foundation::RECT::default();
+        let mut rect = RECT::default();
         if windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut rect).is_ok() {
-            // 假设顶部 28px 是标题栏区域 (根据你的 CSS)
-            // 注意：这里需要考虑 DPI 缩放，简单起见先用固定值，或者你可以根据实际情况调整
-            let titlebar_height = 28; 
+            // 获取窗口 DPI 缩放比例
+            let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd);
+            let scale_factor = dpi as f32 / 96.0;
             
-            // 如果鼠标在标题栏区域内
+            // 标题栏高度 28px
+            let titlebar_height = (28.0 * scale_factor) as i32;
+            // 窗口控制按钮区域约 132px
+            let controls_width = (132.0 * scale_factor) as i32;
+            
+            // 检查鼠标是否在标题栏区域
             if y >= rect.top && y < rect.top + titlebar_height {
-                // 告诉 Windows 这是标题栏，让它自己处理拖拽和还原
-                return LRESULT(HTCAPTION as isize);
+                // 排除右侧的窗口控制按钮区域
+                if x < rect.right - controls_width {
+                    return LRESULT(HTCAPTION as isize);
+                }
             }
         }
     }
 
-    // 其他消息交给默认处理
-    DefWindowProcW(hwnd, msg, wparam, lparam)
+    DefSubclassProc(hwnd, msg, wparam, lparam)
 }
 
 #[tauri::command]
@@ -88,6 +95,23 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            #[cfg(windows)]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    if let Ok(hwnd_raw) = window.hwnd() {
+                        let hwnd = windows::Win32::Foundation::HWND(hwnd_raw.0 as _);
+                        unsafe {
+                            windows::Win32::UI::Shell::SetWindowSubclass(
+                                hwnd,
+                                Some(wnd_proc),
+                                1, // subclass id
+                                0, // ref data
+                            );
+                        }
+                    }
+                }
+            }
 
             Ok(())
         })
