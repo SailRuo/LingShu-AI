@@ -39,8 +39,7 @@ public class BuiltinWorkspaceToolProvider implements ToolProvider {
 
     public BuiltinWorkspaceToolProvider(Path workspaceRoot, Set<String> enabledTools) {
         this.workspaceRoot = resolveWorkspaceRoot(workspaceRoot);
-        Set<String> normalizedTools = normalizeEnabledTools(enabledTools);
-        this.enabledTools = normalizedTools.isEmpty() ? Set.of("execute_command") : normalizedTools;
+        this.enabledTools = normalizeEnabledTools(enabledTools);
     }
 
     @Override

@@ -95,6 +95,8 @@ const canStop = computed(() => ['running', 'paused', 'waiting_approval'].include
   overflow: hidden;
   box-shadow: var(--shadow-sm);
   color: var(--text-primary);
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .task-header {
@@ -196,6 +198,8 @@ const canStop = computed(() => ['running', 'paused', 'waiting_approval'].include
   line-height: 1.45;
   font-family: Consolas, "Courier New", monospace;
   white-space: pre-wrap;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .task-actions {

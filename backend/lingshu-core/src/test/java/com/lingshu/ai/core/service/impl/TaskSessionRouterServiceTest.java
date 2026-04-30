@@ -13,6 +13,8 @@ class TaskSessionRouterServiceTest {
     void isTaskRequest_shouldReturnFalseForCasualConversation() {
         assertFalse(service.isTaskRequest("今天过得怎么样？"));
         assertFalse(service.isTaskRequest("测试一下你还记得我吗"));
+        assertFalse(service.isTaskRequest("你好"));
+        assertFalse(service.isTaskRequest("hello!"));
     }
 
     @Test
@@ -28,5 +30,13 @@ class TaskSessionRouterServiceTest {
 
         assertTrue(decision.taskRequest());
         assertTrue(decision.reason().contains("command") || decision.reason().contains("path"));
+    }
+
+    @Test
+    void decide_shouldNotRouteGreetingIntoTask() {
+        TaskSessionRouterService.TaskRouteDecision decision = service.decide("你好");
+
+        assertFalse(decision.taskRequest());
+        assertTrue(decision.reason().contains("non-task"));
     }
 }

@@ -1,38 +1,49 @@
 package com.lingshu.ai.core.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.lingshu.ai.core.model.task.PlanStep;
-import com.lingshu.ai.core.model.task.PlanStepType;
 import com.lingshu.ai.core.model.task.TaskPlan;
 import com.lingshu.ai.core.service.TaskEventStreamService;
 import com.lingshu.ai.core.service.TaskExecutionEngine;
 import com.lingshu.ai.core.service.TaskPlanner;
+import com.lingshu.ai.core.service.McpService;
+import com.lingshu.ai.core.tool.BuiltinWorkspaceToolProvider;
+import com.lingshu.ai.core.tool.SafeMcpToolProvider;
 import com.lingshu.ai.infrastructure.entity.TaskRun;
 import com.lingshu.ai.infrastructure.repository.TaskRunRepository;
 import com.lingshu.ai.infrastructure.task.TaskEventType;
 import com.lingshu.ai.infrastructure.task.TaskRunState;
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.Content;
+import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.TextContent;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.memory.ChatMemory;
+import dev.langchain4j.memory.chat.MessageWindowChatMemory;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.service.AiServices;
+import dev.langchain4j.service.tool.ToolProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
@@ -41,46 +52,27 @@ public class TaskExecutionEngineImpl implements TaskExecutionEngine {
 
     private static final Logger log = LoggerFactory.getLogger(TaskExecutionEngineImpl.class);
 
-    private static final int SCAN_MAX_DEPTH = 4;
-    private static final int SCAN_MAX_FILES = 200;
-    private static final long COMMAND_TIMEOUT_SECONDS = 30;
-    private static final int FILE_READ_MAX_CHARS = 3000;
-    private static final int OUTPUT_TRUNCATE_CHARS = 4000;
-
-    private static final Set<String> KEY_FILE_PATTERNS = Set.of(
-            "package.json", "pom.xml", "build.gradle", "build.gradle.kts",
-            "settings.gradle", "settings.gradle.kts", "Cargo.toml", "Makefile",
-            "README.md", "README", ".gitignore", "docker-compose.yml",
-            "docker-compose.yaml", "Dockerfile", ".env.example", ".env.template",
-            "tsconfig.json", "vite.config.ts", "vite.config.js",
-            "tailwind.config.js", "tailwind.config.ts", ".eslintrc.json",
-            ".eslintrc.js", ".prettierrc", "application.yml", "application.properties",
-            "babel.config.js", "jest.config.js", "jest.config.ts",
-            "next.config.js", "next.config.ts", "nuxt.config.js", "nuxt.config.ts",
-            "vue.config.js", "webpack.config.js",
-            "requirements.txt", "setup.py", "setup.cfg", "pyproject.toml"
-    );
-
-    private static final Set<String> IGNORED_DIR_NAMES = Set.of(
-            "node_modules", ".git", "target", "build", "__pycache__",
-            ".idea", ".vscode", ".gradle", "dist", ".next", ".nuxt"
-    );
-
     private final Executor taskExecutor;
     private final TaskEventStreamService taskEventStreamService;
     private final TaskRunRepository taskRunRepository;
     private final TaskPlanner taskPlanner;
     private final ObjectMapper objectMapper;
+    private final ChatModel chatModel;
+    private final McpService mcpService;
     private final ConcurrentHashMap<Long, TaskHandle> activeRuns = new ConcurrentHashMap<>();
 
     public TaskExecutionEngineImpl(@Qualifier("taskExecutor") Executor taskExecutor,
                                    TaskEventStreamService taskEventStreamService,
                                    TaskRunRepository taskRunRepository,
-                                   TaskPlanner taskPlanner) {
+                                   TaskPlanner taskPlanner,
+                                   @Qualifier("chatLanguageModel") ChatModel chatModel,
+                                   McpService mcpService) {
         this.taskExecutor = taskExecutor;
         this.taskEventStreamService = taskEventStreamService;
         this.taskRunRepository = taskRunRepository;
         this.taskPlanner = taskPlanner;
+        this.chatModel = chatModel;
+        this.mcpService = mcpService;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -91,7 +83,7 @@ public class TaskExecutionEngineImpl implements TaskExecutionEngine {
         TaskHandle handle = new TaskHandle();
         CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
             try {
-                executeWorkflow(run, handle);
+                executeAgenticWorkflow(run, handle);
             } catch (Exception e) {
                 log.error("Task execution engine failed for run {}: {}", run.getId(), e.getMessage(), e);
                 emitLog(run, "step", "execute_workflow", "message", "Execution engine error: " + e.getMessage());
@@ -123,75 +115,235 @@ public class TaskExecutionEngineImpl implements TaskExecutionEngine {
         taskRunRepository.findByState(TaskRunState.RUNNING).forEach(this::schedule);
     }
 
-    // ── plan-driven workflow ────────────────────────────────────────────
+    // ── agentic workflow ────────────────────────────────────────────
 
-    private record WfContext(
-            Path workspaceRoot,
-            List<String> scannedFiles,
-            Map<String, String> keyFileContents,
-            String lastCommandOutput
-    ) {
-        WfContext withScanned(List<String> files) {
-            return new WfContext(workspaceRoot, List.copyOf(files), keyFileContents, lastCommandOutput);
-        }
-
-        WfContext withKeys(Map<String, String> contents) {
-            return new WfContext(workspaceRoot, scannedFiles, Map.copyOf(contents), lastCommandOutput);
-        }
-
-        WfContext withOutput(String output) {
-            return new WfContext(workspaceRoot, scannedFiles, keyFileContents, output);
-        }
+    interface TaskAgent {
+        @dev.langchain4j.service.SystemMessage("""
+            You are an expert developer agent executing a task in a local workspace.
+            You have access to tools to read files, write files, and execute commands.
+            
+            Follow these rules:
+            1. ALWAYS start by exploring the workspace to understand the context.
+            2. If you need to modify code, read the existing code first.
+            3. After making changes, run tests or build commands to verify your changes if applicable.
+            4. If a command fails, analyze the error and try to fix it.
+            5. When you are completely done with the task, summarize what you did.
+            """)
+        String executeTask(String userRequest);
     }
 
-    private void executeWorkflow(TaskRun run, TaskHandle handle) {
+    private void executeAgenticWorkflow(TaskRun run, TaskHandle handle) {
         Path workspaceRoot = Paths.get(run.getWorkspacePath()).toAbsolutePath().normalize();
-
+        
+        // 1. Generate initial plan (for context and logging)
         TaskPlan plan = taskPlanner.plan(run);
         storePlanInSnapshot(run, plan);
+        emitLog(run, "step", "execution_plan", "message", "Starting agentic execution for: " + plan.summary());
 
-        emitLog(run,
-                "step", "execution_plan",
-                "message", String.format("[%s] %s — %d step(s)",
-                        plan.intentLabel(), plan.summary(), plan.stepCount()),
-                "intentLabel", plan.intentLabel(),
-                "planSummary", plan.summary(),
-                "stepCount", String.valueOf(plan.stepCount()));
-
-        WfContext ctx = new WfContext(workspaceRoot, List.of(), Map.of(), "");
-
-        for (PlanStep step : plan.steps()) {
-            if (handle.isCancelled()) return;
-            ctx = executeStep(run, handle, step, ctx);
-            if (taskEnteredTerminalState(run)) return;
+        // 2. Setup ToolProviders
+        List<ToolProvider> toolProviders = new ArrayList<>();
+        
+        // Add Builtin Workspace Tools (with all permissions enabled for task mode)
+        Set<String> enabledBuiltinTools = Set.of("execute_command", "read_file", "write_file");
+        toolProviders.add(new BuiltinWorkspaceToolProvider(workspaceRoot, enabledBuiltinTools));
+        
+        // Add MCP Tools
+        var mcpClients = mcpService.getActiveClients();
+        if (!mcpClients.isEmpty()) {
+            toolProviders.add(new SafeMcpToolProvider(mcpClients, null, () -> run.getRequestText()));
         }
 
-        buildSummaryAndComplete(run, plan, ctx);
+        // 3. Setup ChatMemory
+        ChatMemory chatMemory = MessageWindowChatMemory.withMaxMessages(50);
+        
+        // Restore memory from snapshot if resuming
+        if (run.getRuntimeSnapshotJson() != null && run.getRuntimeSnapshotJson().contains("\"messages\"")) {
+            try {
+                restoreAgentState(run, chatMemory);
+                log.info("Resuming task {} from snapshot", run.getId());
+                emitLog(run, "step", "agent_resume", "message", "Resuming agent execution from previous state");
+            } catch (Exception e) {
+                log.warn("Failed to restore chat memory for run {}", run.getId(), e);
+            }
+        }
+
+        // 4. Build Agent
+        TaskAgent agent = AiServices.builder(TaskAgent.class)
+                .chatModel(chatModel)
+                .chatMemory(chatMemory)
+                .toolProviders(toolProviders)
+                .build();
+
+        // 5. Execute
+        emitStepStart(run, "agent_execution");
+        try {
+            // Periodically save state (simulated here by saving after execution)
+            // In a fully reactive setup, you'd hook into the TokenStream or ToolExecution events
+            String finalResult = agent.executeTask(run.getRequestText());
+            
+            if (handle.isCancelled()) {
+                saveAgentState(run, chatMemory);
+                return;
+            }
+            
+            emitLog(run, "step", "agent_execution", "message", "Agent finished: " + finalResult);
+            emitStepCompleted(run, "agent_execution", "result", finalResult);
+            
+            transitionState(run, TaskRunState.COMPLETED, finalResult);
+        } catch (Exception e) {
+            if (handle.isCancelled()) {
+                saveAgentState(run, chatMemory);
+                return;
+            }
+            log.error("Agent execution failed", e);
+            emitLog(run, "step", "agent_execution", "message", "Agent failed: " + e.getMessage());
+            transitionState(run, TaskRunState.FAILED, e.getMessage());
+        }
     }
 
-    private boolean taskEnteredTerminalState(TaskRun run) {
-        // reload from db to check whether a step already transitioned us to FAILED
-        return taskRunRepository.findById(run.getId())
-                .map(r -> r.getState() == TaskRunState.FAILED || r.getState() == TaskRunState.STOPPED)
-                .orElse(false);
+    private void saveAgentState(TaskRun run, ChatMemory chatMemory) {
+        try {
+            List<ChatMessage> messages = chatMemory.messages();
+            Map<String, Object> state = new LinkedHashMap<>();
+            state.put("messages", messages.stream().map(this::serializeMessage).toList());
+            
+            String stateJson = objectMapper.writeValueAsString(state);
+            run.setRuntimeSnapshotJson(stateJson);
+            taskRunRepository.save(run);
+            log.info("Saved agent state for run {}", run.getId());
+        } catch (Exception e) {
+            log.error("Failed to save agent state for run {}", run.getId(), e);
+        }
     }
 
-    private WfContext executeStep(TaskRun run, TaskHandle handle, PlanStep step, WfContext ctx) {
-        return switch (step.type()) {
-            case SCAN_WORKSPACE -> ctx.withScanned(scanWorkspace(run, handle, ctx.workspaceRoot()));
-            case READ_KEY_FILES -> ctx.withKeys(readKeyFiles(run, handle, ctx.workspaceRoot(), ctx.scannedFiles()));
-            case EXECUTE_COMMAND -> {
-                String override = step.params().getOrDefault("command", "");
-                yield ctx.withOutput(executeCommand(run, handle, ctx.workspaceRoot(), override));
+    private void restoreAgentState(TaskRun run, ChatMemory chatMemory) throws JsonProcessingException {
+        Map<String, Object> state = objectMapper.readValue(run.getRuntimeSnapshotJson(), new TypeReference<>() {
+        });
+        Object messagesNode = state.get("messages");
+        if (!(messagesNode instanceof List<?> rawMessages) || rawMessages.isEmpty()) {
+            return;
+        }
+
+        int restored = 0;
+        int skipped = 0;
+        for (Object rawMessage : rawMessages) {
+            try {
+                ChatMessage message = deserializeMessage(rawMessage);
+                if (message == null) {
+                    skipped++;
+                    continue;
+                }
+                chatMemory.add(message);
+                restored++;
+            } catch (Exception e) {
+                skipped++;
+                log.debug("Skip invalid snapshot message for run {}: {}", run.getId(), e.getMessage());
             }
-            case ANALYZE_CONTENT, GENERATE_OUTPUT -> {
-                emitLog(run,
-                        "step", step.type().name(),
-                        "message", "Not yet implemented: " + step.description(),
-                        "status", "skipped");
-                yield ctx;
+        }
+        log.info("Restored {} messages (skipped {}) for run {}", restored, skipped, run.getId());
+    }
+
+    private Map<String, Object> serializeMessage(ChatMessage message) {
+        Map<String, Object> data = new HashMap<>();
+        if (message instanceof SystemMessage systemMessage) {
+            data.put("type", "SYSTEM");
+            data.put("text", systemMessage.text());
+            return data;
+        }
+        if (message instanceof UserMessage userMessage) {
+            data.put("type", "USER");
+            data.put("text", extractText(userMessage.contents()));
+            return data;
+        }
+        if (message instanceof AiMessage aiMessage) {
+            data.put("type", "AI");
+            data.put("text", aiMessage.text());
+            if (aiMessage.hasToolExecutionRequests()) {
+                data.put("toolRequests", aiMessage.toolExecutionRequests().stream()
+                        .map(req -> Map.of(
+                                "id", req.id() == null ? "" : req.id(),
+                                "name", req.name() == null ? "" : req.name(),
+                                "arguments", req.arguments() == null ? "" : req.arguments()
+                        ))
+                        .toList());
             }
+            return data;
+        }
+        if (message instanceof ToolExecutionResultMessage toolResult) {
+            data.put("type", "TOOL_EXECUTION_RESULT");
+            data.put("id", toolResult.id());
+            data.put("toolName", toolResult.toolName());
+            data.put("text", toolResult.text());
+            data.put("isError", toolResult.isError());
+            return data;
+        }
+        data.put("type", "UNKNOWN");
+        data.put("text", message.toString());
+        return data;
+    }
+
+    private ChatMessage deserializeMessage(Object rawMessage) {
+        // Backward compatibility: older snapshots stored only message.toString().
+        if (rawMessage instanceof String legacyText) {
+            if (legacyText.isBlank()) {
+                return null;
+            }
+            return UserMessage.from(legacyText);
+        }
+        if (!(rawMessage instanceof Map<?, ?> rawMap)) {
+            return null;
+        }
+
+        String type = safeString(rawMap.get("type"));
+        return switch (type) {
+            case "SYSTEM" -> SystemMessage.from(safeString(rawMap.get("text")));
+            case "USER" -> UserMessage.from(safeString(rawMap.get("text")));
+            case "AI" -> deserializeAiMessage(rawMap);
+            case "TOOL_EXECUTION_RESULT" -> ToolExecutionResultMessage.builder()
+                    .id(safeString(rawMap.get("id")))
+                    .toolName(safeString(rawMap.get("toolName")))
+                    .text(safeString(rawMap.get("text")))
+                    .isError(Boolean.TRUE.equals(rawMap.get("isError")))
+                    .build();
+            default -> null;
         };
+    }
+
+    private ChatMessage deserializeAiMessage(Map<?, ?> rawMap) {
+        Object toolRequestsNode = rawMap.get("toolRequests");
+        if (toolRequestsNode instanceof List<?> rawRequests && !rawRequests.isEmpty()) {
+            List<ToolExecutionRequest> requests = new ArrayList<>();
+            for (Object requestNode : rawRequests) {
+                if (!(requestNode instanceof Map<?, ?> requestMap)) {
+                    continue;
+                }
+                requests.add(ToolExecutionRequest.builder()
+                        .id(safeString(requestMap.get("id")))
+                        .name(safeString(requestMap.get("name")))
+                        .arguments(safeString(requestMap.get("arguments")))
+                        .build());
+            }
+            if (!requests.isEmpty()) {
+                return AiMessage.from(requests);
+            }
+        }
+        return AiMessage.from(safeString(rawMap.get("text")));
+    }
+
+    private String extractText(List<Content> contents) {
+        if (contents == null || contents.isEmpty()) {
+            return "";
+        }
+        return contents.stream()
+                .filter(TextContent.class::isInstance)
+                .map(TextContent.class::cast)
+                .map(TextContent::text)
+                .filter(t -> t != null && !t.isBlank())
+                .collect(Collectors.joining("\n"));
+    }
+
+    private String safeString(Object value) {
+        return value == null ? "" : String.valueOf(value);
     }
 
     // ── plan persistence ──────────────────────────────────────────────
@@ -213,242 +365,6 @@ public class TaskExecutionEngineImpl implements TaskExecutionEngine {
         }
     }
 
-    // ── step 1: scan workspace ─────────────────────────────────────────
-
-    private List<String> scanWorkspace(TaskRun run, TaskHandle handle, Path workspaceRoot) {
-        String step = "scan_workspace";
-        emitStepStart(run, step);
-        emitLog(run, "step", step, "message", "Scanning workspace: " + workspaceRoot);
-
-        if (!Files.exists(workspaceRoot)) {
-            String msg = "Workspace path does not exist: " + workspaceRoot;
-            emitLog(run, "step", step, "message", msg);
-            transitionState(run, TaskRunState.FAILED, msg);
-            return List.of();
-        }
-        if (!Files.isDirectory(workspaceRoot)) {
-            String msg = "Workspace path is not a directory: " + workspaceRoot;
-            emitLog(run, "step", step, "message", msg);
-            transitionState(run, TaskRunState.FAILED, msg);
-            return List.of();
-        }
-
-        try {
-            List<String> files = Files.walk(workspaceRoot, SCAN_MAX_DEPTH)
-                    .filter(p -> !isIgnoredPath(p, workspaceRoot))
-                    .limit(SCAN_MAX_FILES)
-                    .map(p -> relativize(workspaceRoot, p))
-                    .collect(Collectors.toList());
-
-            emitLog(run,
-                    "step", step,
-                    "message", "Found " + files.size() + " files/directories in workspace",
-                    "fileCount", String.valueOf(files.size()));
-
-            String topPreview = files.stream().limit(20).collect(Collectors.joining(", "));
-            emitStepCompleted(run, step,
-                    "fileCount", String.valueOf(files.size()),
-                    "topFiles", topPreview);
-            return files;
-        } catch (IOException e) {
-            log.error("Workspace scan failed for run {}: {}", run.getId(), e.getMessage(), e);
-            emitLog(run, "step", step, "message", "Scan failed: " + e.getMessage());
-            transitionState(run, TaskRunState.FAILED, "Workspace scan failed: " + e.getMessage());
-            return List.of();
-        }
-    }
-
-    // ── step 2: identify & read key files ──────────────────────────────
-
-    private Map<String, String> readKeyFiles(TaskRun run, TaskHandle handle,
-                                             Path workspaceRoot, List<String> scannedFiles) {
-        String step = "read_key_files";
-        emitStepStart(run, step);
-
-        if (scannedFiles.isEmpty()) {
-            emitLog(run, "step", step, "message", "No files to inspect, skipping key file identification");
-            emitStepCompleted(run, step);
-            return Map.of();
-        }
-
-        emitLog(run, "step", step, "message", "Identifying project key files...");
-
-        List<String> matchedKeys = scannedFiles.stream()
-                .filter(f -> KEY_FILE_PATTERNS.contains(Paths.get(f).getFileName().toString()))
-                .limit(5)
-                .collect(Collectors.toList());
-
-        if (matchedKeys.isEmpty()) {
-            emitLog(run, "step", step, "message", "No known key files matched; scanning for source directories instead");
-
-            // fallback: report top-level directories
-            List<String> topDirs = scannedFiles.stream()
-                    .filter(f -> !f.contains("/") && !f.contains("\\"))
-                    .limit(20)
-                    .collect(Collectors.toList());
-            emitLog(run, "step", step, "message", "Top-level entries: " + String.join(", ", topDirs));
-            emitStepCompleted(run, step, "matchedFiles", "0");
-            return Map.of();
-        }
-
-        emitLog(run, "step", step, "message",
-                "Identified " + matchedKeys.size() + " key files: " + String.join(", ", matchedKeys));
-
-        if (handle.isCancelled()) return Map.of();
-
-        Map<String, String> contents = new LinkedHashMap<>();
-        for (String relativePath : matchedKeys) {
-            if (handle.isCancelled()) break;
-            Path filePath = workspaceRoot.resolve(relativePath);
-            try {
-                if (Files.size(filePath) > 500_000) {
-                    emitLog(run, "step", step, "message",
-                            "Skipping large file: " + relativePath + " (" + Files.size(filePath) + " bytes)");
-                    continue;
-                }
-                String content = Files.readString(filePath, StandardCharsets.UTF_8);
-                String truncated = content.length() > FILE_READ_MAX_CHARS
-                        ? content.substring(0, FILE_READ_MAX_CHARS) + "\n... (truncated)"
-                        : content;
-                contents.put(relativePath, truncated);
-
-                emitLog(run,
-                        "step", step,
-                        "message", "Read " + relativePath + " (" + content.length() + " chars)",
-                        "file", relativePath,
-                        "size", String.valueOf(content.length()));
-            } catch (IOException e) {
-                emitLog(run, "step", step, "message",
-                        "Failed to read " + relativePath + ": " + e.getMessage());
-            }
-        }
-
-        emitStepCompleted(run, step, "filesRead", String.valueOf(contents.size()));
-        return contents;
-    }
-
-    // ── step: execute command (category or plan override) ──────────────
-
-    private String executeCommand(TaskRun run, TaskHandle handle, Path workspaceRoot, String planOverride) {
-        String step = "execute_command";
-        emitStepStart(run, step);
-
-        String category = run.getCommandCategory();
-        String command = chooseCommand(category, planOverride);
-
-        if (command.isBlank()) {
-            emitLog(run, "step", step, "message",
-                    "No command available — category=" + (category != null ? category : "null")
-                            + " override=" + (planOverride.isEmpty() ? "none" : planOverride));
-            emitStepCompleted(run, step, "skipped", "true");
-            return "";
-        }
-
-        emitLog(run,
-                "step", step,
-                "message", "Executing: " + command + "  [category: " + (category != null ? category : "") + "]",
-                "command", command,
-                "category", category != null ? category : "");
-
-        if (handle.isCancelled()) return "";
-
-        try {
-            String shell = detectShell();
-            List<String> processCmd = shell.contains("pwsh") || shell.contains("powershell")
-                    ? List.of(shell, "-NoProfile", "-Command", command)
-                    : List.of("sh", "-lc", command);
-
-            ProcessBuilder builder = new ProcessBuilder(processCmd);
-            builder.directory(workspaceRoot.toFile());
-            builder.redirectErrorStream(true);
-
-            Process process = builder.start();
-            boolean timedOut = false;
-            String output;
-
-            try {
-                timedOut = !process.waitFor(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                if (timedOut) {
-                    process.destroyForcibly();
-                    process.waitFor(5, TimeUnit.SECONDS);
-                }
-                output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            } catch (InterruptedException e) {
-                process.destroyForcibly();
-                Thread.currentThread().interrupt();
-                return "Command interrupted by task cancellation";
-            }
-
-            int exitCode = timedOut ? -1 : process.exitValue();
-            String truncated = output.length() > OUTPUT_TRUNCATE_CHARS
-                    ? output.substring(0, OUTPUT_TRUNCATE_CHARS) + "\n... (output truncated)"
-                    : output;
-
-            emitLog(run,
-                    "step", step,
-                    "message", "Command finished (exit=" + exitCode + (timedOut ? ", TIMED OUT" : "") + ")",
-                    "exitCode", String.valueOf(exitCode),
-                    "timedOut", String.valueOf(timedOut),
-                    "output", truncated);
-
-            emitStepCompleted(run, step,
-                    "exitCode", String.valueOf(exitCode),
-                    "timedOut", String.valueOf(timedOut));
-
-            return output;
-        } catch (IOException e) {
-            log.error("Command execution failed for run {}: {}", run.getId(), e.getMessage(), e);
-            emitLog(run, "step", step, "message", "Command execution error: " + e.getMessage());
-            emitStepCompleted(run, step, "error", e.getMessage());
-            return "ERROR: " + e.getMessage();
-        }
-    }
-
-    private String chooseCommand(String category, String planOverride) {
-        if (planOverride != null && !planOverride.isBlank()) {
-            return planOverride;
-        }
-        if (category == null || category.isBlank()) {
-            return "";
-        }
-        return resolveCategoryCommand(category);
-    }
-
-    // ── summary and completion ─────────────────────────────────────────
-
-    private void buildSummaryAndComplete(TaskRun run, TaskPlan plan, WfContext ctx) {
-        Map<String, Object> summary = new LinkedHashMap<>();
-        summary.put("intentLabel", plan.intentLabel());
-        summary.put("planSummary", plan.summary());
-        summary.put("stepCount", plan.stepCount());
-        summary.put("workspaceRoot", ctx.workspaceRoot().toString());
-        summary.put("scannedFileCount", ctx.scannedFiles().size());
-
-        if (!ctx.scannedFiles().isEmpty()) {
-            summary.put("topEntries", ctx.scannedFiles().stream().limit(15).collect(Collectors.toList()));
-        }
-
-        summary.put("keyFilesIdentified", ctx.keyFileContents().size());
-        if (!ctx.keyFileContents().isEmpty()) {
-            summary.put("keyFileNames", new ArrayList<>(ctx.keyFileContents().keySet()));
-        }
-
-        String cmdOutput = ctx.lastCommandOutput();
-        if (cmdOutput != null && !cmdOutput.isEmpty()) {
-            int previewLen = Math.min(cmdOutput.length(), 500);
-            summary.put("commandOutputPreview", cmdOutput.substring(0, previewLen));
-        }
-
-        String summaryJson;
-        try {
-            summaryJson = objectMapper.writeValueAsString(summary);
-        } catch (JsonProcessingException e) {
-            summaryJson = "{\"error\":\"failed to serialize summary\"}";
-        }
-
-        transitionState(run, TaskRunState.COMPLETED, summaryJson);
-    }
-
     // ── state transition ───────────────────────────────────────────────
 
     private void transitionState(TaskRun run, TaskRunState targetState, String summary) {
@@ -460,9 +376,6 @@ public class TaskExecutionEngineImpl implements TaskExecutionEngine {
 
         managed.setState(targetState);
         managed.setUpdatedAt(LocalDateTime.now());
-        if (summary != null && !summary.isBlank()) {
-            managed.setRuntimeSnapshotJson(summary);
-        }
         if (targetState == TaskRunState.COMPLETED || targetState == TaskRunState.FAILED
                 || targetState == TaskRunState.STOPPED) {
             managed.setCompletedAt(LocalDateTime.now());
@@ -505,94 +418,6 @@ public class TaskExecutionEngineImpl implements TaskExecutionEngine {
             }
         }
         return payload;
-    }
-
-    // ── filesystem helpers ─────────────────────────────────────────────
-
-    private boolean isIgnoredPath(Path path, Path root) {
-        if (path.equals(root)) {
-            return false;
-        }
-
-        Path fileName = path.getFileName();
-        if (fileName != null) {
-            String name = fileName.toString();
-            if (name.isEmpty()) return false;
-
-            // ignore hidden files (except .gitignore, .env*, .eslintrc, .prettierrc)
-            if (name.startsWith(".") && !name.equals(".gitignore")
-                    && !name.startsWith(".env") && !name.equals(".eslintrc.json")
-                    && !name.equals(".eslintrc.js") && !name.equals(".prettierrc")) {
-                return true;
-            }
-
-            if (Files.isDirectory(path) && IGNORED_DIR_NAMES.contains(name)) {
-                return true;
-            }
-
-            // ignore binary / large common patterns
-            if (!Files.isDirectory(path)) {
-                return name.endsWith(".exe") || name.endsWith(".dll")
-                        || name.endsWith(".so") || name.endsWith(".dylib")
-                        || name.endsWith(".jar") || name.endsWith(".war")
-                        || name.endsWith(".class") || name.endsWith(".bin")
-                        || name.endsWith(".png") || name.endsWith(".jpg")
-                        || name.endsWith(".jpeg") || name.endsWith(".gif")
-                        || name.endsWith(".ico") || name.endsWith(".svg");
-            }
-        }
-        return false;
-    }
-
-    private String relativize(Path root, Path path) {
-        try {
-            return root.relativize(path).toString().replace('\\', '/');
-        } catch (Exception e) {
-            return path.getFileName().toString();
-        }
-    }
-
-    // ── command helpers ────────────────────────────────────────────────
-
-    private String resolveCategoryCommand(String category) {
-        String normalized = category.trim().toLowerCase(Locale.ROOT);
-        return switch (normalized) {
-            case "npm" -> "npm --version && npm ls --depth=0 2>&1 || npm --version";
-            case "mvn", "maven" -> "mvn --version 2>&1 || echo 'mvn not found'";
-            case "git" -> "git status --short 2>&1 && git branch --show-current 2>&1 || git --version";
-            case "python", "python3" -> "python --version 2>&1 || python3 --version 2>&1";
-            case "pip" -> "pip --version 2>&1 || pip3 --version 2>&1";
-            case "java" -> "java -version 2>&1";
-            case "cargo" -> "cargo --version 2>&1";
-            case "go" -> "go version 2>&1";
-            case "rustc" -> "rustc --version 2>&1";
-            case "node" -> "node --version 2>&1";
-            case "yarn" -> "yarn --version 2>&1 || echo 'yarn not found'";
-            case "pnpm" -> "pnpm --version 2>&1 || echo 'pnpm not found'";
-            case "docker" -> "docker --version 2>&1 && docker ps 2>&1 || docker --version";
-            case "shell" -> "echo 'Shell ready at: '$(pwd) && ls -la 2>&1";
-            case "powershell", "pwsh" -> "Get-Location; Get-ChildItem -Name 2>&1";
-            default -> normalized + " --version 2>&1 || echo 'command not found'";
-        };
-    }
-
-    private String detectShell() {
-        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        if (os.contains("windows")) {
-            return Files.exists(Paths.get("C:\\Program Files\\PowerShell\\7\\pwsh.exe"))
-                    ? "pwsh"
-                    : "powershell";
-        }
-        return canExecute("pwsh", "-NoProfile", "-Command", "echo ok") ? "pwsh" : "sh";
-    }
-
-    private boolean canExecute(String... command) {
-        try {
-            Process process = new ProcessBuilder(command).start();
-            return process.waitFor(2, TimeUnit.SECONDS) && process.exitValue() == 0;
-        } catch (Exception ignored) {
-            return false;
-        }
     }
 
     // ── lifecycle ──────────────────────────────────────────────────────

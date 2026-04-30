@@ -147,9 +147,9 @@ public class RetrievalFeedbackService {
             return FeedbackPersistenceState.NEWLY_PERSISTED;
         }
 
-        List<RetrievalFeedbackRecord> records = result.getFactFeedback().stream()
+        List<com.lingshu.ai.infrastructure.entity.RetrievalFeedbackRecord> records = result.getFactFeedback().stream()
                 .filter(feedback -> feedback != null && feedback.getFactId() != null)
-                .map(feedback -> RetrievalFeedbackRecord.builder()
+                .map(feedback -> com.lingshu.ai.infrastructure.entity.RetrievalFeedbackRecord.builder()
                         .turnId(snapshot.getTurnId())
                         .sessionId(snapshot.getSessionId())
                         .userId(snapshot.getUserId())
@@ -457,7 +457,7 @@ public class RetrievalFeedbackService {
                 record.setTaskVector(delta.serializedVector());
                 record.setTaskUncertainty(delta.uncertainty());
                 record.setUpdateCount(delta.updateCount());
-            } else if (Boolean.FALSE.equals(feedback.getValid())) {
+            } else if (Boolean.FALSE.equals(feedback.getValid()) && feedback.getConfidence() != null) {
                 double uncertainty = memoryStateUpdater.applyUnsupportedUncertainty(
                         record.getTaskUncertainty(),
                         feedback.getConfidence()
@@ -518,18 +518,20 @@ public class RetrievalFeedbackService {
     private void logAnalysis(Long turnId,
                              RetrievalContextSnapshot snapshot,
                              RetrievalFeedbackResult result) {
-        int contextFactCount = snapshot.getContextFacts().size();
+        int contextFactCount = snapshot.getContextFacts() == null ? 0 : snapshot.getContextFacts().size();
         int supportedCount = 0;
         int unsupportedCount = 0;
         int uncertainCount = 0;
 
-        for (RetrievalFeedbackResult.FactFeedback feedback : result.getFactFeedback()) {
-            if (feedback == null || feedback.getValid() == null) {
-                uncertainCount++;
-            } else if (Boolean.TRUE.equals(feedback.getValid())) {
-                supportedCount++;
-            } else {
-                unsupportedCount++;
+        if (result != null && result.getFactFeedback() != null) {
+            for (RetrievalFeedbackResult.FactFeedback feedback : result.getFactFeedback()) {
+                if (feedback == null || feedback.getValid() == null) {
+                    uncertainCount++;
+                } else if (Boolean.TRUE.equals(feedback.getValid())) {
+                    supportedCount++;
+                } else {
+                    unsupportedCount++;
+                }
             }
         }
 

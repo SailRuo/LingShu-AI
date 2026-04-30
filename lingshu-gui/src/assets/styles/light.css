@@ -1,0 +1,49 @@
+/* ====== 浅色模式 (微信绿) ====== */
+:root, html, body {
+  /* 基础主色 */
+  --color-primary: #07C160;
+  --color-primary-hover: #06AD56;
+  --color-primary-active: #069A4D;
+  --color-primary-light: #E8F8EE;
+
+  /* 适配 Arco Design 的所有可能变量名 */
+  --primary-1: #E8F8EE; --primary-5: #06AD56; --primary-6: #07C160; --primary-7: #069A4D;
+  --arcoblue-1: #E8F8EE; --arcoblue-5: #06AD56; --arcoblue-6: #07C160; --arcoblue-7: #069A4D;
+  --arco-primary-6: #07C160;
+  --primary-6-rgb: 7, 193, 96;
+
+  /* 背景色 */
+  --bg-sidebar: #EDEDED;
+  --bg-conversation-list: #F7F7F7;
+  --bg-chat-window: #FFFFFF;
+  --bg-input: #FFFFFF;
+  --text-on-primary: #FFFFFF;
+}
+
+/* ====== 强制覆盖 Arco 组件样式 (防止变量失效) ====== */
+
+/* Primary 按钮 */
+body .arco-btn-primary:not(.arco-btn-disabled) {
+  background-color: var(--color-primary) !important;
+  border-color: var(--color-primary) !important;
+  color: #fff !important;
+}
+body .arco-btn-primary:not(.arco-btn-disabled):hover {
+  background-color: var(--color-primary-hover) !important;
+  border-color: var(--color-primary-hover) !important;
+}
+
+/* Switch 开关 */
+body .arco-switch-checked {
+  background-color: var(--color-primary) !important;
+}
+
+/* 选中的菜单/列表项 */
+body .arco-select-option-active, 
+body .arco-select-option-selected {
+  color: var(--color-primary) !important;
+}
+body .arco-checkbox-checked .arco-checkbox-icon,
+body .arco-radio-checked .arco-radio-icon {
+  background-color: var(--color-primary) !important;
+}

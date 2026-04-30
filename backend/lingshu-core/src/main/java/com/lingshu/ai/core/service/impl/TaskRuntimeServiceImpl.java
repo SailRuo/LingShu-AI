@@ -11,6 +11,7 @@ import com.lingshu.ai.infrastructure.entity.TaskRun;
 import com.lingshu.ai.infrastructure.repository.TaskRunRepository;
 import com.lingshu.ai.infrastructure.task.TaskEventType;
 import com.lingshu.ai.infrastructure.task.TaskRunState;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -20,32 +21,58 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Locale;
+import java.util.regex.Pattern;
 
 @Service
 public class TaskRuntimeServiceImpl implements TaskRuntimeService {
+    private static final Pattern GIT_CMD = Pattern.compile("(?i).*(?:^|\\s)(git)(?:\\s|$).*");
+    private static final Pattern JS_CMD = Pattern.compile("(?i).*(?:^|\\s)(npm|pnpm|yarn|node|npx)(?:\\s|$).*");
+    private static final Pattern JAVA_CMD = Pattern.compile("(?i).*(?:^|\\s)(mvn|gradle|java|javac|./gradlew)(?:\\s|$).*");
+    private static final Pattern PYTHON_CMD = Pattern.compile("(?i).*(?:^|\\s)(python|pip|pytest|uv)(?:\\s|$).*");
+    private static final Pattern SHELL_CMD = Pattern.compile("(?i).*(?:^|\\s)(powershell|pwsh|cmd|bash|sh)(?:\\s|$).*");
+
 
     private final TaskRunRepository taskRunRepository;
     private final TaskEventStreamService taskEventStreamService;
     private final TaskPermissionService taskPermissionService;
     private final TaskExecutionEngine taskExecutionEngine;
+    private final TaskSessionRouterService taskSessionRouterService;
 
     public TaskRuntimeServiceImpl(TaskRunRepository taskRunRepository,
                                   TaskEventStreamService taskEventStreamService,
                                   TaskPermissionService taskPermissionService,
                                   TaskExecutionEngine taskExecutionEngine) {
+        this(taskRunRepository, taskEventStreamService, taskPermissionService, taskExecutionEngine, new TaskSessionRouterService());
+    }
+
+    @Autowired
+    public TaskRuntimeServiceImpl(TaskRunRepository taskRunRepository,
+                                  TaskEventStreamService taskEventStreamService,
+                                  TaskPermissionService taskPermissionService,
+                                  TaskExecutionEngine taskExecutionEngine,
+                                  TaskSessionRouterService taskSessionRouterService) {
         this.taskRunRepository = taskRunRepository;
         this.taskEventStreamService = taskEventStreamService;
         this.taskPermissionService = taskPermissionService;
         this.taskExecutionEngine = taskExecutionEngine;
+        this.taskSessionRouterService = taskSessionRouterService;
     }
 
     @Override
     @Transactional("transactionManager")
     public TaskRunView start(TaskStartRequest request) {
+        String requestText = requireText(request.requestText(), "requestText");
+        TaskSessionRouterService.TaskRouteDecision routeDecision = taskSessionRouterService.decide(requestText);
+        if (!routeDecision.taskRequest()) {
+            throw new IllegalArgumentException("requestText is not a task request: " + routeDecision.reason());
+        }
+        String commandCategory = resolveCommandCategory(request.commandCategory(), requestText);
+
         TaskPermissionService.TaskPermissionDecision decision = taskPermissionService.evaluate(
                 request.userId(),
                 request.workspacePath(),
-                request.commandCategory()
+                commandCategory
         );
         LocalDateTime now = LocalDateTime.now();
         boolean requiresApproval = decision.requiresWorkspaceApproval() || decision.requiresCommandApproval();
@@ -54,10 +81,10 @@ public class TaskRuntimeServiceImpl implements TaskRuntimeService {
         TaskRun run = TaskRun.builder()
                 .userId(requireText(request.userId(), "userId"))
                 .chatSessionId(request.chatSessionId())
-                .title(buildTitle(request.requestText()))
+                .title(buildTitle(requestText))
                 .workspacePath(requireText(request.workspacePath(), "workspacePath"))
-                .commandCategory(requireText(request.commandCategory(), "commandCategory"))
-                .requestText(requireText(request.requestText(), "requestText"))
+                .commandCategory(commandCategory)
+                .requestText(requestText)
                 .state(state)
                 .createdAt(now)
                 .updatedAt(now)
@@ -247,5 +274,19 @@ public class TaskRuntimeServiceImpl implements TaskRuntimeService {
             throw new IllegalArgumentException(fieldName + " must not be blank");
         }
         return value.trim();
+    }
+
+    private String resolveCommandCategory(String requestedCategory, String requestText) {
+        String normalizedRequested = requestedCategory == null ? "" : requestedCategory.trim().toLowerCase(Locale.ROOT);
+        if (!normalizedRequested.isBlank() && !"auto".equals(normalizedRequested)) {
+            return normalizedRequested;
+        }
+        String normalizedText = requestText == null ? "" : requestText.toLowerCase(Locale.ROOT);
+        if (GIT_CMD.matcher(normalizedText).matches()) return "git";
+        if (JS_CMD.matcher(normalizedText).matches()) return "node";
+        if (JAVA_CMD.matcher(normalizedText).matches()) return "java";
+        if (PYTHON_CMD.matcher(normalizedText).matches()) return "python";
+        if (SHELL_CMD.matcher(normalizedText).matches()) return "shell";
+        return "general";
     }
 }

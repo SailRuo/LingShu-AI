@@ -36,6 +36,28 @@ import static org.mockito.Mockito.when;
 class TaskRuntimeServiceImplTest {
 
     @Test
+    void start_shouldRejectNonTaskRequestTextEvenIfTaskModeIsEnabled() {
+        TaskRunRepository taskRunRepository = mock(TaskRunRepository.class);
+        TaskEventRepository taskEventRepository = mock(TaskEventRepository.class);
+        TaskPermissionService taskPermissionService = mock(TaskPermissionService.class);
+        TaskExecutionEngine taskExecutionEngine = mock(TaskExecutionEngine.class);
+        TaskRuntimeServiceImpl service = new TaskRuntimeServiceImpl(
+                taskRunRepository,
+                new TaskEventStreamServiceImpl(taskEventRepository, taskRunRepository, new ObjectMapper()),
+                taskPermissionService,
+                taskExecutionEngine
+        );
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> service.start(
+                new TaskStartRequest("web:test-user", 12L, "你好", "D:\\work\\demo", "npm")
+        ));
+
+        assertTrue(error.getMessage().contains("not a task request"));
+        verify(taskRunRepository, never()).save(any(TaskRun.class));
+        verify(taskExecutionEngine, never()).schedule(any(TaskRun.class));
+    }
+
+    @Test
     void start_shouldReturnWaitingApprovalAndAppendCreatedAndApprovalRequiredEvents() {
         TaskRunRepository taskRunRepository = mock(TaskRunRepository.class);
         TaskEventRepository taskEventRepository = mock(TaskEventRepository.class);

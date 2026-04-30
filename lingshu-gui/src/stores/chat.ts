@@ -61,6 +61,11 @@ interface WebSocketTaskEventMessage {
   payload: Record<string, any>;
 }
 
+interface TaskIntentResponse {
+  taskRequest: boolean;
+  reason: string;
+}
+
 // 文件转 Base64
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -381,6 +386,10 @@ export const useChatStore = defineStore('chat', () => {
     const agent = agentsStore.agents.find(a => a.id === agentId);
 
     if (taskModeEnabled) {
+      const intent = await detectTaskIntent(content);
+      if (!intent.taskRequest) {
+        Message.info('该消息更适合普通对话，已按聊天发送');
+      } else {
       const tempTaskMessage = createPendingTaskMessage(content, conversationId, agent);
       messagesMap.value[conversationId].push(tempTaskMessage);
       await startTaskRun({
@@ -391,6 +400,7 @@ export const useChatStore = defineStore('chat', () => {
         requestText: content
       });
       return;
+      }
     }
 
     // 添加一个空的 AI 消息用于流式更新
@@ -707,6 +717,22 @@ export const useChatStore = defineStore('chat', () => {
     return response.json();
   }
 
+  async function detectTaskIntent(message: string): Promise<TaskIntentResponse> {
+    try {
+      const response = await fetch(getFullUrl('/api/chat/task-intent'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message })
+      });
+      if (!response.ok) {
+        return { taskRequest: true, reason: 'intent-check-failed-open' };
+      }
+      return response.json();
+    } catch {
+      return { taskRequest: true, reason: 'intent-check-error-failed-open' };
+    }
+  }
+
   function createPendingTaskMessage(requestText: string, conversationId: string, agent: any): TaskMessage {
     return {
       id: `task-pending-${Date.now()}`,
@@ -724,7 +750,7 @@ export const useChatStore = defineStore('chat', () => {
         workspace: extractWorkspacePath(requestText) || 'E:\\Project\\LingShu-AI',
         commandCategory: inferCommandCategory(requestText),
         permissionApproved: false,
-        steps: createBaseTaskSteps(),
+        steps: [{ id: 'task_created', label: '创建任务并绑定会话', state: 'active' }],
         logs: [`[${new Date().toLocaleTimeString()}] 正在创建任务...`],
         approvalRequest: null
       }
@@ -749,13 +775,23 @@ export const useChatStore = defineStore('chat', () => {
     snapshot.state = mapTaskState(run.state);
     snapshot.permissionApproved = snapshot.state !== 'waiting_approval';
 
-    for (const event of run.events || []) {
+    const orderedEvents = [...(run.events || [])].sort((a, b) => a.sequenceNo - b.sequenceNo);
+    for (const event of orderedEvents) {
       const payload = parsePayload(event.payloadJson);
       applyTaskEventToSnapshot(snapshot, event.eventType, payload, event.timestamp);
     }
 
-    if (snapshot.state === 'running' && snapshot.steps.every(step => step.state === 'pending')) {
-      snapshot.steps[0].state = 'active';
+    if (snapshot.state === 'running' && snapshot.steps.length > 0 && !snapshot.steps.some(step => step.state === 'active')) {
+      let lastPending: TaskStep | undefined;
+      for (let i = snapshot.steps.length - 1; i >= 0; i -= 1) {
+        if (snapshot.steps[i].state === 'pending') {
+          lastPending = snapshot.steps[i];
+          break;
+        }
+      }
+      if (lastPending) {
+        lastPending.state = 'active';
+      }
     }
 
     return snapshot;
@@ -768,19 +804,10 @@ export const useChatStore = defineStore('chat', () => {
       workspace,
       commandCategory,
       permissionApproved: false,
-      steps: createBaseTaskSteps(),
+      steps: [],
       logs: [],
       approvalRequest: null
     };
-  }
-
-  function createBaseTaskSteps(): TaskStep[] {
-    return [
-      { id: 'task_created', label: '创建任务并绑定会话', state: 'pending' },
-      { id: 'approval', label: '检查并处理权限审批', state: 'pending' },
-      { id: 'analyze_workspace', label: '分析项目目录与执行上下文', state: 'pending' },
-      { id: 'followup', label: '等待后续执行与结果汇总', state: 'pending' }
-    ];
   }
 
   function applyTaskEventToSnapshot(
@@ -792,13 +819,13 @@ export const useChatStore = defineStore('chat', () => {
     const time = new Date(timestamp).toLocaleTimeString();
     switch (eventType) {
       case 'TASK_CREATED':
-        setStepState(snapshot.steps, 'task_created', 'done');
+        upsertStep(snapshot.steps, 'task_created', '创建任务并绑定会话', 'done');
         pushTaskLog(snapshot.logs, `[${time}] 任务已创建`);
         break;
       case 'APPROVAL_REQUIRED':
         snapshot.state = 'waiting_approval';
         snapshot.permissionApproved = false;
-        setStepState(snapshot.steps, 'approval', 'active');
+        upsertStep(snapshot.steps, 'approval', '检查并处理权限审批', 'active');
         snapshot.approvalRequest = {
           id: `approval-${timestamp}`,
           scope: 'directory',
@@ -810,13 +837,13 @@ export const useChatStore = defineStore('chat', () => {
       case 'APPROVAL_GRANTED':
         snapshot.permissionApproved = true;
         snapshot.approvalRequest = null;
-        setStepState(snapshot.steps, 'approval', 'done');
+        upsertStep(snapshot.steps, 'approval', '检查并处理权限审批', 'done');
         pushTaskLog(snapshot.logs, `[${time}] 审批通过，已写入长期授权`);
         break;
       case 'APPROVAL_REJECTED':
         snapshot.state = 'stopped';
         snapshot.permissionApproved = false;
-        setStepState(snapshot.steps, 'approval', 'failed');
+        upsertStep(snapshot.steps, 'approval', '检查并处理权限审批', 'failed');
         snapshot.approvalRequest = null;
         pushTaskLog(snapshot.logs, `[${time}] 审批被拒绝，任务停止`);
         break;
@@ -830,32 +857,38 @@ export const useChatStore = defineStore('chat', () => {
         break;
       case 'TASK_STOPPED':
         snapshot.state = 'stopped';
+        completeActiveSteps(snapshot.steps, 'failed');
         pushTaskLog(snapshot.logs, `[${time}] 任务已终止`);
         break;
       case 'TASK_COMPLETED':
         snapshot.state = 'done';
-        setStepState(snapshot.steps, 'followup', 'done');
+        completeActiveSteps(snapshot.steps, 'done');
         snapshot.summary = payload.summary || '任务已完成';
         pushTaskLog(snapshot.logs, `[${time}] 任务完成`);
         break;
       case 'TASK_FAILED':
         snapshot.state = 'failed';
-        setStepState(snapshot.steps, 'followup', 'failed');
+        completeActiveSteps(snapshot.steps, 'failed');
         pushTaskLog(snapshot.logs, `[${time}] 任务失败`);
         break;
       case 'STEP_STARTED':
-        if (payload.step === 'analyze_workspace') {
-          setStepState(snapshot.steps, 'analyze_workspace', 'active');
-          setStepState(snapshot.steps, 'followup', 'pending');
+        markStepStarted(snapshot.steps, payload.step);
+        pushTaskLog(snapshot.logs, `[${time}] 开始步骤：${toStepLabel(payload.step)}`);
+        break;
+      case 'STEP_COMPLETED':
+        markStepCompleted(snapshot.steps, payload.step);
+        if (payload.result) {
+          snapshot.summary = String(payload.result);
         }
-        pushTaskLog(snapshot.logs, `[${time}] 开始步骤：${payload.step || 'unknown'}`);
+        pushTaskLog(snapshot.logs, `[${time}] 完成步骤：${toStepLabel(payload.step)}`);
         break;
       case 'LOG':
         if (payload.message) {
-          pushTaskLog(snapshot.logs, `[${time}] ${payload.message}`);
+          const prefix = payload.step ? `${toStepLabel(payload.step)}：` : '';
+          pushTaskLog(snapshot.logs, `[${time}] ${prefix}${payload.message}`);
         }
-        if (snapshot.steps.find(step => step.id === 'analyze_workspace')?.state === 'active') {
-          setStepState(snapshot.steps, 'followup', 'active');
+        if (payload.step) {
+          upsertStep(snapshot.steps, String(payload.step), toStepLabel(payload.step), 'active');
         }
         break;
       default:
@@ -863,11 +896,52 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function setStepState(steps: TaskStep[], stepId: string, state: TaskStep['state']) {
+  function upsertStep(steps: TaskStep[], stepId: string, label: string, state: TaskStep['state']) {
+    if (!stepId) return;
     const step = steps.find(item => item.id === stepId);
     if (step) {
+      // Keep terminal states stable unless failed overrides done.
+      if (step.state === 'done' && state !== 'failed') return;
+      if (step.state === 'failed') return;
+      step.label = label || step.label;
       step.state = state;
+      return;
     }
+    steps.push({ id: stepId, label, state });
+  }
+
+  function markStepStarted(steps: TaskStep[], rawStep: unknown) {
+    const stepId = typeof rawStep === 'string' ? rawStep : 'execution';
+    const label = toStepLabel(stepId);
+    upsertStep(steps, stepId, label, 'active');
+  }
+
+  function markStepCompleted(steps: TaskStep[], rawStep: unknown) {
+    const stepId = typeof rawStep === 'string' ? rawStep : 'execution';
+    const label = toStepLabel(stepId);
+    upsertStep(steps, stepId, label, 'done');
+  }
+
+  function completeActiveSteps(steps: TaskStep[], finalState: 'done' | 'failed') {
+    for (const step of steps) {
+      if (step.state === 'active') {
+        step.state = finalState;
+      }
+    }
+  }
+
+  function toStepLabel(rawStep: unknown): string {
+    const step = typeof rawStep === 'string' ? rawStep : '';
+    if (!step) return '执行流程';
+    const builtIn: Record<string, string> = {
+      task_created: '创建任务并绑定会话',
+      approval: '检查并处理权限审批',
+      agent_execution: '智能体执行',
+      execution_plan: '生成执行计划',
+      agent_resume: '恢复智能体上下文'
+    };
+    if (builtIn[step]) return builtIn[step];
+    return step.replace(/_/g, ' ');
   }
 
   function pushTaskLog(logs: string[], message: string) {
@@ -941,11 +1015,12 @@ export const useChatStore = defineStore('chat', () => {
 
   function inferCommandCategory(text: string): string {
     const normalized = text.toLowerCase();
-    if (normalized.includes('npm') || normalized.includes('pnpm') || normalized.includes('yarn')) return 'npm';
-    if (normalized.includes('python') || normalized.includes('pytest')) return 'python';
-    if (normalized.includes('mvn') || normalized.includes('gradle') || normalized.includes('java')) return 'java';
     if (normalized.includes('git')) return 'git';
-    return 'npm';
+    if (normalized.includes('npm') || normalized.includes('pnpm') || normalized.includes('yarn') || normalized.includes('node') || normalized.includes('npx')) return 'node';
+    if (normalized.includes('python') || normalized.includes('pytest') || normalized.includes('pip') || normalized.includes('uv ')) return 'python';
+    if (normalized.includes('mvn') || normalized.includes('gradle') || normalized.includes('java') || normalized.includes('javac')) return 'java';
+    if (normalized.includes('powershell') || normalized.includes('pwsh') || normalized.includes('cmd') || normalized.includes('bash') || normalized.includes('sh ')) return 'shell';
+    return 'auto';
   }
 
   function extractWorkspacePath(text: string): string | null {

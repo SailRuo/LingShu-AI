@@ -4,35 +4,21 @@ import com.lingshu.ai.core.dto.RetrievalContextSnapshot;
 import com.lingshu.ai.core.service.RetrievalContextSnapshotStore;
 import org.springframework.stereotype.Service;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class InMemoryRetrievalContextSnapshotStore implements RetrievalContextSnapshotStore {
 
-    static final int DEFAULT_MAX_SNAPSHOTS = 256;
-
-    private final int maxSnapshots;
-    private final Map<Long, RetrievalContextSnapshot> snapshots;
-
-    public InMemoryRetrievalContextSnapshotStore() {
-        this(DEFAULT_MAX_SNAPSHOTS);
-    }
-
-    InMemoryRetrievalContextSnapshotStore(int maxSnapshots) {
-        this.maxSnapshots = Math.max(1, maxSnapshots);
-        this.snapshots = new LinkedHashMap<>(16, 0.75f, false);
-    }
+    private final Map<String, RetrievalContextSnapshot> store = new ConcurrentHashMap<>();
 
     @Override
     public void save(RetrievalContextSnapshot snapshot) {
-        if (snapshot != null && snapshot.getTurnId() != null) {
-            synchronized (snapshots) {
-                snapshots.put(snapshot.getTurnId(), snapshot);
-                trimToMaxSize();
-            }
+        if (snapshot == null || snapshot.getTurnId() == null) {
+            return;
         }
+        store.put(String.valueOf(snapshot.getTurnId()), snapshot);
     }
 
     @Override
@@ -40,17 +26,13 @@ public class InMemoryRetrievalContextSnapshotStore implements RetrievalContextSn
         if (turnId == null) {
             return Optional.empty();
         }
-        synchronized (snapshots) {
-            return Optional.ofNullable(snapshots.get(turnId));
-        }
+        return Optional.ofNullable(store.get(String.valueOf(turnId)));
     }
 
     @Override
     public void remove(Long turnId) {
         if (turnId != null) {
-            synchronized (snapshots) {
-                snapshots.remove(turnId);
-            }
+            store.remove(String.valueOf(turnId));
         }
     }
 
@@ -59,15 +41,8 @@ public class InMemoryRetrievalContextSnapshotStore implements RetrievalContextSn
         if (sessionId == null) {
             return;
         }
-        synchronized (snapshots) {
-            snapshots.entrySet().removeIf(entry -> sessionId.equals(entry.getValue().getSessionId()));
-        }
-    }
-
-    private void trimToMaxSize() {
-        while (snapshots.size() > maxSnapshots) {
-            Long oldestTurnId = snapshots.keySet().iterator().next();
-            snapshots.remove(oldestTurnId);
-        }
+        store.entrySet().removeIf(entry -> 
+            entry.getValue() != null && sessionId.equals(entry.getValue().getSessionId())
+        );
     }
 }

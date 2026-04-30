@@ -97,7 +97,7 @@ public class SystemStatusController {
                 log.warn("Embedding Ollama status check failed: {}", e.getMessage());
                 embedStatus = "offline";
             }
-        } else if ("openai".equalsIgnoreCase(embedSource)) {
+        } else if ("openai".equalsIgnoreCase(embedSource) || "lmstudio".equalsIgnoreCase(embedSource)) {
             try {
                 String base = embedBaseUrl;
                 String embedApiKey = setting.getEmbedApiKey();
@@ -138,8 +138,8 @@ public class SystemStatusController {
         }
 
         // 2. Check Chat Source (if OpenAI)
-        if ("openai".equalsIgnoreCase(aiSource)) {
-            vram = "Cloud";
+        if ("openai".equalsIgnoreCase(aiSource) || "lmstudio".equalsIgnoreCase(aiSource)) {
+            vram = "lmstudio".equalsIgnoreCase(aiSource) ? "Local" : "Cloud";
             try {
                 String base = setting.getBaseUrl();
                 String apiKey = setting.getApiKey();

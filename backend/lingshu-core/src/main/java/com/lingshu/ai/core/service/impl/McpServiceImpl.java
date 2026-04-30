@@ -91,23 +91,11 @@ public class McpServiceImpl implements McpService {
                     .logResponses(true);
                     
             // Apply headers if present
-            // Some versions of langchain4j StreamableHttpMcpTransport.builder() don't have .headers() method
-            // We use reflection to safely try setting headers without breaking compilation for different versions
             if (config.getHeaders() != null && !config.getHeaders().isBlank()) {
                 try {
                     Map<String, String> headersMap = objectMapper.readValue(config.getHeaders(), new TypeReference<Map<String, String>>() {});
                     if (!headersMap.isEmpty()) {
-                        try {
-                            // First try headers(Map) if available (recent versions)
-                            builder.getClass().getMethod("headers", Map.class).invoke(builder, headersMap);
-                        } catch (NoSuchMethodException e) {
-                            try {
-                                // Or maybe customHeaders(Map)
-                                builder.getClass().getMethod("customHeaders", Map.class).invoke(builder, headersMap);
-                            } catch (NoSuchMethodException ex) {
-                                log.warn("Cannot set headers: StreamableHttpMcpTransport.builder() does not support headers() method in the current langchain4j version");
-                            }
-                        }
+                        builder.customHeaders(headersMap);
                     }
                 } catch (Exception e) {
                     log.error("Failed to parse or apply headers for MCP client: {}", config.getName(), e);
@@ -210,35 +198,8 @@ public class McpServiceImpl implements McpService {
             java.util.List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
             for (var tool : tools) {
                 java.util.Map<String, Object> map = new java.util.HashMap<>();
-                String name = null;
-                String description = null;
-                
-                try {
-                    // Try name() (Standard for ToolSpecification)
-                    name = (String) tool.getClass().getMethod("name").invoke(tool);
-                    description = (String) tool.getClass().getMethod("description").invoke(tool);
-                } catch (Exception e1) {
-                    try {
-                        // Try getName() (Standard Bean)
-                        name = (String) tool.getClass().getMethod("getName").invoke(tool);
-                        description = (String) tool.getClass().getMethod("getDescription").invoke(tool);
-                    } catch (Exception e2) {
-                        // Fallback to string parsing if it's the ToolSpecification.toString() format
-                        String s = tool.toString();
-                        if (s.contains("name = \"")) {
-                            name = extractValue(s, "name = \"", "\"");
-                            description = extractValue(s, "description = \"", "\"");
-                        } else if (s.contains("name=\"")) {
-                            name = extractValue(s, "name=\"", "\"");
-                            description = extractValue(s, "description=\"", "\"");
-                        } else {
-                            name = s;
-                        }
-                    }
-                }
-                
-                map.put("name", name);
-                map.put("description", description);
+                map.put("name", tool.name());
+                map.put("description", tool.description());
                 result.add(map);
             }
             return result;
@@ -246,15 +207,6 @@ public class McpServiceImpl implements McpService {
             log.warn("MCP Check failed for id {}: {}", id, e.getMessage());
             return Collections.emptyList();
         }
-    }
-
-    private String extractValue(String source, String startToken, String endToken) {
-        int start = source.indexOf(startToken);
-        if (start == -1) return null;
-        start += startToken.length();
-        int end = source.indexOf(endToken, start);
-        if (end == -1) return source.substring(start);
-        return source.substring(start, end);
     }
 
     @Override

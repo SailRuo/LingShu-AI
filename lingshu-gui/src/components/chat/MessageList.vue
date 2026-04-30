@@ -270,6 +270,8 @@ function renderMarkdown(content: string) {
   word-break: break-word;
   position: relative;
   align-self: flex-start;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .bubble:has(.task-card) {
@@ -329,11 +331,15 @@ function renderMarkdown(content: string) {
 
 .text-content {
   white-space: pre-wrap;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .markdown-content {
   display: block;
   max-width: 100%;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .markdown-content :deep(p) {

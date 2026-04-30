@@ -445,7 +445,6 @@ public class ChatServiceImpl implements ChatService {
         }
 
         Set<String> enabledBuiltinTools = new LinkedHashSet<>(requiredBuiltinTools);
-        enabledBuiltinTools.add("execute_command");
         toolProviders.add(new BuiltinWorkspaceToolProvider(
                 Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize(),
                 enabledBuiltinTools));
@@ -830,7 +829,7 @@ public class ChatServiceImpl implements ChatService {
         systemLogService.startTimer("get_models");
 
         try {
-            if ("openai".equalsIgnoreCase(source)) {
+            if ("openai".equalsIgnoreCase(source) || "lmstudio".equalsIgnoreCase(source)) {
                 org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
                 if (apiKey != null && !apiKey.isBlank()) {
                     headers.set("Authorization", "Bearer " + apiKey);

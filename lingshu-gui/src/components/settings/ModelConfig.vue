@@ -1,14 +1,40 @@
 <script setup lang="ts">
 import { onMounted } from 'vue';
 import { useSettingsStore } from '../../stores/settings';
-import IconRefresh from '@arco-design/web-vue/es/icon/icon-refresh';
 
 const store = useSettingsStore();
 
 const sourceOptions = [
   { value: 'ollama', label: 'Ollama (本地)' },
+  { value: 'lmstudio', label: 'LM Studio' },
   { value: 'openai', label: 'OpenAI 兼容' }
 ];
+
+const handleSourceChange = (val: string, type: 'llm' | 'embedding' | 'memoryModel') => {
+  const defaults: Record<string, string> = {
+    ollama: 'http://localhost:11434',
+    lmstudio: 'http://localhost:1234/v1'
+  };
+
+  if (defaults[val]) {
+    if (type === 'llm') {
+      store.llm.baseUrl = defaults[val];
+    } else if (type === 'embedding') {
+      store.embedding.baseUrl = defaults[val];
+    } else if (type === 'memoryModel') {
+      store.memoryModel.baseUrl = defaults[val];
+    }
+  }
+
+  // 自动刷新对应类型的模型列表
+  if (type === 'llm') {
+    store.fetchChatModels(true);
+  } else if (type === 'embedding') {
+    store.fetchEmbedModels(true);
+  } else if (type === 'memoryModel') {
+    store.fetchMemoryModels(true);
+  }
+};
 
 const ttsFormatOptions = [
   { value: 'mp3', label: 'MP3' },
@@ -34,10 +60,10 @@ onMounted(() => {
             <div class="setting-row">
               <div class="row-label">
                 <span class="main-text">模型来源</span>
-                <span class="sub-text">选择模型提供来源，Ollama 为本地部署，OpenAI 兼容支持各类云端服务</span>
+                <span class="sub-text">选择模型提供来源，Ollama/LM Studio 为本地部署，OpenAI 兼容支持各类云端服务</span>
               </div>
               <div class="row-action">
-                <a-select v-model="store.llm.source" :options="sourceOptions" :style="{ width: '160px' }" size="small" />
+                <a-select v-model="store.llm.source" :options="sourceOptions" :style="{ width: '160px' }" size="small" @change="(val) => handleSourceChange(val as string, 'llm')" />
               </div>
             </div>
 
@@ -52,19 +78,12 @@ onMounted(() => {
                   :options="store.chatModelOptions"
                   :loading="store.loadingChatModels"
                   placeholder="选择或输入模型名称..."
-                  :style="{ width: '200px' }"
+                  :style="{ width: '320px' }"
                   size="small"
                   allow-search
                   allow-create
+                  @dropdown-show="store.fetchChatModels(true)"
                 />
-                <a-button
-                  type="text"
-                  size="mini"
-                  :loading="store.loadingChatModels"
-                  @click="store.fetchChatModels(false)"
-                >
-                  <template #icon><IconRefresh /></template>
-                </a-button>
               </div>
             </div>
 
@@ -74,7 +93,7 @@ onMounted(() => {
                 <span class="sub-text">模型 API 的服务端点地址</span>
               </div>
               <div class="row-action">
-                <a-input v-model="store.llm.baseUrl" placeholder="http://localhost:11434" :style="{ width: '280px' }" size="small" />
+                <a-input v-model="store.llm.baseUrl" placeholder="http://localhost:11434" :style="{ width: '320px' }" size="small" @blur="store.fetchChatModels(true)" />
               </div>
             </div>
 
@@ -84,7 +103,7 @@ onMounted(() => {
                 <span class="sub-text">OpenAI 兼容 API 需要提供密钥，Ollama 本地服务可留空</span>
               </div>
               <div class="row-action">
-                <a-input-password v-model="store.llm.apiKey" placeholder="sk-..." :style="{ width: '280px' }" size="small" />
+                <a-input-password v-model="store.llm.apiKey" placeholder="sk-..." :style="{ width: '320px' }" size="small" />
               </div>
             </div>
 
@@ -109,7 +128,7 @@ onMounted(() => {
                 <span class="sub-text">选择向量化模型的提供来源</span>
               </div>
               <div class="row-action">
-                <a-select v-model="store.embedding.source" :options="sourceOptions" :style="{ width: '160px' }" size="small" />
+                <a-select v-model="store.embedding.source" :options="sourceOptions" :style="{ width: '160px' }" size="small" @change="(val) => handleSourceChange(val as string, 'embedding')" />
               </div>
             </div>
 
@@ -124,19 +143,12 @@ onMounted(() => {
                   :options="store.embedModelOptions"
                   :loading="store.loadingEmbedModels"
                   placeholder="选择或输入模型名称..."
-                  :style="{ width: '200px' }"
+                  :style="{ width: '320px' }"
                   size="small"
                   allow-search
                   allow-create
+                  @dropdown-show="store.fetchEmbedModels(true)"
                 />
-                <a-button
-                  type="text"
-                  size="mini"
-                  :loading="store.loadingEmbedModels"
-                  @click="store.fetchEmbedModels(false)"
-                >
-                  <template #icon><IconRefresh /></template>
-                </a-button>
               </div>
             </div>
 
@@ -146,7 +158,7 @@ onMounted(() => {
                 <span class="sub-text">向量模型服务端点，默认与对话模型共享地址</span>
               </div>
               <div class="row-action">
-                <a-input v-model="store.embedding.baseUrl" placeholder="http://localhost:11434" :style="{ width: '280px' }" size="small" />
+                <a-input v-model="store.embedding.baseUrl" placeholder="http://localhost:11434" :style="{ width: '320px' }" size="small" @blur="store.fetchEmbedModels(true)" />
               </div>
             </div>
 
@@ -156,7 +168,7 @@ onMounted(() => {
                 <span class="sub-text">OpenAI 兼容 API 需要提供密钥，Ollama 本地服务可留空</span>
               </div>
               <div class="row-action">
-                <a-input-password v-model="store.embedding.apiKey" placeholder="sk-..." :style="{ width: '280px' }" size="small" />
+                <a-input-password v-model="store.embedding.apiKey" placeholder="sk-..." :style="{ width: '320px' }" size="small" />
               </div>
             </div>
           </div>
@@ -171,7 +183,7 @@ onMounted(() => {
                 <span class="sub-text">用于长期记忆处理的模型来源，留空则默认使用对话模型配置</span>
               </div>
               <div class="row-action">
-                <a-select v-model="store.memoryModel.source" :options="sourceOptions" :style="{ width: '160px' }" size="small" allow-clear placeholder="默认使用对话模型" />
+                <a-select v-model="store.memoryModel.source" :options="sourceOptions" :style="{ width: '160px' }" size="small" allow-clear placeholder="默认使用对话模型" @change="(val) => handleSourceChange(val as string, 'memoryModel')" />
               </div>
             </div>
 
@@ -186,19 +198,12 @@ onMounted(() => {
                   :options="store.memoryModelOptions"
                   :loading="store.loadingMemoryModels"
                   placeholder="选择或输入模型名称..."
-                  :style="{ width: '200px' }"
+                  :style="{ width: '320px' }"
                   size="small"
                   allow-search
                   allow-create
+                  @dropdown-show="store.fetchMemoryModels(true)"
                 />
-                <a-button
-                  type="text"
-                  size="mini"
-                  :loading="store.loadingMemoryModels"
-                  @click="store.fetchMemoryModels(false)"
-                >
-                  <template #icon><IconRefresh /></template>
-                </a-button>
               </div>
             </div>
 
@@ -208,7 +213,7 @@ onMounted(() => {
                 <span class="sub-text">记忆模型服务端点，留空则默认使用对话模型地址</span>
               </div>
               <div class="row-action">
-                <a-input v-model="store.memoryModel.baseUrl" placeholder="默认使用对话模型地址" :style="{ width: '280px' }" size="small" />
+                <a-input v-model="store.memoryModel.baseUrl" placeholder="默认使用对话模型地址" :style="{ width: '320px' }" size="small" @blur="store.fetchMemoryModels(true)" />
               </div>
             </div>
 
@@ -218,7 +223,7 @@ onMounted(() => {
                 <span class="sub-text">记忆模型密钥，留空则默认使用对话模型密钥</span>
               </div>
               <div class="row-action">
-                <a-input-password v-model="store.memoryModel.apiKey" placeholder="默认使用对话模型密钥" :style="{ width: '280px' }" size="small" />
+                <a-input-password v-model="store.memoryModel.apiKey" placeholder="默认使用对话模型密钥" :style="{ width: '320px' }" size="small" />
               </div>
             </div>
           </div>
@@ -406,7 +411,7 @@ onMounted(() => {
 
 .save-area {
   display: flex;
-  justify-content: center;
+  justify-content: flex-end;
   padding: 20px 0;
   margin-top: auto;
 }
